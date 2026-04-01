@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TSMC Options</title>
+    <script type="module" src="/src/options/main.ts"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Local Sync Control</p>
+        <h1>Total Sync: My Context</h1>
+        <p class="lede">
+          Route captured AI chat deltas into your local backend and choose which providers the
+          extension should observe.
+        </p>
+      </section>
+
+      <section class="panel">
+        <form id="settings-form" class="form">
+          <label class="field">
+            <span>Backend URL</span>
+            <input id="backend-url" name="backend-url" type="url" placeholder="http://127.0.0.1:8000" required />
+          </label>
+
+          <div class="providers">
+            <label class="toggle">
+              <input id="provider-chatgpt" type="checkbox" />
+              <span>ChatGPT</span>
+            </label>
+            <label class="toggle">
+              <input id="provider-gemini" type="checkbox" />
+              <span>Gemini</span>
+            </label>
+            <label class="toggle">
+              <input id="provider-grok" type="checkbox" />
+              <span>Grok</span>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Save Settings</button>
+            <p id="save-status" class="status"></p>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel panel-secondary">
+        <div class="status-grid">
+          <div>
+            <p class="status-label">Last Success</p>
+            <p id="last-success" class="status-value">No sync yet</p>
+          </div>
+          <div>
+            <p class="status-label">Last Session</p>
+            <p id="last-session" class="status-value">n/a</p>
+          </div>
+          <div class="error-card">
+            <p class="status-label">Last Error</p>
+            <p id="last-error" class="status-value">None</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
+

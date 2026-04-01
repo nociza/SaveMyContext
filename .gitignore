@@ -1,0 +1,16 @@
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+backend/.env
+backend/.coverage
+backend/data/
+extension/dist/
+extension/node_modules/
+extension/.vite/
+extension/playwright-report/
+extension/test-results/

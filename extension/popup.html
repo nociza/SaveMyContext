@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TSMC</title>
+    <script type="module" src="/src/popup/main.ts"></script>
+  </head>
+  <body>
+    <main class="popup">
+      <section class="card">
+        <p class="eyebrow">TSMC</p>
+        <h1>Local Sync</h1>
+        <p class="summary">Watch AI chats, keep diffs, and mirror them into your local context store.</p>
+
+        <div class="stack">
+          <div>
+            <p class="label">Backend</p>
+            <p id="backend-url" class="value">Loading…</p>
+          </div>
+          <div>
+            <p class="label">Last Success</p>
+            <p id="last-success" class="value">No sync yet</p>
+          </div>
+          <div>
+            <p class="label">Last Sync</p>
+            <p id="last-session" class="value">n/a</p>
+          </div>
+          <div>
+            <p class="label">Providers</p>
+            <p id="providers" class="value">Loading…</p>
+          </div>
+          <div class="error">
+            <p class="label">Last Error</p>
+            <p id="last-error" class="value">None</p>
+          </div>
+        </div>
+
+        <button id="open-options" type="button">Open Settings</button>
+      </section>
+    </main>
+  </body>
+</html>
+
