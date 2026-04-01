@@ -8,6 +8,7 @@ __pycache__/
 *.pyd
 backend/.env
 backend/.coverage
+backend/*.egg-info/
 backend/data/
 extension/dist/
 extension/node_modules/

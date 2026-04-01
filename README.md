@@ -17,7 +17,7 @@ TSMC (Total Sync: My Context) is a local-first second-brain pipeline for web AI 
 ```bash
 cd backend
 uv sync
-uv run uvicorn app.main:app --reload
+uv run dev
 ```
 
 The backend stores runtime data under `backend/data/`.
@@ -29,18 +29,50 @@ Copy [`backend/.env.example`](/Volumes/Brookline/Projects/Personal/tsmc/backend/
 ```bash
 cd extension
 pnpm install
-pnpm build
+pnpm run dev
 ```
+
+`pnpm run dev` keeps rebuilding `extension/dist/` as files change. Load `extension/dist/` as an unpacked extension in Chrome. After code changes, Chrome still needs the unpacked extension reloaded from the Extensions page to pick up the rebuilt files.
+
+The extension options page includes an `Auto Sync History` toggle. When it is enabled, visiting `chatgpt.com` automatically backfills the signed-in user's historical conversations by calling the same website endpoints the app uses in-browser, then forwards those captures into the local backend.
 
 For browser-level extension E2E coverage, install Playwright's bundled Chromium once:
 
 ```bash
+cd backend
+uv sync
+uv run dev
+```
+
+In another terminal:
+
+```bash
 cd extension
 pnpm exec playwright install chromium
-pnpm test:e2e
+TSMC_E2E_BACKEND_URL=http://127.0.0.1:8000 pnpm test:e2e
 ```
 
 Load `extension/dist/` as an unpacked Chrome extension. Open the extension options page and point it at your FastAPI backend, usually `http://127.0.0.1:8000`.
+
+## Local Dev Loop
+
+Backend:
+
+```bash
+cd backend
+uv sync
+uv run dev
+```
+
+Extension:
+
+```bash
+cd extension
+pnpm install
+pnpm run dev
+```
+
+Then load [extension/dist](/Volumes/Brookline/Projects/Personal/tsmc/extension/dist) as an unpacked extension, set the backend URL to `http://127.0.0.1:8000`, and reload the unpacked extension after source changes.
 
 ## Verification
 
@@ -58,7 +90,7 @@ cd extension
 pnpm test
 pnpm typecheck
 pnpm build
-pnpm test:e2e
+TSMC_E2E_BACKEND_URL=http://127.0.0.1:8000 pnpm test:e2e
 ```
 
 ## Processing Model

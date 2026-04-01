@@ -4,6 +4,7 @@ import type { ExtensionSettings, RuntimeMessage, SyncStatus } from "../shared/ty
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
 const backendUrlInput = document.querySelector<HTMLInputElement>("#backend-url");
+const autoSyncHistoryInput = document.querySelector<HTMLInputElement>("#auto-sync-history");
 const providerInputs = {
   chatgpt: document.querySelector<HTMLInputElement>("#provider-chatgpt"),
   gemini: document.querySelector<HTMLInputElement>("#provider-gemini"),
@@ -13,6 +14,7 @@ const saveStatus = document.querySelector<HTMLParagraphElement>("#save-status");
 const lastSuccess = document.querySelector<HTMLParagraphElement>("#last-success");
 const lastSession = document.querySelector<HTMLParagraphElement>("#last-session");
 const lastError = document.querySelector<HTMLParagraphElement>("#last-error");
+const historySync = document.querySelector<HTMLParagraphElement>("#history-sync");
 
 function formatDate(value?: string): string {
   if (!value) {
@@ -35,6 +37,9 @@ async function load(): Promise<void> {
   if (backendUrlInput) {
     backendUrlInput.value = settings.backendUrl;
   }
+  if (autoSyncHistoryInput) {
+    autoSyncHistoryInput.checked = settings.autoSyncHistory;
+  }
 
   for (const [provider, input] of Object.entries(providerInputs)) {
     if (input) {
@@ -51,6 +56,21 @@ async function load(): Promise<void> {
   if (lastError) {
     lastError.textContent = status.lastError ?? "None";
   }
+  if (historySync) {
+    if (status.historySyncInProgress) {
+      historySync.textContent = `Running ${status.historySyncProvider ?? ""}`.trim();
+    } else if (status.historySyncLastCompletedAt) {
+      const count =
+        typeof status.historySyncLastConversationCount === "number"
+          ? `, ${status.historySyncLastConversationCount} conversations`
+          : "";
+      historySync.textContent = `${status.historySyncLastResult ?? "success"} ${formatDate(
+        status.historySyncLastCompletedAt
+      )}${count}`;
+    } else {
+      historySync.textContent = settings.autoSyncHistory ? "Idle" : "Disabled";
+    }
+  }
 }
 
 form?.addEventListener("submit", async (event) => {
@@ -61,6 +81,7 @@ form?.addEventListener("submit", async (event) => {
 
   const nextSettings: Partial<ExtensionSettings> = {
     backendUrl: backendUrlInput.value.trim(),
+    autoSyncHistory: autoSyncHistoryInput?.checked ?? true,
     enabledProviders: {
       chatgpt: providerInputs.chatgpt?.checked ?? true,
       gemini: providerInputs.gemini?.checked ?? true,
@@ -80,4 +101,3 @@ form?.addEventListener("submit", async (event) => {
 });
 
 void load();
-

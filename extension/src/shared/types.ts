@@ -47,9 +47,18 @@ export interface SessionSyncState {
   lastSyncedAt?: string;
 }
 
+export interface ProviderHistorySyncState {
+  inProgress?: boolean;
+  lastStartedAt?: string;
+  lastCompletedAt?: string;
+  lastConversationCount?: number;
+  lastPageUrl?: string;
+}
+
 export interface ExtensionSettings {
   backendUrl: string;
   enabledProviders: Record<ProviderName, boolean>;
+  autoSyncHistory: boolean;
 }
 
 export interface SyncStatus {
@@ -59,6 +68,28 @@ export interface SyncStatus {
   lastSessionKey?: string;
   lastSyncedMessageCount?: number;
   backendUrl?: string;
+  autoSyncHistory?: boolean;
+  historySyncInProgress?: boolean;
+  historySyncProvider?: ProviderName;
+  historySyncLastStartedAt?: string;
+  historySyncLastCompletedAt?: string;
+  historySyncLastConversationCount?: number;
+  historySyncLastPageUrl?: string;
+  historySyncLastResult?: "success" | "failed" | "unsupported";
+  historySyncLastError?: string | null;
+}
+
+export interface PageVisitPayload {
+  provider: ProviderName;
+  pageUrl: string;
+}
+
+export interface HistorySyncUpdate {
+  provider: ProviderName;
+  phase: "started" | "completed" | "failed" | "unsupported";
+  conversationCount?: number;
+  pageUrl: string;
+  message?: string;
 }
 
 export interface BackendIngestMessage {
@@ -83,7 +114,9 @@ export interface BackendIngestPayload {
 
 export type RuntimeMessage =
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
+  | { type: "PAGE_VISIT"; payload: PageVisitPayload }
+  | { type: "TRIGGER_HISTORY_SYNC"; payload: { provider: ProviderName } }
+  | { type: "HISTORY_SYNC_STATUS"; payload: HistorySyncUpdate }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<ExtensionSettings> }
   | { type: "GET_STATUS" };
-

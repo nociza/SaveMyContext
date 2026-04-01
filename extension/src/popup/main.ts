@@ -5,6 +5,7 @@ import type { ExtensionSettings, RuntimeMessage, SyncStatus } from "../shared/ty
 const backendUrl = document.querySelector<HTMLParagraphElement>("#backend-url");
 const lastSuccess = document.querySelector<HTMLParagraphElement>("#last-success");
 const lastSession = document.querySelector<HTMLParagraphElement>("#last-session");
+const historySync = document.querySelector<HTMLParagraphElement>("#history-sync");
 const providers = document.querySelector<HTMLParagraphElement>("#providers");
 const lastError = document.querySelector<HTMLParagraphElement>("#last-error");
 const openOptionsButton = document.querySelector<HTMLButtonElement>("#open-options");
@@ -36,6 +37,19 @@ async function load(): Promise<void> {
   if (lastSession) {
     lastSession.textContent = status.lastSessionKey ?? "n/a";
   }
+  if (historySync) {
+    if (!settings.autoSyncHistory) {
+      historySync.textContent = "Disabled";
+    } else if (status.historySyncInProgress) {
+      historySync.textContent = `Running ${status.historySyncProvider ?? ""}`.trim();
+    } else if (status.historySyncLastCompletedAt) {
+      historySync.textContent = `${status.historySyncLastResult ?? "success"} ${formatDate(
+        status.historySyncLastCompletedAt
+      )}`;
+    } else {
+      historySync.textContent = "Idle";
+    }
+  }
   if (providers) {
     providers.textContent = Object.entries(settings.enabledProviders)
       .filter(([, enabled]) => enabled)
@@ -52,4 +66,3 @@ openOptionsButton?.addEventListener("click", () => {
 });
 
 void load();
-

@@ -2,7 +2,7 @@
 name = "tsmc-backend"
 version = "0.1.0"
 description = "FastAPI backend for TSMC"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "aiosqlite>=0.21.0",
@@ -16,6 +16,9 @@ dependencies = [
   "uvloop>=0.22.1; platform_system != 'Windows'",
 ]
 
+[project.scripts]
+dev = "app.dev:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8.4.2",
@@ -27,5 +30,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.uv]
-package = false
+package = true

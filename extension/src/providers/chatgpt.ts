@@ -7,6 +7,7 @@ import {
   findStringByKeys,
   flattenText,
   normalizeRole,
+  resolveCapturedUrl,
   sessionIdFromPageUrl,
   sortMessages,
   stableId
@@ -59,7 +60,12 @@ export class ChatGPTScraper implements IProviderScraper {
   readonly provider = "chatgpt" as const;
 
   matches(event: CapturedNetworkEvent): boolean {
-    return /chatgpt\.com|chat\.openai\.com/.test(new URL(event.url).hostname) && /backend-api|conversation/.test(event.url);
+    const url = resolveCapturedUrl(event.url, event.pageUrl);
+    if (!url) {
+      return false;
+    }
+
+    return /chatgpt\.com|chat\.openai\.com/.test(url.hostname) && /backend-api|conversation/.test(url.pathname + url.search);
   }
 
   parse(event: CapturedNetworkEvent): NormalizedSessionSnapshot | null {

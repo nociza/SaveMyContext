@@ -24,6 +24,14 @@
             <input id="backend-url" name="backend-url" type="url" placeholder="http://127.0.0.1:8000" required />
           </label>
 
+          <label class="toggle toggle-wide">
+            <input id="auto-sync-history" type="checkbox" />
+            <span>
+              <strong>Auto Sync History</strong>
+              <small>When enabled, visiting a supported provider triggers a historical sync using the website session.</small>
+            </span>
+          </label>
+
           <div class="providers">
             <label class="toggle">
               <input id="provider-chatgpt" type="checkbox" />
@@ -56,6 +64,10 @@
             <p class="status-label">Last Session</p>
             <p id="last-session" class="status-value">n/a</p>
           </div>
+          <div>
+            <p class="status-label">History Sync</p>
+            <p id="history-sync" class="status-value">Idle</p>
+          </div>
           <div class="error-card">
             <p class="status-label">Last Error</p>
             <p id="last-error" class="status-value">None</p>
@@ -65,4 +77,3 @@
     </main>
   </body>
 </html>
-

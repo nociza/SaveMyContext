@@ -1,8 +1,15 @@
-import type { ExtensionSettings, SessionSyncState, SyncStatus } from "./types";
+import type {
+  ExtensionSettings,
+  ProviderHistorySyncState,
+  ProviderName,
+  SessionSyncState,
+  SyncStatus
+} from "./types";
 
 const SETTINGS_KEY = "tsmc.settings";
 const SYNC_STATE_KEY = "tsmc.sync-state";
 const STATUS_KEY = "tsmc.status";
+const HISTORY_SYNC_KEY = "tsmc.history-sync";
 
 export const defaultSettings: ExtensionSettings = {
   backendUrl: "http://127.0.0.1:8000",
@@ -10,7 +17,8 @@ export const defaultSettings: ExtensionSettings = {
     chatgpt: true,
     gemini: true,
     grok: true
-  }
+  },
+  autoSyncHistory: true
 };
 
 export async function initializeStorage(): Promise<void> {
@@ -26,7 +34,8 @@ export async function getSettings(): Promise<ExtensionSettings> {
     enabledProviders: {
       ...defaultSettings.enabledProviders,
       ...(current.enabledProviders ?? {})
-    }
+    },
+    autoSyncHistory: current.autoSyncHistory ?? defaultSettings.autoSyncHistory
   };
   await chrome.storage.sync.set({ [SETTINGS_KEY]: merged });
   return merged;
@@ -39,10 +48,14 @@ export async function saveSettings(update: Partial<ExtensionSettings>): Promise<
     enabledProviders: {
       ...current.enabledProviders,
       ...(update.enabledProviders ?? {})
-    }
+    },
+    autoSyncHistory: update.autoSyncHistory ?? current.autoSyncHistory
   };
   await chrome.storage.sync.set({ [SETTINGS_KEY]: next });
-  await setStatus({ backendUrl: next.backendUrl });
+  await setStatus({
+    backendUrl: next.backendUrl,
+    autoSyncHistory: next.autoSyncHistory
+  });
   return next;
 }
 
@@ -62,9 +75,10 @@ export async function saveSessionSyncState(sessionKey: string, state: SessionSyn
 export async function getStatus(): Promise<SyncStatus> {
   const stored = await chrome.storage.local.get(STATUS_KEY);
   const current = (stored[STATUS_KEY] ?? {}) as SyncStatus;
-  if (!current.backendUrl) {
+  if (!current.backendUrl || current.autoSyncHistory === undefined) {
     const settings = await getSettings();
     current.backendUrl = settings.backendUrl;
+    current.autoSyncHistory = settings.autoSyncHistory;
     await chrome.storage.local.set({ [STATUS_KEY]: current });
   }
   return current;
@@ -78,5 +92,21 @@ export async function setStatus(update: Partial<SyncStatus>): Promise<SyncStatus
   } satisfies SyncStatus;
   await chrome.storage.local.set({ [STATUS_KEY]: next });
   return next;
+}
+
+export async function getProviderHistorySyncState(provider: ProviderName): Promise<ProviderHistorySyncState> {
+  const stored = await chrome.storage.local.get(HISTORY_SYNC_KEY);
+  const states = (stored[HISTORY_SYNC_KEY] ?? {}) as Record<ProviderName, ProviderHistorySyncState>;
+  return states[provider] ?? {};
+}
+
+export async function saveProviderHistorySyncState(
+  provider: ProviderName,
+  state: ProviderHistorySyncState
+): Promise<void> {
+  const stored = await chrome.storage.local.get(HISTORY_SYNC_KEY);
+  const states = (stored[HISTORY_SYNC_KEY] ?? {}) as Record<ProviderName, ProviderHistorySyncState>;
+  states[provider] = state;
+  await chrome.storage.local.set({ [HISTORY_SYNC_KEY]: states });
 }
 

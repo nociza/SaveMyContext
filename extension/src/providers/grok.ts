@@ -8,6 +8,7 @@ import {
   flattenText,
   normalizeRole,
   pickLikelyText,
+  resolveCapturedUrl,
   sessionIdFromPageUrl,
   sortMessages,
   stableId
@@ -54,7 +55,12 @@ export class GrokScraper implements IProviderScraper {
   readonly provider = "grok" as const;
 
   matches(event: CapturedNetworkEvent): boolean {
-    return /grok\.com|x\.com/.test(new URL(event.url).hostname) && /app-chat|conversation|grok|chat/i.test(event.url);
+    const url = resolveCapturedUrl(event.url, event.pageUrl);
+    if (!url) {
+      return false;
+    }
+
+    return /grok\.com|x\.com/.test(url.hostname) && /app-chat|conversation|grok|chat/i.test(url.pathname + url.search);
   }
 
   parse(event: CapturedNetworkEvent): NormalizedSessionSnapshot | null {
@@ -133,4 +139,3 @@ export class GrokScraper implements IProviderScraper {
     };
   }
 }
-

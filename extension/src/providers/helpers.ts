@@ -4,6 +4,14 @@ export function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+export function resolveCapturedUrl(url: string, pageUrl: string): URL | null {
+  try {
+    return new URL(url, pageUrl);
+  } catch {
+    return null;
+  }
+}
+
 export function safeJsonParse(text: string): unknown | null {
   try {
     return JSON.parse(text);
