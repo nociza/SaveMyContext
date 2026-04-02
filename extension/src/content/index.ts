@@ -11,6 +11,7 @@ type HistorySyncControlPayload = {
   type: "START_HISTORY_SYNC";
   syncedSessionIds?: string[];
   previousTopSessionId?: string;
+  previousTopSessionIds?: string[];
   refreshSessionIds?: string[];
 };
 
@@ -140,6 +141,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       type: "START_HISTORY_SYNC",
       syncedSessionIds: payload.syncedSessionIds,
       previousTopSessionId: payload.previousTopSessionId,
+      previousTopSessionIds: payload.previousTopSessionIds,
       refreshSessionIds: payload.refreshSessionIds
     });
     sendResponse({ ok: true });

@@ -362,9 +362,11 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
   const secondSessionId = "gemini-e2e-987654321";
   const thirdSessionId = "gemini-e2e-333333333";
   const skippedSessionId = "gemini-e2e-skipped-123456789";
+  const accountOneSessionId = "gemini-e2e-u1-555555555";
+  const skippedAccountOneSessionId = "gemini-e2e-u1-skipped-555555555";
   const backendLogs: string[] = [];
   const observedListRequests: Array<{ sourcePath: string; pinned: boolean; pageToken: string | null }> = [];
-  const observedReadRequests: Array<{ conversationId: string; pageToken: string | null }> = [];
+  const observedReadRequests: Array<{ sourcePath: string; conversationId: string; pageToken: string | null }> = [];
   let backendProcess: ReturnType<typeof spawn> | undefined;
   let backendBaseUrl = configuredBackendBaseUrl();
 
@@ -425,15 +427,21 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       await serviceWorker.evaluate((skippedId) => {
         return chrome.storage.local.set({
           "tsmc.sync-state": {
-            [`gemini:${skippedId}`]: {
+            [`gemini:u0__${skippedId}`]: {
               seenMessageIds: ["existing-message"],
               lastSyncedAt: "2026-04-01T11:50:00.000Z"
+            },
+            [`gemini:u1__gemini-e2e-u1-skipped-555555555`]: {
+              seenMessageIds: ["existing-message-u1"],
+              lastSyncedAt: "2026-04-01T11:51:00.000Z"
             }
           }
         });
       }, skippedSessionId);
 
-      await context.route(/^https:\/\/gemini\.google\.com\/app(?:\/.*)?$/, async (route) => {
+      await context.route(/^https:\/\/gemini\.google\.com(?:\/u\/\d+)?\/app(?:\/.*)?$/, async (route) => {
+        const pageUrl = new URL(route.request().url());
+        const isAccountOne = pageUrl.pathname.startsWith("/u/1/");
         await route.fulfill({
           status: 200,
           contentType: "text/html; charset=utf-8",
@@ -444,23 +452,27 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
     <title>Gemini</title>
   </head>
   <body>
-    <input name="at" value="e2e-gemini-token" />
-    <script>window.WIZ_global_data = { SNlM0e: "e2e-gemini-token" };</script>
+    <input name="at" value="${isAccountOne ? "e2e-gemini-token-u1" : "e2e-gemini-token-u0"}" />
+    <a href="/app/${sessionId}">Primary account</a>
+    <a href="/u/1/app/${accountOneSessionId}">Secondary account</a>
+    <script>window.WIZ_global_data = { SNlM0e: "${isAccountOne ? "e2e-gemini-token-u1" : "e2e-gemini-token-u0"}" };</script>
   </body>
 </html>`
         });
       });
 
-      await context.route("https://gemini.google.com/_/BardChatUi/data/batchexecute*", async (route) => {
+      await context.route(/^https:\/\/gemini\.google\.com(?:\/u\/\d+)?\/_\/BardChatUi\/data\/batchexecute.*$/, async (route) => {
         const url = new URL(route.request().url());
         const rpcId = url.searchParams.get("rpcids");
         const requestArgs = parseGeminiRequestArgs(route.request().postData());
+        const sourcePath = url.searchParams.get("source-path") ?? "";
+        const accountBasePrefix = sourcePath.startsWith("/u/1/") ? "/u/1" : "";
 
         if (rpcId === "MaZiqc") {
           const pinned = Array.isArray(requestArgs?.[2]) && requestArgs[2]?.[0] === 1;
           const pageToken = typeof requestArgs?.[1] === "string" ? requestArgs[1] : null;
           observedListRequests.push({
-            sourcePath: url.searchParams.get("source-path") ?? "",
+            sourcePath,
             pinned,
             pageToken
           });
@@ -474,7 +486,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
             return;
           }
 
-          if (!pageToken) {
+          if (!pageToken && accountBasePrefix === "") {
             await route.fulfill({
               status: 200,
               contentType: "application/json",
@@ -492,7 +504,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
             return;
           }
 
-          if (pageToken === "page-2") {
+          if (pageToken === "page-2" && accountBasePrefix === "") {
             await route.fulfill({
               status: 200,
               contentType: "application/json",
@@ -501,6 +513,21 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
                 buildGeminiListPayload([
                   buildGeminiConversationEntry(skippedSessionId, "Gemini Previously Synced"),
                   buildGeminiConversationEntry(thirdSessionId, "Gemini E2E Sync 3")
+                ])
+              )
+            });
+            return;
+          }
+
+          if (!pageToken && accountBasePrefix === "/u/1") {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: buildBatchExecuteResponseBody(
+                "MaZiqc",
+                buildGeminiListPayload([
+                  buildGeminiConversationEntry(accountOneSessionId, "Gemini E2E Account 1"),
+                  buildGeminiConversationEntry(skippedAccountOneSessionId, "Gemini Account 1 Previously Synced")
                 ])
               )
             });
@@ -518,7 +545,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         if (rpcId === "hNvQHb") {
           const conversationId = typeof requestArgs?.[0] === "string" ? requestArgs[0].replace(/^c_/, "") : "";
           const pageToken = typeof requestArgs?.[2] === "string" ? requestArgs[2] : null;
-          observedReadRequests.push({ conversationId, pageToken });
+          observedReadRequests.push({ sourcePath, conversationId, pageToken });
           await wait(400);
 
           if (conversationId === sessionId && !pageToken) {
@@ -572,6 +599,25 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
                 "hNvQHb",
                 buildGeminiTurnPayload([
                   buildGeminiTurnBlock("Does Gemini list pagination work?", "Yes. The importer follows the history next-page token and reaches later conversations too.", 1711842120, "rc_4")
+                ])
+              )
+            });
+            return;
+          }
+
+          if (conversationId === accountOneSessionId && !pageToken && accountBasePrefix === "/u/1") {
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: buildBatchExecuteResponseBody(
+                "hNvQHb",
+                buildGeminiTurnPayload([
+                  buildGeminiTurnBlock(
+                    "Do you sync multiple Gemini accounts?",
+                    "Yes. The importer enumerates each logged-in /u/N Gemini surface and syncs them separately.",
+                    1711842180,
+                    "rc_5"
+                  )
                 ])
               )
             });
@@ -633,10 +679,10 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         historySyncLastConversationCount?: number;
       };
 
-      expect(completedStatus.historySyncProcessedCount).toBe(4);
-      expect(completedStatus.historySyncTotalCount).toBe(4);
-      expect(completedStatus.historySyncSkippedCount).toBe(1);
-      expect(completedStatus.historySyncLastConversationCount).toBe(3);
+      expect(completedStatus.historySyncProcessedCount).toBe(6);
+      expect(completedStatus.historySyncTotalCount).toBe(6);
+      expect(completedStatus.historySyncSkippedCount).toBe(2);
+      expect(completedStatus.historySyncLastConversationCount).toBe(4);
 
       await expect
         .poll(
@@ -646,13 +692,13 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
               return null;
             }
             const sessions = (await response.json()) as Array<{ external_session_id: string }>;
-            return sessions.find((session) => session.external_session_id === sessionId)?.external_session_id ?? null;
+            return sessions.find((session) => session.external_session_id === `u0__${sessionId}`)?.external_session_id ?? null;
           },
           {
             message: "Waiting for the backend to persist the auto-synced Gemini session."
           }
         )
-        .toBe(sessionId);
+        .toBe(`u0__${sessionId}`);
 
       const sessionsResponse = await request.get(`${backendBaseUrl}/api/v1/sessions?provider=gemini`);
       expect(sessionsResponse.ok()).toBeTruthy();
@@ -661,7 +707,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         external_session_id: string;
         title: string | null;
       }>;
-      const matchedSession = sessions.find((session) => session.external_session_id === sessionId);
+      const matchedSession = sessions.find((session) => session.external_session_id === `u0__${sessionId}`);
       expect(matchedSession?.title).toBe("Gemini E2E Sync");
 
       const sessionResponse = await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`);
@@ -671,7 +717,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         messages: Array<{ content: string }>;
       };
 
-      expect(persisted.external_session_id).toBe(sessionId);
+      expect(persisted.external_session_id).toBe(`u0__${sessionId}`);
       expect(persisted.messages.map((message) => message.content)).toEqual([
         "Explain proactive backfill on Gemini.",
         "Proactive backfill imports your saved Gemini conversations automatically.",
@@ -679,10 +725,12 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         "It follows Gemini next-page tokens until the full conversation is imported."
       ]);
 
-      const secondSession = sessions.find((session) => session.external_session_id === secondSessionId);
+      const secondSession = sessions.find((session) => session.external_session_id === `u0__${secondSessionId}`);
       expect(secondSession?.title).toBe("Gemini E2E Sync 2");
-      const thirdSession = sessions.find((session) => session.external_session_id === thirdSessionId);
+      const thirdSession = sessions.find((session) => session.external_session_id === `u0__${thirdSessionId}`);
       expect(thirdSession?.title).toBe("Gemini E2E Sync 3");
+      const accountOneSession = sessions.find((session) => session.external_session_id === `u1__${accountOneSessionId}`);
+      expect(accountOneSession?.title).toBe("Gemini E2E Account 1");
 
       const refreshBaseline = (await serviceWorker.evaluate(async () => {
         const stored = await chrome.storage.local.get("tsmc.status");
@@ -745,20 +793,21 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
       await expect(popup.locator("#history-sync")).toContainText("success");
       await expect(popup.locator("#last-session")).toHaveText(
-        new RegExp(`^gemini:(${sessionId}|${secondSessionId}|${thirdSessionId})$`)
+        new RegExp(`^gemini:(u0__(${sessionId}|${secondSessionId}|${thirdSessionId})|u1__${accountOneSessionId})$`)
       );
       await expect(popup.locator("#history-sync")).toContainText("0 conversations");
 
       expect(observedListRequests.length).toBeGreaterThan(0);
-      expect(new Set(observedListRequests.map((request) => request.sourcePath))).toEqual(new Set(["/app"]));
+      expect(new Set(observedListRequests.map((request) => request.sourcePath))).toEqual(new Set(["/app", "/u/1/app"]));
       expect(observedListRequests.some((request) => request.pageToken === "page-2")).toBe(true);
       expect(observedReadRequests.slice(readCountAfterInitialSync)).toEqual([]);
       expect(observedReadRequests).toEqual(
         expect.arrayContaining([
-          { conversationId: sessionId, pageToken: null },
-          { conversationId: sessionId, pageToken: "turn-page-2" },
-          { conversationId: secondSessionId, pageToken: null },
-          { conversationId: thirdSessionId, pageToken: null }
+          { sourcePath: "/app/gemini-e2e-123456789", conversationId: sessionId, pageToken: null },
+          { sourcePath: "/app/gemini-e2e-123456789", conversationId: sessionId, pageToken: "turn-page-2" },
+          { sourcePath: "/app/gemini-e2e-987654321", conversationId: secondSessionId, pageToken: null },
+          { sourcePath: "/app/gemini-e2e-333333333", conversationId: thirdSessionId, pageToken: null },
+          { sourcePath: "/u/1/app/gemini-e2e-u1-555555555", conversationId: accountOneSessionId, pageToken: null }
         ])
       );
     } finally {

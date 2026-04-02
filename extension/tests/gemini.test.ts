@@ -51,7 +51,7 @@ describe("GeminiScraper", () => {
     const snapshot = scraper.parse(event);
 
     expect(snapshot).not.toBeNull();
-    expect(snapshot?.externalSessionId).toBe("gemini-e2e-session");
+    expect(snapshot?.externalSessionId).toBe("u0__gemini-e2e-session");
     expect(snapshot?.title).toBe("Gemini E2E Sync");
     expect(snapshot?.messages.map((message) => message.id)).toEqual(["msg-user-1", "msg-assistant-1"]);
     expect(snapshot?.messages.map((message) => message.content)).toEqual([
@@ -107,5 +107,59 @@ describe("GeminiScraper", () => {
       "msg-assistant-shape",
       "msg-user-shape"
     ]);
+  });
+
+  it("scopes Gemini sessions by logged-in account surface", () => {
+    const scraper = new GeminiScraper();
+
+    const event = {
+      source: "tsmc-network-observer",
+      providerHint: "gemini",
+      pageUrl: "https://gemini.google.com/u/1/app/account-scoped-session",
+      requestId: "req-gemini-account-scope",
+      method: "POST",
+      url: "https://gemini.google.com/u/1/_/BardChatUi/data/batchexecute?rpcids=hNvQHb",
+      capturedAt: "2026-04-02T09:00:00.000Z",
+      response: {
+        status: 200,
+        ok: true,
+        contentType: "application/json",
+        text: JSON.stringify({
+          conversationId: "c_account-scoped-session",
+          messages: [
+            {
+              id: "msg-user-account",
+              role: "user",
+              content: "What account am I on?"
+            },
+            {
+              id: "msg-assistant-account",
+              role: "assistant",
+              content: "This session belongs to /u/1."
+            }
+          ]
+        }),
+        json: {
+          conversationId: "c_account-scoped-session",
+          messages: [
+            {
+              id: "msg-user-account",
+              role: "user",
+              content: "What account am I on?"
+            },
+            {
+              id: "msg-assistant-account",
+              role: "assistant",
+              content: "This session belongs to /u/1."
+            }
+          ]
+        }
+      }
+    } satisfies CapturedNetworkEvent;
+
+    const snapshot = scraper.parse(event);
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.externalSessionId).toBe("u1__account-scoped-session");
   });
 });

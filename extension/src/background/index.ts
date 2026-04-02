@@ -194,9 +194,14 @@ async function handlePageVisit(
     return { triggered: false, reason: "already-in-progress" };
   }
 
-  const syncedSessionIds = currentState.lastTopSessionId
+  const hasExistingHistoryWatermark =
+    Boolean(currentState.lastTopSessionId) || Boolean(currentState.lastTopSessionIds?.length);
+  const syncedSessionIds = hasExistingHistoryWatermark
     ? undefined
     : extractExternalSessionIds(payload.provider, await getProviderSessionSyncStates(payload.provider));
+  const previousTopSessionIds =
+    currentState.lastTopSessionIds ??
+    (currentState.lastTopSessionId ? [currentState.lastTopSessionId] : undefined);
   const now = new Date().toISOString();
   await saveProviderHistorySyncState(payload.provider, {
     ...currentState,
@@ -226,7 +231,8 @@ async function handlePageVisit(
       payload: {
         provider: payload.provider,
         syncedSessionIds,
-        previousTopSessionId: currentState.lastTopSessionId
+        previousTopSessionId: currentState.lastTopSessionId,
+        previousTopSessionIds
       }
     } satisfies RuntimeMessage);
   } catch (error) {
@@ -256,10 +262,15 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
 
   const currentState = await getProviderHistorySyncState(update.provider);
   const currentStatus = await getStatus();
+  const existingTopSessionIds =
+    currentState.lastTopSessionIds ??
+    (currentState.lastTopSessionId ? [currentState.lastTopSessionId] : undefined);
+  const nextTopSessionIds = update.topSessionIds ?? (update.topSessionId ? [update.topSessionId] : existingTopSessionIds);
   const patch = {
     ...currentState,
     lastPageUrl: update.pageUrl,
-    lastTopSessionId: update.topSessionId ?? currentState.lastTopSessionId,
+    lastTopSessionId: update.topSessionId ?? update.topSessionIds?.[0] ?? currentState.lastTopSessionId,
+    lastTopSessionIds: nextTopSessionIds,
     lastDriftAlert: update.providerDriftAlert ?? currentState.lastDriftAlert
   };
 

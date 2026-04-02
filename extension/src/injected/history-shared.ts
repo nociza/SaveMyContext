@@ -4,6 +4,7 @@ export interface HistorySyncControlPayload {
   type: "START_HISTORY_SYNC";
   syncedSessionIds?: string[];
   previousTopSessionId?: string;
+  previousTopSessionIds?: string[];
   refreshSessionIds?: string[];
 }
 

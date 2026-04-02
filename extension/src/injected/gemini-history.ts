@@ -12,6 +12,8 @@ const GEMINI_HISTORY_READ_PAGE_SIZE = 1_000;
 const GEMINI_HISTORY_READ_CONCURRENCY = 4;
 const GEMINI_CONTEXT_WAIT_TIMEOUT_MS = 10_000;
 const GEMINI_CONTEXT_WAIT_POLL_MS = 200;
+const GEMINI_ACCOUNT_DISCOVERY_MAX_INDEX = 10;
+const GEMINI_ACCOUNT_DISCOVERY_MISS_LIMIT = 2;
 const nativeFetch = window.fetch.bind(window);
 
 interface GeminiRuntimeContext {
@@ -23,8 +25,19 @@ interface GeminiRuntimeContext {
   basePrefix?: string;
 }
 
+interface GeminiAccountContext extends GeminiRuntimeContext {
+  accountIndex: number;
+  accountKey: string;
+  sourcePath: string;
+  basePrefix: string;
+}
+
 interface GeminiConversationEntry {
   conversationId: string;
+  scopedSessionId: string;
+  accountIndex: number;
+  accountKey: string;
+  basePrefix: string;
   title?: string;
   pinned?: boolean;
   hidden?: boolean;
@@ -57,58 +70,7 @@ function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
 }
 
-function parseGeminiRoute(
-  url = location.href
-): {
-  basePrefix: string;
-  sourcePath: string;
-  currentConversationId?: string;
-} {
-  try {
-    const parsed = new URL(url, location.href);
-    const segments = parsed.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
-    let basePrefix = "";
-    let index = 0;
-
-    if (segments[0] === "u" && /^\d+$/.test(segments[1] ?? "")) {
-      basePrefix = `/u/${segments[1]}`;
-      index = 2;
-    }
-
-    if (segments[index] === "app") {
-      const currentConversationId = normalizeGeminiConversationId(segments[index + 1]) ?? undefined;
-      return {
-        basePrefix,
-        sourcePath: currentConversationId ? `${basePrefix}/app/${currentConversationId}` : `${basePrefix}/app`,
-        currentConversationId
-      };
-    }
-
-    if (segments[index] === "gem" && segments[index + 1]) {
-      const gemId = segments[index + 1];
-      const currentConversationId = normalizeGeminiConversationId(segments[index + 2]) ?? undefined;
-      return {
-        basePrefix,
-        sourcePath: currentConversationId
-          ? `${basePrefix}/gem/${gemId}/${currentConversationId}`
-          : `${basePrefix}/gem/${gemId}`,
-        currentConversationId
-      };
-    }
-
-    return {
-      basePrefix,
-      sourcePath: `${basePrefix}/app`
-    };
-  } catch {
-    return {
-      basePrefix: "",
-      sourcePath: "/app"
-    };
-  }
-}
-
-export function normalizeGeminiConversationId(value: unknown): string | null {
+function normalizeGeminiConversationId(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -121,6 +83,161 @@ export function normalizeGeminiConversationId(value: unknown): string | null {
   return trimmed.startsWith("c_") ? trimmed.slice(2) : trimmed;
 }
 
+function normalizeGeminiBasePrefix(value?: string | null): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    return "";
+  }
+
+  const match = trimmed.match(/^\/u\/(\d+)$/);
+  return match ? `/u/${match[1]}` : "";
+}
+
+function geminiAccountIndexFromBasePrefix(value?: string | null): number {
+  const match = normalizeGeminiBasePrefix(value).match(/^\/u\/(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+function buildGeminiAppSourcePath(basePrefix?: string | null): string {
+  return `${normalizeGeminiBasePrefix(basePrefix)}/app`;
+}
+
+function parseGeminiRoute(
+  url = location.href,
+  fallbackBaseUrl = "https://gemini.google.com/app"
+): {
+  accountIndex: number;
+  accountKey: string;
+  basePrefix: string;
+  sourcePath: string;
+  currentConversationId?: string;
+} {
+  try {
+    const parsed = new URL(url, fallbackBaseUrl);
+    const segments = parsed.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+    let basePrefix = "";
+    let index = 0;
+
+    if (segments[0] === "u" && /^\d+$/.test(segments[1] ?? "")) {
+      basePrefix = `/u/${segments[1]}`;
+      index = 2;
+    }
+
+    const accountIndex = geminiAccountIndexFromBasePrefix(basePrefix);
+    const accountKey = `u${accountIndex}`;
+
+    if (segments[index] === "app") {
+      const currentConversationId = normalizeGeminiConversationId(segments[index + 1]) ?? undefined;
+      return {
+        accountIndex,
+        accountKey,
+        basePrefix,
+        sourcePath: currentConversationId ? `${basePrefix}/app/${currentConversationId}` : `${basePrefix}/app`,
+        currentConversationId
+      };
+    }
+
+    if (segments[index] === "gem" && segments[index + 1]) {
+      const gemId = segments[index + 1];
+      const currentConversationId = normalizeGeminiConversationId(segments[index + 2]) ?? undefined;
+      return {
+        accountIndex,
+        accountKey,
+        basePrefix,
+        sourcePath: currentConversationId
+          ? `${basePrefix}/gem/${gemId}/${currentConversationId}`
+          : `${basePrefix}/gem/${gemId}`,
+        currentConversationId
+      };
+    }
+
+    return {
+      accountIndex,
+      accountKey,
+      basePrefix,
+      sourcePath: `${basePrefix}/app`
+    };
+  } catch {
+    return {
+      accountIndex: 0,
+      accountKey: "u0",
+      basePrefix: "",
+      sourcePath: "/app"
+    };
+  }
+}
+
+function buildGeminiScopedSessionId(accountKey: string, conversationId: unknown): string | null {
+  const normalizedConversationId = normalizeGeminiConversationId(conversationId);
+  if (!normalizedConversationId) {
+    return null;
+  }
+
+  return `${accountKey}__${normalizedConversationId}`;
+}
+
+function parseGeminiScopedSessionId(
+  value: unknown
+): {
+  accountKey: string;
+  conversationId: string;
+} | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const scopedMatch = trimmed.match(/^(u\d+)__(.+)$/);
+  if (scopedMatch) {
+    const conversationId = normalizeGeminiConversationId(scopedMatch[2]);
+    if (!conversationId) {
+      return null;
+    }
+
+    return {
+      accountKey: scopedMatch[1],
+      conversationId
+    };
+  }
+
+  const conversationId = normalizeGeminiConversationId(trimmed);
+  if (!conversationId) {
+    return null;
+  }
+
+  return {
+    accountKey: "u0",
+    conversationId
+  };
+}
+
+function normalizeGeminiExternalSessionId(value: string): string | null {
+  const parsed = parseGeminiScopedSessionId(value);
+  return parsed ? buildGeminiScopedSessionId(parsed.accountKey, parsed.conversationId) : null;
+}
+
+function buildGeminiHistoryPageUrl(
+  conversationId: string,
+  options?: {
+    basePrefix?: string;
+    origin?: string;
+  }
+): string {
+  const normalizedConversationId = normalizeGeminiConversationId(conversationId) ?? conversationId;
+  return new URL(
+    `${normalizeGeminiBasePrefix(options?.basePrefix)}/app/${normalizedConversationId}`,
+    options?.origin ?? location.origin
+  ).toString();
+}
+
 function toGeminiApiConversationId(conversationId: string): string {
   return conversationId.startsWith("c_") ? conversationId : `c_${conversationId}`;
 }
@@ -130,19 +247,7 @@ function sourcePathToBasePrefix(sourcePath?: string): string {
     return "";
   }
 
-  const match = sourcePath.match(/^\/u\/\d+/);
-  return match?.[0] ?? "";
-}
-
-function toGeminiHistoryListSourcePath(sourcePath: string): string {
-  const trimmed = sourcePath.replace(/\/+$/, "");
-  if (/^\/u\/\d+\/app\/[^/]+$/.test(trimmed) || /^\/app\/[^/]+$/.test(trimmed)) {
-    return trimmed.replace(/\/[^/]+$/, "");
-  }
-  if (/^\/u\/\d+\/gem\/[^/]+\/[^/]+$/.test(trimmed) || /^\/gem\/[^/]+\/[^/]+$/.test(trimmed)) {
-    return trimmed.replace(/\/[^/]+$/, "");
-  }
-  return trimmed;
+  return parseGeminiRoute(new URL(sourcePath, location.origin).toString(), location.href).basePrefix;
 }
 
 function decodeGeminiToken(value: string): string {
@@ -174,24 +279,59 @@ function readGeminiAtTokenFromDom(): string | null {
   return null;
 }
 
-function collectGeminiRuntimeContext(): GeminiRuntimeContext {
-  const route = parseGeminiRoute(location.href);
-  const hl = document.documentElement?.lang?.trim() || geminiRuntimeContext.hl || "en";
-  const at = readGeminiAtTokenFromDom() ?? geminiRuntimeContext.at;
-  const sourcePath = geminiRuntimeContext.sourcePath ?? route.sourcePath;
-  const basePrefix = geminiRuntimeContext.basePrefix ?? sourcePathToBasePrefix(sourcePath) ?? route.basePrefix;
+function parseGeminiRuntimeContextFromHtml(
+  html: string,
+  options?: {
+    defaultBasePrefix?: string;
+    defaultSourcePath?: string;
+  }
+): GeminiRuntimeContext {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const input = doc.querySelector('input[name="at"]');
+  const inputValue = input?.getAttribute("value")?.trim();
+  const htmlText = doc.documentElement?.outerHTML || html;
+  const tokenMatch = htmlText.match(/"SNlM0e":"([^"]+)"/);
 
   return {
-    at: at ?? undefined,
-    hl,
-    bl: geminiRuntimeContext.bl,
-    fSid: geminiRuntimeContext.fSid,
+    at: inputValue || (tokenMatch?.[1] ? decodeGeminiToken(tokenMatch[1]).trim() : undefined),
+    hl: doc.documentElement?.lang?.trim() || undefined,
+    sourcePath: options?.defaultSourcePath,
+    basePrefix: normalizeGeminiBasePrefix(options?.defaultBasePrefix)
+  };
+}
+
+function toGeminiAccountContext(context: GeminiRuntimeContext, options?: { defaultBasePrefix?: string }): GeminiAccountContext {
+  const basePrefix = normalizeGeminiBasePrefix(
+    context.basePrefix ?? sourcePathToBasePrefix(context.sourcePath) ?? options?.defaultBasePrefix
+  );
+  const accountIndex = geminiAccountIndexFromBasePrefix(basePrefix);
+  const accountKey = `u${accountIndex}`;
+  const sourcePath = buildGeminiAppSourcePath(basePrefix);
+
+  return {
+    ...context,
+    accountIndex,
+    accountKey,
     sourcePath,
     basePrefix
   };
 }
 
-async function waitForGeminiRuntimeContext(): Promise<GeminiRuntimeContext> {
+function collectGeminiRuntimeContext(): GeminiAccountContext {
+  const route = parseGeminiRoute(location.href);
+  const hl = document.documentElement?.lang?.trim() || geminiRuntimeContext.hl || "en";
+  const at = readGeminiAtTokenFromDom() ?? geminiRuntimeContext.at;
+  return toGeminiAccountContext({
+    at: at ?? undefined,
+    hl,
+    bl: geminiRuntimeContext.bl,
+    fSid: geminiRuntimeContext.fSid,
+    sourcePath: buildGeminiAppSourcePath(geminiRuntimeContext.basePrefix ?? route.basePrefix),
+    basePrefix: geminiRuntimeContext.basePrefix ?? route.basePrefix
+  });
+}
+
+async function waitForGeminiRuntimeContext(): Promise<GeminiAccountContext> {
   const deadline = Date.now() + GEMINI_CONTEXT_WAIT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
@@ -248,11 +388,142 @@ export function maybeUpdateGeminiRuntimeContext(url: string, requestBody?: Captu
     sourcePath: searchParams.get("source-path")?.trim() || undefined
   };
 
-  nextContext.basePrefix = sourcePathToBasePrefix(nextContext.sourcePath);
+  nextContext.basePrefix = normalizeGeminiBasePrefix(sourcePathToBasePrefix(nextContext.sourcePath));
   Object.assign(
     geminiRuntimeContext,
     Object.fromEntries(Object.entries(nextContext).filter(([, value]) => Boolean(value)))
   );
+}
+
+function extractGeminiAccountIndicesFromHtml(html: string): number[] {
+  const indices = new Set<number>();
+
+  for (const match of html.matchAll(/\/u\/(\d+)(?=\/(?:app|gem|$))/g)) {
+    const accountIndex = Number.parseInt(match[1], 10);
+    if (Number.isFinite(accountIndex)) {
+      indices.add(accountIndex);
+    }
+  }
+
+  return [...indices.values()].sort((left, right) => left - right);
+}
+
+function collectGeminiAccountHintsFromDocument(): number[] {
+  const indices = new Set<number>();
+  const route = parseGeminiRoute(location.href);
+  indices.add(route.accountIndex);
+
+  const html = document.documentElement?.innerHTML ?? "";
+  for (const accountIndex of extractGeminiAccountIndicesFromHtml(html)) {
+    indices.add(accountIndex);
+  }
+
+  for (const element of document.querySelectorAll<HTMLElement>("[href], [action]")) {
+    const attributeValue = element.getAttribute("href") ?? element.getAttribute("action");
+    if (!attributeValue) {
+      continue;
+    }
+
+    try {
+      const candidate = new URL(attributeValue, location.href);
+      if (candidate.hostname !== location.hostname) {
+        continue;
+      }
+
+      indices.add(parseGeminiRoute(candidate.toString(), location.href).accountIndex);
+    } catch {
+      // Ignore malformed account hints.
+    }
+  }
+
+  return [...indices.values()].sort((left, right) => left - right);
+}
+
+async function loadGeminiAccountContext(
+  accountIndex: number,
+  activeContext: GeminiAccountContext
+): Promise<GeminiAccountContext | null> {
+  if (accountIndex === activeContext.accountIndex) {
+    return activeContext;
+  }
+
+  const requestedBasePrefix = accountIndex === 0 ? "/u/0" : `/u/${accountIndex}`;
+  const requestedUrl = new URL(buildGeminiAppSourcePath(requestedBasePrefix), location.origin).toString();
+
+  try {
+    const response = await nativeFetch(requestedUrl, {
+      credentials: "include",
+      redirect: "follow"
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const finalUrl = response.url || requestedUrl;
+    const finalRoute = parseGeminiRoute(finalUrl, requestedUrl);
+    if (finalRoute.accountIndex !== accountIndex) {
+      return null;
+    }
+
+    const html = await response.text();
+    const htmlContext = parseGeminiRuntimeContextFromHtml(html, {
+      defaultBasePrefix: finalRoute.basePrefix,
+      defaultSourcePath: buildGeminiAppSourcePath(finalRoute.basePrefix)
+    });
+    if (!htmlContext.at) {
+      return null;
+    }
+
+    return toGeminiAccountContext(
+      {
+        ...activeContext,
+        ...htmlContext,
+        basePrefix: finalRoute.basePrefix,
+        sourcePath: buildGeminiAppSourcePath(finalRoute.basePrefix)
+      },
+      {
+        defaultBasePrefix: finalRoute.basePrefix
+      }
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function discoverGeminiAccountContexts(activeContext: GeminiAccountContext): Promise<GeminiAccountContext[]> {
+  const contexts = new Map<string, GeminiAccountContext>();
+  contexts.set(activeContext.accountKey, activeContext);
+
+  const hintedIndices = collectGeminiAccountHintsFromDocument();
+  let highestRequiredIndex = Math.max(activeContext.accountIndex, ...hintedIndices, 0);
+  let missesBeyondRequired = 0;
+
+  for (let accountIndex = 0; accountIndex <= GEMINI_ACCOUNT_DISCOVERY_MAX_INDEX; accountIndex += 1) {
+    if (accountIndex === activeContext.accountIndex) {
+      continue;
+    }
+
+    const accountContext = await loadGeminiAccountContext(accountIndex, activeContext);
+    const duplicateTokenContext =
+      accountContext?.at &&
+      [...contexts.values()].find((context) => context.at && context.at === accountContext.at && context.accountKey !== accountContext.accountKey);
+
+    if (accountContext && !duplicateTokenContext) {
+      contexts.set(accountContext.accountKey, accountContext);
+      highestRequiredIndex = Math.max(highestRequiredIndex, accountContext.accountIndex);
+      missesBeyondRequired = 0;
+      continue;
+    }
+
+    if (accountIndex >= highestRequiredIndex) {
+      missesBeyondRequired += 1;
+      if (missesBeyondRequired >= GEMINI_ACCOUNT_DISCOVERY_MISS_LIMIT) {
+        break;
+      }
+    }
+  }
+
+  return [...contexts.values()].sort((left, right) => left.accountIndex - right.accountIndex);
 }
 
 function nextGeminiReqId(): string {
@@ -385,7 +656,7 @@ function readGeminiNextPageToken(payloads: unknown[]): string | undefined {
   return undefined;
 }
 
-function parseGeminiConversationEntry(value: unknown): GeminiConversationEntry | null {
+function parseGeminiConversationEntry(context: GeminiAccountContext, value: unknown): GeminiConversationEntry | null {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -395,16 +666,25 @@ function parseGeminiConversationEntry(value: unknown): GeminiConversationEntry |
     return null;
   }
 
+  const scopedSessionId = buildGeminiScopedSessionId(context.accountKey, conversationId);
+  if (!scopedSessionId) {
+    return null;
+  }
+
   const title = typeof value[1] === "string" && value[1].trim() ? value[1].trim() : undefined;
   return {
     conversationId,
+    scopedSessionId,
+    accountIndex: context.accountIndex,
+    accountKey: context.accountKey,
+    basePrefix: context.basePrefix,
     title,
     pinned: value[2] === true || value[2] === 1,
     hidden: value[3] === true || value[3] === 1
   };
 }
 
-function extractGeminiConversationEntries(payloads: unknown[]): GeminiConversationEntry[] {
+function extractGeminiConversationEntries(context: GeminiAccountContext, payloads: unknown[]): GeminiConversationEntry[] {
   const entries: GeminiConversationEntry[] = [];
 
   for (const payload of payloads) {
@@ -413,7 +693,7 @@ function extractGeminiConversationEntries(payloads: unknown[]): GeminiConversati
     }
 
     for (const item of payload[2]) {
-      const entry = parseGeminiConversationEntry(item);
+      const entry = parseGeminiConversationEntry(context, item);
       if (entry) {
         entries.push(entry);
       }
@@ -432,11 +712,11 @@ function buildGeminiReadArgs(conversationId: string, pageToken: string | undefin
 }
 
 async function listGeminiConversationEntries(
-  context: GeminiRuntimeContext,
+  context: GeminiAccountContext,
   pinned: boolean,
   stopConversationId?: string
 ): Promise<GeminiConversationEntry[]> {
-  const sourcePath = toGeminiHistoryListSourcePath(parseGeminiRoute(location.href).sourcePath);
+  const sourcePath = buildGeminiAppSourcePath(context.basePrefix);
   const entries = new Map<string, GeminiConversationEntry>();
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
@@ -451,9 +731,9 @@ async function listGeminiConversationEntries(
       );
     }
 
-    for (const entry of extractGeminiConversationEntries(result.payloads)) {
-      const current = entries.get(entry.conversationId);
-      entries.set(entry.conversationId, {
+    for (const entry of extractGeminiConversationEntries(context, result.payloads)) {
+      const current = entries.get(entry.scopedSessionId);
+      entries.set(entry.scopedSessionId, {
         ...current,
         ...entry,
         title: entry.title || current?.title
@@ -478,53 +758,74 @@ async function listGeminiConversationEntries(
 
 function pickGeminiWatermarkConversationId(entries: GeminiConversationEntry[]): string | undefined {
   return (
-    entries.find((entry) => !entry.hidden && !entry.pinned)?.conversationId ??
-    entries.find((entry) => !entry.hidden)?.conversationId ??
-    entries[0]?.conversationId
+    entries.find((entry) => !entry.hidden && !entry.pinned)?.scopedSessionId ??
+    entries.find((entry) => !entry.hidden)?.scopedSessionId ??
+    entries[0]?.scopedSessionId
   );
 }
 
 async function collectGeminiHistoryCandidates(
-  context: GeminiRuntimeContext,
-  previousTopSessionId: string | undefined,
+  contexts: GeminiAccountContext[],
+  previousTopSessionIds: Set<string>,
   syncedSessionIds: Set<string>,
   refreshSessionIds: Set<string>
 ): Promise<{
-  topSessionId?: string;
+  topSessionIds: string[];
   pendingEntries: GeminiConversationEntry[];
   totalCount: number;
   skippedCount: number;
 }> {
-  const pinnedEntries = await listGeminiConversationEntries(context, true);
-  const unpinnedEntries = await listGeminiConversationEntries(context, false, previousTopSessionId);
-  const orderedEntries = dedupeIds(
-    [...pinnedEntries, ...unpinnedEntries].map((entry) => entry.conversationId)
-  ).map((conversationId) => {
-    return [...pinnedEntries, ...unpinnedEntries].find((entry) => entry.conversationId === conversationId)!;
-  });
-
-  const topSessionId = pickGeminiWatermarkConversationId(orderedEntries);
-
-  if (previousTopSessionId) {
-    const stopIndex = orderedEntries.findIndex((entry) => entry.conversationId === previousTopSessionId);
-    const pendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
-    return {
-      topSessionId,
-      pendingEntries,
-      totalCount: pendingEntries.length,
-      skippedCount: 0
-    };
+  const previousTopByAccount = new Map<string, string>();
+  for (const sessionId of previousTopSessionIds) {
+    const parsed = parseGeminiScopedSessionId(sessionId);
+    if (parsed) {
+      previousTopByAccount.set(parsed.accountKey, sessionId);
+    }
   }
 
-  const pendingEntries = orderedEntries.filter((entry) => {
-    return refreshSessionIds.has(entry.conversationId) || !syncedSessionIds.has(entry.conversationId);
-  });
+  const topSessionIds: string[] = [];
+  const pendingEntries: GeminiConversationEntry[] = [];
+  let totalCount = 0;
+  let skippedCount = 0;
+
+  for (const context of contexts) {
+    const previousTopSessionId = previousTopByAccount.get(context.accountKey);
+    const pinnedEntries = await listGeminiConversationEntries(context, true);
+    const unpinnedEntries = await listGeminiConversationEntries(context, false, previousTopSessionId);
+    const combinedEntries = [...pinnedEntries, ...unpinnedEntries];
+    const orderedEntries = dedupeIds(combinedEntries.map((entry) => entry.scopedSessionId)).map((scopedSessionId) => {
+      return combinedEntries.find((entry) => entry.scopedSessionId === scopedSessionId)!;
+    });
+
+    const topSessionId = pickGeminiWatermarkConversationId(orderedEntries);
+    if (topSessionId) {
+      topSessionIds.push(topSessionId);
+    }
+
+    if (previousTopSessionId) {
+      const stopIndex = orderedEntries.findIndex((entry) => entry.scopedSessionId === previousTopSessionId);
+      const nextPendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
+      pendingEntries.push(...nextPendingEntries);
+      totalCount += nextPendingEntries.length;
+      continue;
+    }
+
+    totalCount += orderedEntries.length;
+    for (const entry of orderedEntries) {
+      if (refreshSessionIds.has(entry.scopedSessionId) || !syncedSessionIds.has(entry.scopedSessionId)) {
+        pendingEntries.push(entry);
+        continue;
+      }
+
+      skippedCount += 1;
+    }
+  }
 
   return {
-    topSessionId,
+    topSessionIds,
     pendingEntries,
-    totalCount: orderedEntries.length,
-    skippedCount: orderedEntries.length - pendingEntries.length
+    totalCount,
+    skippedCount
   };
 }
 
@@ -749,7 +1050,7 @@ function extractGeminiConversationBlocks(payloads: unknown[]): GeminiConversatio
 }
 
 function buildGeminiSyntheticMessages(
-  conversationId: string,
+  scopedSessionId: string,
   blocks: GeminiConversationBlock[],
   capturedAt: string
 ): Array<{
@@ -770,7 +1071,7 @@ function buildGeminiSyntheticMessages(
   let previousAssistantId: string | undefined;
   for (const [index, block] of blocks.entries()) {
     const occurredAt = block.occurredAt ?? capturedAt;
-    const userId = `gemini-${conversationId}-user-${index}`;
+    const userId = `gemini-${scopedSessionId}-user-${index}`;
     messages.push({
       id: userId,
       parentId: previousAssistantId,
@@ -779,7 +1080,7 @@ function buildGeminiSyntheticMessages(
       occurredAt
     });
 
-    const assistantId = `gemini-${conversationId}-assistant-${index}`;
+    const assistantId = `gemini-${scopedSessionId}-assistant-${index}`;
     messages.push({
       id: assistantId,
       parentId: userId,
@@ -794,7 +1095,7 @@ function buildGeminiSyntheticMessages(
 }
 
 async function fetchGeminiConversationCapture(
-  context: GeminiRuntimeContext,
+  context: GeminiAccountContext,
   entry: GeminiConversationEntry
 ): Promise<{
   requestBody: {
@@ -811,7 +1112,7 @@ async function fetchGeminiConversationCapture(
   url: string;
 }> {
   const conversationId = entry.conversationId;
-  const sourcePath = `${context.basePrefix ?? ""}/app/${conversationId}`;
+  const sourcePath = `${context.basePrefix}/app/${conversationId}`;
   const payloads: unknown[] = [];
   const requestBodies: string[] = [];
   let pageToken: string | undefined;
@@ -857,12 +1158,15 @@ async function fetchGeminiConversationCapture(
 
   const responseJson = {
     conversationId,
+    externalSessionId: entry.scopedSessionId,
+    accountKey: entry.accountKey,
     title: entry.title,
-    messages: buildGeminiSyntheticMessages(conversationId, blocks, capturedAt)
+    messages: buildGeminiSyntheticMessages(entry.scopedSessionId, blocks, capturedAt)
   };
   const requestJson = {
     rpcId: GEMINI_READ_RPC_ID,
     conversationId,
+    externalSessionId: entry.scopedSessionId,
     pageCount: requestBodies.length
   };
 
@@ -882,17 +1186,13 @@ async function fetchGeminiConversationCapture(
   };
 }
 
-function buildGeminiHistoryPageUrl(conversationId: string): string {
-  const route = parseGeminiRoute(location.href);
-  return new URL(`${route.basePrefix}/app/${conversationId}`, location.origin).toString();
-}
-
 function postHistorySyncProgress(
   hooks: GeminiHistoryHooks,
   processedCount: number,
   totalCount: number,
   skippedCount: number,
   topSessionId?: string,
+  topSessionIds?: string[],
   message?: string
 ): void {
   hooks.postStatus({
@@ -903,6 +1203,7 @@ function postHistorySyncProgress(
     totalCount,
     skippedCount,
     topSessionId,
+    topSessionIds,
     pageUrl: location.href,
     message
   });
@@ -920,40 +1221,57 @@ export async function runGeminiHistorySync(
   });
 
   try {
-    const context = await waitForGeminiRuntimeContext();
-    const previousTopSessionId = normalizeGeminiConversationId(control?.previousTopSessionId) ?? undefined;
+    const activeContext = await waitForGeminiRuntimeContext();
+    const accountContexts = await discoverGeminiAccountContexts(activeContext);
+    const previousTopSessionIds = normalizeHistorySessionIds(
+      "gemini",
+      [
+        ...(control?.previousTopSessionIds ?? []),
+        ...(control?.previousTopSessionId ? [control.previousTopSessionId] : [])
+      ],
+      normalizeGeminiExternalSessionId
+    );
     const syncedSessionIds = normalizeHistorySessionIds(
       "gemini",
       control?.syncedSessionIds,
-      normalizeGeminiConversationId
+      normalizeGeminiExternalSessionId
     );
     const refreshSessionIds = normalizeHistorySessionIds(
       "gemini",
       control?.refreshSessionIds,
-      normalizeGeminiConversationId
+      normalizeGeminiExternalSessionId
     );
-    const { topSessionId, pendingEntries, totalCount, skippedCount } = await collectGeminiHistoryCandidates(
-      context,
-      previousTopSessionId,
+    const { topSessionIds, pendingEntries, totalCount, skippedCount } = await collectGeminiHistoryCandidates(
+      accountContexts,
+      previousTopSessionIds,
       syncedSessionIds,
       refreshSessionIds
     );
+    const topSessionId = topSessionIds[0];
 
     let processedCount = skippedCount;
     let syncedConversationCount = 0;
     let driftFailureCount = 0;
     let firstDriftFailure: ProviderDriftAlert | null = null;
-    postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
+    postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
 
     await runWithConcurrency(pendingEntries, GEMINI_HISTORY_READ_CONCURRENCY, async (entry) => {
       try {
-        const capture = await fetchGeminiConversationCapture(context, entry);
+        const accountContext = accountContexts.find((context) => context.accountKey === entry.accountKey);
+        if (!accountContext) {
+          throw new Error(`Missing Gemini account context for ${entry.accountKey}.`);
+        }
+
+        const capture = await fetchGeminiConversationCapture(accountContext, entry);
         hooks.postCapture({
           providerHint: "gemini",
           captureMode: "full_snapshot",
           historySyncRunId: hooks.runId,
-          pageUrl: buildGeminiHistoryPageUrl(entry.conversationId),
-          requestId: `history-gemini-${entry.conversationId}-${Date.now()}`,
+          pageUrl: buildGeminiHistoryPageUrl(entry.conversationId, {
+            basePrefix: entry.basePrefix,
+            origin: location.origin
+          }),
+          requestId: `history-gemini-${entry.accountKey}-${entry.conversationId}-${Date.now()}`,
           method: "POST",
           url: capture.url,
           capturedAt: new Date().toISOString(),
@@ -969,7 +1287,7 @@ export async function runGeminiHistorySync(
         // Skip malformed individual conversations without aborting the whole run.
       } finally {
         processedCount += 1;
-        postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
+        postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
       }
     });
 
@@ -998,6 +1316,7 @@ export async function runGeminiHistorySync(
       totalCount,
       skippedCount,
       topSessionId,
+      topSessionIds,
       pageUrl: location.href,
       providerDriftAlert
     });

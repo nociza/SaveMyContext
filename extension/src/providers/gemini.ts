@@ -23,11 +23,50 @@ function normalizeGeminiConversationId(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
+
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
   }
+
   return trimmed.startsWith("c_") ? trimmed.slice(2) : trimmed;
+}
+
+function geminiAccountKeyFromPageUrl(pageUrl: string): string {
+  try {
+    const parsed = new URL(pageUrl);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments[0] === "u" && /^\d+$/.test(segments[1] ?? "")) {
+      return `u${segments[1]}`;
+    }
+  } catch {
+    // Ignore malformed page URLs and fall back to the default account surface.
+  }
+
+  return "u0";
+}
+
+function buildGeminiScopedSessionId(accountKey: string, conversationId: unknown): string | null {
+  const normalizedConversationId = normalizeGeminiConversationId(conversationId);
+  if (!normalizedConversationId) {
+    return null;
+  }
+
+  return `${accountKey}__${normalizedConversationId}`;
+}
+
+function normalizeGeminiExternalSessionId(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const scopedMatch = trimmed.match(/^(u\d+)__(.+)$/);
+  if (scopedMatch) {
+    return buildGeminiScopedSessionId(scopedMatch[1], scopedMatch[2]);
+  }
+
+  return buildGeminiScopedSessionId("u0", trimmed);
 }
 
 function buildExplicitMessage(item: unknown, index: number, externalSessionId: string): NormalizedMessage | null {
@@ -111,10 +150,20 @@ export class GeminiScraper implements IProviderScraper {
     const title =
       findStringByKeys(responseCandidates, ["title", "conversationTitle"]) ??
       findStringByKeys(requestCandidates, ["title", "conversationTitle"]);
-    const externalSessionId =
+    const explicitExternalSessionId =
+      normalizeGeminiExternalSessionId(
+        findStringByKeys(responseCandidates, ["externalSessionId", "external_session_id"]) ??
+          findStringByKeys(requestCandidates, ["externalSessionId", "external_session_id"]) ??
+          ""
+      ) ?? null;
+    const accountKey = geminiAccountKeyFromPageUrl(event.pageUrl);
+    const conversationId =
       normalizeGeminiConversationId(findStringByKeys(responseCandidates, ["conversationId", "conversation_id", "chat_id"])) ??
       normalizeGeminiConversationId(findStringByKeys(requestCandidates, ["conversationId", "conversation_id", "chat_id"])) ??
-      normalizeGeminiConversationId(sessionIdFromPageUrl(event.pageUrl)) ??
+      normalizeGeminiConversationId(sessionIdFromPageUrl(event.pageUrl));
+    const externalSessionId =
+      explicitExternalSessionId ??
+      (conversationId ? buildGeminiScopedSessionId(accountKey, conversationId) : null) ??
       stableId("gemini-session", event.pageUrl);
 
     const explicitMessages = dedupeMessages(

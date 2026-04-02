@@ -63,6 +63,7 @@ export interface ProviderHistorySyncState {
   lastStartedAt?: string;
   lastCompletedAt?: string;
   lastTopSessionId?: string;
+  lastTopSessionIds?: string[];
   lastConversationCount?: number;
   lastPageUrl?: string;
   processedCount?: number;
@@ -108,6 +109,7 @@ export interface HistorySyncTriggerPayload {
   provider: ProviderName;
   syncedSessionIds?: string[];
   previousTopSessionId?: string;
+  previousTopSessionIds?: string[];
   refreshSessionIds?: string[];
 }
 
@@ -120,6 +122,7 @@ export interface HistorySyncUpdate {
   totalCount?: number;
   skippedCount?: number;
   topSessionId?: string;
+  topSessionIds?: string[];
   pageUrl: string;
   message?: string;
   providerDriftAlert?: ProviderDriftAlert | null;
