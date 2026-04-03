@@ -3,6 +3,7 @@ import "./styles.css";
 import type { ExtensionSettings, ProviderDriftAlert, RuntimeMessage, SyncStatus } from "../shared/types";
 
 const backendUrl = document.querySelector<HTMLParagraphElement>("#backend-url");
+const backendStatus = document.querySelector<HTMLParagraphElement>("#backend-status");
 const lastSuccess = document.querySelector<HTMLParagraphElement>("#last-success");
 const lastSession = document.querySelector<HTMLParagraphElement>("#last-session");
 const historySync = document.querySelector<HTMLParagraphElement>("#history-sync");
@@ -59,6 +60,18 @@ function formatProviderDriftAlert(alert?: ProviderDriftAlert | null): string {
   return `${headline} ${formatDate(alert.detectedAt)}.${evidence}`.trim();
 }
 
+function formatBackendStatus(status: SyncStatus): string {
+  if (status.backendValidationError) {
+    return status.backendValidationError;
+  }
+
+  if (status.backendValidatedAt && status.backendVersion) {
+    return `${status.backendProduct ?? "tsmc-server"} ${status.backendVersion} (${status.backendAuthMode ?? "unknown"})`;
+  }
+
+  return "Checking…";
+}
+
 async function sendMessage<TResponse>(message: RuntimeMessage): Promise<TResponse> {
   return chrome.runtime.sendMessage(message) as Promise<TResponse>;
 }
@@ -72,6 +85,9 @@ async function load(): Promise<void> {
   if (backendUrl) {
     const suffix = status.backendVersion ? ` (${status.backendVersion})` : "";
     backendUrl.textContent = `${settings.backendUrl}${suffix}`;
+  }
+  if (backendStatus) {
+    backendStatus.textContent = formatBackendStatus(status);
   }
   if (lastSuccess) {
     lastSuccess.textContent = formatDate(status.lastSuccessAt);

@@ -28,7 +28,11 @@ import type {
 
 let queue = Promise.resolve();
 const HISTORY_SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
+const BACKEND_VALIDATION_TTL_MS = 30 * 1000;
 const historySyncRunErrors = new Map<string, string>();
+let backendValidationInFlight: Promise<SyncStatus> | null = null;
+let backendValidationLastCompletedAt = 0;
+let backendValidationLastKey = "";
 
 async function syncActionBadge(status: SyncStatus): Promise<void> {
   if (status.providerDriftAlert) {
@@ -79,12 +83,68 @@ function enqueueTask<T>(task: () => Promise<T>): Promise<T> {
   return result;
 }
 
+function backendValidationCacheKey(settings: ExtensionSettings): string {
+  return `${settings.backendUrl.trim()}::${settings.backendToken ?? ""}`;
+}
+
+async function refreshBackendStatus(force = false): Promise<SyncStatus> {
+  const settings = await getSettings();
+  const validationKey = backendValidationCacheKey(settings);
+  const now = Date.now();
+
+  if (!force) {
+    if (backendValidationInFlight) {
+      return backendValidationInFlight;
+    }
+
+    if (
+      validationKey === backendValidationLastKey &&
+      now - backendValidationLastCompletedAt < BACKEND_VALIDATION_TTL_MS
+    ) {
+      return getStatus();
+    }
+  }
+
+  backendValidationInFlight = (async () => {
+    const candidateBackendUrl = settings.backendUrl.trim().replace(/\/$/, "");
+
+    try {
+      const { normalizedUrl, capabilities } = await validateBackendConfiguration(settings);
+      await saveBackendValidation(capabilities, null);
+      return await setExtensionStatus({
+        backendUrl: normalizedUrl,
+        autoSyncHistory: settings.autoSyncHistory,
+        backendValidatedAt: new Date().toISOString(),
+        backendProduct: capabilities.product,
+        backendVersion: capabilities.version,
+        backendAuthMode: capabilities.auth.mode,
+        backendValidationError: null,
+        backendVaultRoot: capabilities.storage.vault_root
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await saveBackendValidation(null, message);
+      return await setExtensionStatus({
+        backendUrl: candidateBackendUrl || settings.backendUrl,
+        autoSyncHistory: settings.autoSyncHistory,
+        backendValidationError: message
+      });
+    } finally {
+      backendValidationLastKey = validationKey;
+      backendValidationLastCompletedAt = Date.now();
+      backendValidationInFlight = null;
+    }
+  })();
+
+  return backendValidationInFlight;
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  void initializeStorage().then(() => getStatus().then(syncActionBadge));
+  void initializeStorage().then(() => refreshBackendStatus(true));
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void initializeStorage().then(() => getStatus().then(syncActionBadge));
+  void initializeStorage().then(() => refreshBackendStatus(true));
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
@@ -138,7 +198,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 
   if (message.type === "GET_STATUS") {
-    void getStatus().then(sendResponse);
+    void refreshBackendStatus(false).then(sendResponse);
     return true;
   }
 
@@ -175,6 +235,10 @@ async function handlePageVisit(
   tabId: number | undefined
 ): Promise<{ triggered: boolean; reason?: string }> {
   const settings = await getSettings();
+  const backendStatus = await refreshBackendStatus(false);
+  if (backendStatus.backendValidationError) {
+    return { triggered: false, reason: "backend-unavailable" };
+  }
   if (!settings.enabledProviders[payload.provider]) {
     return { triggered: false, reason: "provider-disabled" };
   }
@@ -526,6 +590,8 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
     const message = error instanceof Error ? error.message : String(error);
     await saveBackendValidation(null, message);
     await setExtensionStatus({
+      backendUrl: candidateSettings.backendUrl.trim().replace(/\/$/, "") || candidateSettings.backendUrl,
+      autoSyncHistory: candidateSettings.autoSyncHistory,
       backendValidationError: message
     });
     return {
