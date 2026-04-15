@@ -5,6 +5,7 @@ import type {
   BackendGraphNode,
   BackendProcessingStatus,
   BackendSearchResponse,
+  BackendStorageSettings,
   BackendSystemStatus,
   ExtensionSettings,
   ProcessingCompleteResponse,
@@ -218,4 +219,23 @@ export async function fetchKnowledgeSearch(
     limit: String(limit)
   });
   return fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities);
+}
+
+export async function updateKnowledgeStoragePath(
+  settings: ExtensionSettings,
+  markdownRoot: string,
+  capabilities?: BackendCapabilities
+): Promise<BackendStorageSettings> {
+  const response = await fetch(backendApiUrl(settings, "/system/storage", capabilities), {
+    method: "POST",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify({
+      markdown_root: markdownRoot.trim()
+    })
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Knowledge path update failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return (await response.json()) as BackendStorageSettings;
 }

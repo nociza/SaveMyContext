@@ -13,10 +13,11 @@ from app.models.base import utcnow
 from app.schemas.dashboard import CategoryCount, DashboardSummary
 from app.schemas.graph import GraphEdge, GraphNode
 from app.schemas.search import SearchResponse
-from app.schemas.system import SystemStatus
+from app.schemas.system import StorageSettingsResponse, StorageSettingsUpdate, SystemStatus
 from app.services.git_versioning import GitVersioningService
 from app.services.graph import GraphService
 from app.services.search import SearchService
+from app.services.storage_config import StorageConfigService
 from app.services.todo import TodoListService
 
 
@@ -115,3 +116,19 @@ async def system_status(
         total_messages=int((await db.scalar(select(func.count(ChatMessage.id)))) or 0),
         total_triplets=int((await db.scalar(select(func.count(FactTriplet.id)))) or 0),
     )
+
+
+@router.get("/system/storage", response_model=StorageSettingsResponse)
+async def get_storage_settings(
+    _: AuthContext = Depends(require_scope("read")),
+) -> StorageSettingsResponse:
+    return StorageConfigService().read()
+
+
+@router.post("/system/storage", response_model=StorageSettingsResponse)
+async def update_storage_settings(
+    payload: StorageSettingsUpdate,
+    _: AuthContext = Depends(require_scope("admin")),
+    db: AsyncSession = Depends(get_db_session),
+) -> StorageSettingsResponse:
+    return await StorageConfigService(db).update_markdown_root(payload.markdown_root)

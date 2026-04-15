@@ -15,6 +15,7 @@ class CapabilityFeatureSet(BaseModel):
     graph: bool = True
     obsidian_vault: bool = True
     knowledge_graph_files: bool = True
+    storage_management: bool = True
     agent_api: bool = True
     todo_list: bool = True
     git_versioning: bool = True

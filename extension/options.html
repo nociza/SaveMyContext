@@ -36,6 +36,25 @@
             Configure your OpenRouter or other OpenAI-compatible API key on the backend. The extension only needs the backend URL and optional app token.
           </p>
 
+          <div class="field-group">
+            <label class="field">
+              <span>Knowledge Storage Root</span>
+              <input
+                id="knowledge-path"
+                name="knowledge-path"
+                type="text"
+                placeholder="/home/you/Notes"
+                autocomplete="off"
+              />
+            </label>
+            <div class="field-actions">
+              <button id="save-knowledge-path" class="button-secondary" type="button">Apply Path</button>
+              <p id="knowledge-path-status" class="status">
+                This path lives on the backend machine. TSMC writes the vault into `TSMC/` under this folder.
+              </p>
+            </div>
+          </div>
+
           <label class="toggle toggle-wide">
             <input id="auto-sync-history" type="checkbox" />
             <span>

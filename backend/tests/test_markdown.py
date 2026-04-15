@@ -181,11 +181,27 @@ async def test_markdown_export_handles_mixed_naive_and_aware_session_timestamps(
 
         output_path = await exporter.write_session(aware_session)
         entity_note = exporter.vault_root / "Graph" / "Entities" / "fastapi.md"
+        home_dashboard = exporter.vault_root / "Dashboards" / "Home.md"
+        readme = exporter.vault_root / "README.md"
+        agents = exporter.vault_root / "AGENTS.md"
+        manifest = exporter.vault_root / "manifest.json"
 
         assert output_path.exists()
         assert entity_note.exists()
+        assert home_dashboard.exists()
+        assert readme.exists()
+        assert agents.exists()
+        assert manifest.exists()
         entity_markdown = entity_note.read_text(encoding="utf-8")
+        home_markdown = home_dashboard.read_text(encoding="utf-8")
+        agents_markdown = agents.read_text(encoding="utf-8")
+        manifest_json = manifest.read_text(encoding="utf-8")
         assert "Aware Session" in entity_markdown
         assert "Naive Session" in entity_markdown
+        assert "# TSMC Home" in home_markdown
+        assert "README" in home_markdown
+        assert "# AGENTS" in agents_markdown
+        assert "\"entrypoints\"" in manifest_json
+        assert "\"home_dashboard\"" in manifest_json
 
     await engine.dispose()

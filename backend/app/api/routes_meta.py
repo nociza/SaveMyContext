@@ -42,6 +42,7 @@ async def capabilities(db: AsyncSession = Depends(get_db_session)) -> Capability
             auth_mode=auth_mode,
         ),
         features=CapabilityFeatureSet(
+            storage_management=True,
             browser_proxy=settings.experimental_browser_automation,
             openai_compatible_api=settings.experimental_browser_automation,
         ),

@@ -179,4 +179,51 @@ describe("backend validation helpers", () => {
     expect(response.count).toBe(1);
     expect(response.results[0]?.snippet).toBe("Rust | uses | ownership");
   });
+
+  it("updates the backend knowledge storage path with auth headers", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        markdown_root: "/srv/knowledge",
+        vault_root: "/srv/knowledge/TSMC",
+        todo_list_path: "/srv/knowledge/TSMC/Dashboards/To-Do List.md",
+        persistence_kind: "cli_config",
+        persisted_to: "/home/test/.config/tsmc/config.toml",
+        regenerated_session_count: 12,
+        git_initialized: true
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { updateKnowledgeStoragePath } = await import("../src/background/backend");
+    const response = await updateKnowledgeStoragePath(
+      {
+        backendUrl: "https://notes.example.com/",
+        backendToken: "tsmc_pat_test",
+        autoSyncHistory: true,
+        indexingMode: "all",
+        triggerWords: ["lorem"],
+        blacklistWords: [],
+        enabledProviders: {
+          chatgpt: true,
+          gemini: true,
+          grok: true
+        }
+      },
+      "/srv/knowledge"
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith("https://notes.example.com/api/v1/system/storage", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer tsmc_pat_test"
+      },
+      body: JSON.stringify({
+        markdown_root: "/srv/knowledge"
+      })
+    });
+    expect(response.vault_root).toBe("/srv/knowledge/TSMC");
+    expect(response.regenerated_session_count).toBe(12);
+  });
 });

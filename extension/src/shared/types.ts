@@ -107,6 +107,7 @@ export interface BackendCapabilities {
     graph: boolean;
     obsidian_vault: boolean;
     knowledge_graph_files: boolean;
+    storage_management?: boolean;
     agent_api: boolean;
     browser_proxy: boolean;
     openai_compatible_api: boolean;
@@ -143,6 +144,7 @@ export interface SyncStatus {
   backendVersion?: string;
   backendAuthMode?: "bootstrap_local" | "app_token";
   backendValidationError?: string | null;
+  backendMarkdownRoot?: string;
   backendVaultRoot?: string;
   processingMode?: string;
   processingWorkerModel?: string;
@@ -194,6 +196,16 @@ export interface BackendSystemStatus {
   total_sessions: number;
   total_messages: number;
   total_triplets: number;
+}
+
+export interface BackendStorageSettings {
+  markdown_root: string;
+  vault_root: string;
+  todo_list_path: string;
+  persistence_kind: string;
+  persisted_to?: string | null;
+  regenerated_session_count: number;
+  git_initialized: boolean;
 }
 
 export interface BackendGraphNode {
@@ -345,6 +357,12 @@ export interface SaveSettingsResponse {
   error?: string;
 }
 
+export interface SaveKnowledgePathResponse {
+  ok: boolean;
+  storage?: BackendStorageSettings;
+  error?: string;
+}
+
 export type RuntimeMessage =
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
   | { type: "PAGE_VISIT"; payload: PageVisitPayload }
@@ -358,4 +376,5 @@ export type RuntimeMessage =
   | { type: "RUN_PROVIDER_PROMPT"; payload: RunProviderPromptPayload }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<ExtensionSettings> }
+  | { type: "SAVE_KNOWLEDGE_PATH"; payload: { markdownRoot: string } }
   | { type: "GET_STATUS" };

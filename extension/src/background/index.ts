@@ -4,6 +4,7 @@ import {
   fetchKnowledgeSearch,
   fetchNextProcessingTask,
   fetchProcessingStatus,
+  updateKnowledgeStoragePath,
   validateBackendConfiguration
 } from "./backend";
 import { buildIngestPayload, mergeSeenMessageIds } from "./diff";
@@ -42,6 +43,7 @@ import type {
   ProviderName,
   RunProviderPromptResponse,
   RuntimeMessage,
+  SaveKnowledgePathResponse,
   SaveSettingsResponse,
   SyncStatus
 } from "../shared/types";
@@ -504,6 +506,7 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         backendVersion: capabilities.version,
         backendAuthMode: capabilities.auth.mode,
         backendValidationError: null,
+        backendMarkdownRoot: capabilities.storage.markdown_root,
         backendVaultRoot: capabilities.storage.vault_root,
         processingMode: processing.mode,
         processingWorkerModel: processing.worker_model,
@@ -527,6 +530,8 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         backendUrl: candidateBackendUrl || settings.backendUrl,
         autoSyncHistory: settings.autoSyncHistory,
         backendValidationError: message,
+        backendMarkdownRoot: undefined,
+        backendVaultRoot: undefined,
         processingPendingCount: undefined,
         processingMode: undefined,
         processingWorkerModel: undefined
@@ -613,6 +618,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 
   if (message.type === "GET_STATUS") {
     void refreshBackendStatus(false).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === "SAVE_KNOWLEDGE_PATH") {
+    void enqueueTask(() => handleSaveKnowledgePath(message.payload.markdownRoot))
+      .then(sendResponse)
+      .catch((error) => {
+        console.error("TSMC knowledge path save failed", error);
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        } satisfies SaveKnowledgePathResponse);
+      });
     return true;
   }
 
@@ -1325,6 +1343,7 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendVersion: capabilities.version,
       backendAuthMode: capabilities.auth.mode,
       backendValidationError: null,
+      backendMarkdownRoot: capabilities.storage.markdown_root,
       backendVaultRoot: capabilities.storage.vault_root,
       processingMode: processing.mode,
       processingWorkerModel: processing.worker_model,
@@ -1343,6 +1362,8 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendUrl: candidateSettings.backendUrl.trim().replace(/\/$/, "") || candidateSettings.backendUrl,
       autoSyncHistory: candidateSettings.autoSyncHistory,
       backendValidationError: message,
+      backendMarkdownRoot: undefined,
+      backendVaultRoot: undefined,
       processingPendingCount: undefined,
       processingMode: undefined,
       processingWorkerModel: undefined
@@ -1350,6 +1371,45 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
     return {
       ok: false,
       error: message
+    };
+  }
+}
+
+async function handleSaveKnowledgePath(markdownRoot: string): Promise<SaveKnowledgePathResponse> {
+  const nextPath = markdownRoot.trim();
+  if (!nextPath) {
+    return {
+      ok: false,
+      error: "Enter an absolute knowledge storage path."
+    };
+  }
+
+  const settings = await getSettings();
+  const status = await refreshBackendStatus(false);
+  if (status.backendValidationError) {
+    return {
+      ok: false,
+      error: status.backendValidationError
+    };
+  }
+
+  try {
+    const storage = await updateKnowledgeStoragePath(
+      {
+        ...settings,
+        backendUrl: status.backendUrl ?? settings.backendUrl
+      },
+      nextPath
+    );
+    await refreshBackendStatus(true);
+    return {
+      ok: true,
+      storage
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error)
     };
   }
 }

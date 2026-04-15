@@ -196,6 +196,7 @@ export async function saveBackendValidation(
     backendProduct: capabilities?.product,
     backendVersion: capabilities?.version,
     backendAuthMode: capabilities?.auth.mode,
+    backendMarkdownRoot: capabilities?.storage.markdown_root,
     backendVaultRoot: capabilities?.storage.vault_root,
     backendValidationError: error
   });

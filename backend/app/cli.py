@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import getpass
 import json
+import os
 import shutil
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -96,6 +97,7 @@ def print_json(payload: object) -> None:
 
 
 async def open_cli_session(config: CLIConfig, paths: CLIPaths):
+    os.environ["TSMC_CLI_CONFIG_PATH"] = str(paths.config_path)
     ensure_cli_directories(config, paths)
     ensure_env_file(paths.env_path)
     apply_runtime_environment(config, paths.env_path)
@@ -108,6 +110,7 @@ async def open_cli_session(config: CLIConfig, paths: CLIPaths):
 
 def command_run(args: argparse.Namespace) -> int:
     paths, config = load_effective_config(args)
+    os.environ["TSMC_CLI_CONFIG_PATH"] = str(paths.config_path)
     ensure_cli_directories(config, paths)
     ensure_env_file(paths.env_path)
     apply_runtime_environment(config, paths.env_path)

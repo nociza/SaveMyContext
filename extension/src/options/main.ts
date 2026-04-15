@@ -4,6 +4,7 @@ import type {
   ExtensionSettings,
   ProviderDriftAlert,
   RuntimeMessage,
+  SaveKnowledgePathResponse,
   SaveSettingsResponse,
   SyncStatus
 } from "../shared/types";
@@ -12,6 +13,8 @@ import { describeIndexingMode, normalizeRuleWords } from "../shared/indexing-rul
 const form = document.querySelector<HTMLFormElement>("#settings-form");
 const backendUrlInput = document.querySelector<HTMLInputElement>("#backend-url");
 const backendTokenInput = document.querySelector<HTMLInputElement>("#backend-token");
+const knowledgePathInput = document.querySelector<HTMLInputElement>("#knowledge-path");
+const saveKnowledgePathButton = document.querySelector<HTMLButtonElement>("#save-knowledge-path");
 const autoSyncHistoryInput = document.querySelector<HTMLInputElement>("#auto-sync-history");
 const indexingModeInput = document.querySelector<HTMLInputElement>("#indexing-mode-trigger");
 const triggerWordsInput = document.querySelector<HTMLInputElement>("#trigger-words");
@@ -29,6 +32,7 @@ const historySync = document.querySelector<HTMLParagraphElement>("#history-sync"
 const providerDriftCard = document.querySelector<HTMLDivElement>("#provider-drift-card");
 const providerDrift = document.querySelector<HTMLParagraphElement>("#provider-drift");
 const backendValidation = document.querySelector<HTMLParagraphElement>("#backend-validation");
+const knowledgePathStatus = document.querySelector<HTMLParagraphElement>("#knowledge-path-status");
 const indexingRulesStatus = document.querySelector<HTMLParagraphElement>("#indexing-rules-status");
 const lastIndexing = document.querySelector<HTMLParagraphElement>("#last-indexing");
 const openDashboardButton = document.querySelector<HTMLButtonElement>("#open-dashboard");
@@ -38,6 +42,7 @@ let loadPromise: Promise<void> | null = null;
 let loadQueued = false;
 let formHydrated = false;
 let formDirty = false;
+let knowledgePathDirty = false;
 
 function formatDate(value?: string): string {
   if (!value) {
@@ -143,6 +148,10 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
 function render(settings: ExtensionSettings, status: SyncStatus): void {
   syncFormFromSettings(settings);
 
+  if (knowledgePathInput && !knowledgePathDirty && status.backendMarkdownRoot) {
+    knowledgePathInput.value = status.backendMarkdownRoot;
+  }
+
   if (lastSuccess) {
     lastSuccess.textContent = formatDate(status.lastSuccessAt);
   }
@@ -172,6 +181,16 @@ function render(settings: ExtensionSettings, status: SyncStatus): void {
       backendValidation.textContent = `${status.backendProduct ?? "tsmc-server"} ${status.backendVersion} (${status.backendAuthMode ?? "unknown"})`;
     } else {
       backendValidation.textContent = "Not validated yet";
+    }
+  }
+  if (knowledgePathStatus) {
+    if (status.backendValidationError) {
+      knowledgePathStatus.textContent = "Validate the backend before changing the knowledge path.";
+    } else if (status.backendMarkdownRoot && status.backendVaultRoot) {
+      knowledgePathStatus.textContent = `Current root: ${status.backendMarkdownRoot}. Vault: ${status.backendVaultRoot}.`;
+    } else {
+      knowledgePathStatus.textContent =
+        "This path lives on the backend machine. TSMC writes the vault into TSMC/ under this folder.";
     }
   }
 }
@@ -254,6 +273,10 @@ backendTokenInput?.addEventListener("input", () => {
   formDirty = true;
 });
 
+knowledgePathInput?.addEventListener("input", () => {
+  knowledgePathDirty = true;
+});
+
 autoSyncHistoryInput?.addEventListener("change", () => {
   formDirty = true;
 });
@@ -278,6 +301,32 @@ for (const input of Object.values(providerInputs)) {
 
 openDashboardButton?.addEventListener("click", () => {
   void chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+});
+
+saveKnowledgePathButton?.addEventListener("click", async () => {
+  const markdownRoot = knowledgePathInput?.value.trim() ?? "";
+  const response = await sendMessage<SaveKnowledgePathResponse>({
+    type: "SAVE_KNOWLEDGE_PATH",
+    payload: {
+      markdownRoot
+    }
+  });
+  if (!response.ok) {
+    if (knowledgePathStatus) {
+      knowledgePathStatus.textContent = response.error ?? "Could not update the knowledge path.";
+    }
+    return;
+  }
+  knowledgePathDirty = false;
+  if (knowledgePathInput && response.storage?.markdown_root) {
+    knowledgePathInput.value = response.storage.markdown_root;
+  }
+  if (knowledgePathStatus && response.storage) {
+    const persistedTo = response.storage.persisted_to ? ` Persisted to ${response.storage.persisted_to}.` : "";
+    knowledgePathStatus.textContent =
+      `Vault moved to ${response.storage.vault_root}. Rebuilt ${response.storage.regenerated_session_count} sessions.${persistedTo}`;
+  }
+  await load();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

@@ -7,10 +7,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import inspect, select
+from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import NO_VALUE
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.core.config import get_settings
 from app.models import ChatMessage, ChatSession, FactTriplet, SessionCategory, SyncEvent
@@ -72,17 +72,36 @@ class MarkdownExporter:
 
     async def write_session(self, session: ChatSession) -> Path:
         self._ensure_directories()
-        target = self._session_note_path(session)
-        source_target = self._source_note_path(session)
-        previous_path = Path(session.markdown_path).expanduser() if session.markdown_path else None
-        if previous_path and previous_path != target and previous_path.exists():
-            previous_path.unlink()
-        target.write_text(self.render_session(session), encoding="utf-8")
-        source_target.write_text(self.render_source_session(session), encoding="utf-8")
+        target = self._write_session_files(session)
         await self._write_graph_notes()
         await self._write_dashboards()
         await self._commit_vault(session)
         return target
+
+    async def rebuild_vault(self) -> int:
+        self._ensure_directories()
+        await self._write_dashboards()
+        if self.db is None:
+            return 0
+
+        sessions = (
+            await self.db.execute(
+                select(ChatSession)
+                .options(
+                    selectinload(ChatSession.messages),
+                    selectinload(ChatSession.triplets),
+                    selectinload(ChatSession.sync_events),
+                )
+                .order_by(ChatSession.updated_at.desc())
+            )
+        ).scalars().all()
+
+        for session in sessions:
+            session.markdown_path = str(self._write_session_files(session))
+
+        await self._write_graph_notes()
+        await self._write_dashboards()
+        return len(sessions)
 
     def render(self, session: ChatSession) -> str:
         return self.render_session(session)
@@ -275,6 +294,7 @@ class MarkdownExporter:
         sessions = (
             await self.db.execute(select(ChatSession).order_by(ChatSession.updated_at.desc()))
         ).scalars().all()
+        triplet_count = int((await self.db.scalar(select(func.count(FactTriplet.id)))) or 0)
 
         dashboards_dir = self.vault_root / "Dashboards"
         for category, label in CATEGORY_LABELS.items():
@@ -302,6 +322,22 @@ class MarkdownExporter:
         ]
         (dashboards_dir / "Graph Index.md").write_text(
             "\n".join(graph_index_lines).strip() + "\n",
+            encoding="utf-8",
+        )
+        (dashboards_dir / "Home.md").write_text(
+            self._render_home_dashboard(sessions, triplet_count),
+            encoding="utf-8",
+        )
+        (self.vault_root / "README.md").write_text(
+            self._render_vault_readme(sessions, triplet_count),
+            encoding="utf-8",
+        )
+        (self.vault_root / "AGENTS.md").write_text(
+            self._render_agents_guide(sessions, triplet_count),
+            encoding="utf-8",
+        )
+        (self.vault_root / "manifest.json").write_text(
+            self._render_manifest_json(sessions, triplet_count),
             encoding="utf-8",
         )
 
@@ -334,6 +370,16 @@ class MarkdownExporter:
         (self.vault_root / "Graph" / "Indexes").mkdir(parents=True, exist_ok=True)
         (self.vault_root / "Dashboards").mkdir(parents=True, exist_ok=True)
         TodoListService(base_dir=self.base_dir, vault_root_name=self.vault_root_name).ensure_exists()
+
+    def _write_session_files(self, session: ChatSession) -> Path:
+        target = self._session_note_path(session)
+        source_target = self._source_note_path(session)
+        previous_path = Path(session.markdown_path).expanduser() if session.markdown_path else None
+        if previous_path and previous_path != target and previous_path.exists():
+            previous_path.unlink()
+        target.write_text(self.render_session(session), encoding="utf-8")
+        source_target.write_text(self.render_source_session(session), encoding="utf-8")
+        return target
 
     def _session_note_path(self, session: ChatSession) -> Path:
         category_dir = CATEGORY_LABELS.get(session.category, "Sessions")
@@ -422,6 +468,147 @@ class MarkdownExporter:
         if loaded is NO_VALUE:
             return []
         return list(loaded or [])
+
+    def _render_home_dashboard(self, sessions: list[ChatSession], triplet_count: int) -> str:
+        provider_counts = self._provider_counts(sessions)
+        lines = [
+            "# TSMC Home",
+            "",
+            "## Start Here",
+            "",
+            f"- Human overview: {self._wiki_link(self.vault_root / 'README.md', 'README')}",
+            f"- Agent workflow: {self._wiki_link(self.vault_root / 'AGENTS.md', 'AGENTS')}",
+            f"- Shared to-do list: {self._wiki_link(self._todo_list_path(), TODO_TITLE)}",
+            f"- Graph overview: {self._wiki_link(self.vault_root / 'Dashboards' / 'Graph Index.md', 'Graph Index')}",
+            "",
+            "## Snapshot",
+            "",
+            f"- Total sessions: {len(sessions)}",
+            f"- Total fact triplets: {triplet_count}",
+            "",
+            "## Collections",
+            "",
+        ]
+        for _, label in CATEGORY_LABELS.items():
+            lines.append(f"- {self._wiki_link(self.vault_root / 'Dashboards' / f'{label} Index.md', f'{label} Index')}")
+        lines.extend(["", "## Providers", ""])
+        if provider_counts:
+            for provider, count in provider_counts.items():
+                lines.append(f"- {provider}: {count}")
+        else:
+            lines.append("- No captured sessions yet.")
+        lines.extend(["", "## Recent Sessions", ""])
+        if sessions:
+            for session in sessions[:12]:
+                lines.append(
+                    f"- {self._wiki_link(self._session_note_path(session), session.title or session.external_session_id)}"
+                )
+        else:
+            lines.append("- No captured sessions yet.")
+        return "\n".join(lines).strip() + "\n"
+
+    def _render_vault_readme(self, sessions: list[ChatSession], triplet_count: int) -> str:
+        lines = [
+            "# TSMC Vault",
+            "",
+            "This vault mirrors synced AI conversations into a local, searchable knowledge base.",
+            "",
+            "## What Lives Here",
+            "",
+            "- `Factual/`, `Ideas/`, `Journal/`, `Todo/`, `Sessions/`: processed conversation notes.",
+            "- `Sources/`: raw provider captures and raw message payloads.",
+            "- `Graph/Entities/`: per-entity notes derived from fact triplets.",
+            "- `Dashboards/`: entry points, indexes, and the shared to-do list.",
+            "- `manifest.json`: machine-readable inventory for tools and agents.",
+            "",
+            "## Recommended Entry Points",
+            "",
+            f"- {self._wiki_link(self.vault_root / 'Dashboards' / 'Home.md', 'Home Dashboard')}",
+            f"- {self._wiki_link(self.vault_root / 'Dashboards' / 'Graph Index.md', 'Graph Index')}",
+            f"- {self._wiki_link(self._todo_list_path(), TODO_TITLE)}",
+            "",
+            "## Current Snapshot",
+            "",
+            f"- Sessions: {len(sessions)}",
+            f"- Fact triplets: {triplet_count}",
+            f"- Vault root: `{self.vault_root}`",
+            "- Machine manifest: `manifest.json`",
+            "",
+            "## Notes",
+            "",
+            "- The processed note is the readable view of a conversation.",
+            "- The matching source document is the canonical raw capture for auditing and reprocessing.",
+            "- Git versioning is intended to track every vault change when git is available.",
+            "",
+        ]
+        return "\n".join(lines).strip() + "\n"
+
+    def _render_agents_guide(self, sessions: list[ChatSession], triplet_count: int) -> str:
+        lines = [
+            "# AGENTS",
+            "",
+            "Use this file as the first stop when a coding or reasoning agent is pointed at the TSMC vault.",
+            "",
+            "## Ground Truth",
+            "",
+            "- `Sources/` contains the raw scraped content and raw payloads.",
+            "- Processed category notes summarize and organize those sources for reuse.",
+            "- `Graph/` captures extracted entities and relationships for factual retrieval.",
+            "- `Dashboards/To-Do List.md` is the single shared to-do file.",
+            "",
+            "## Suggested Retrieval Order",
+            "",
+            f"1. Open {self._wiki_link(self.vault_root / 'Dashboards' / 'Home.md', 'Home Dashboard')}.",
+            f"2. Follow category indexes or {self._wiki_link(self.vault_root / 'Dashboards' / 'Graph Index.md', 'Graph Index')}.",
+            "3. When precision matters, open the linked source document and inspect the raw capture.",
+            "4. If editing to-dos or notes, preserve structure and let git capture the revision.",
+            "",
+            "## Current Snapshot",
+            "",
+            f"- Sessions: {len(sessions)}",
+            f"- Fact triplets: {triplet_count}",
+            "- Manifest: `manifest.json`",
+            "",
+            "## Authoring Rules",
+            "",
+            "- Do not overwrite source documents with summaries.",
+            "- Keep links between processed notes and source documents intact.",
+            "- Prefer appending clear, dated notes over destructive rewrites.",
+            "",
+        ]
+        return "\n".join(lines).strip() + "\n"
+
+    def _render_manifest_json(self, sessions: list[ChatSession], triplet_count: int) -> str:
+        categories = {
+            (category.value if category else "unclassified"): len(
+                [session for session in sessions if session.category == category]
+            )
+            for category in [*CATEGORY_LABELS.keys(), None]
+        }
+        manifest = {
+            "generated_at": datetime_isoformat(datetime.now(timezone.utc)),
+            "vault_root": str(self.vault_root),
+            "entrypoints": {
+                "home_dashboard": str(self.vault_root / "Dashboards" / "Home.md"),
+                "readme": str(self.vault_root / "README.md"),
+                "agents": str(self.vault_root / "AGENTS.md"),
+                "todo_list": str(self._todo_list_path()),
+                "graph_index": str(self.vault_root / "Dashboards" / "Graph Index.md"),
+            },
+            "counts": {
+                "sessions": len(sessions),
+                "triplets": triplet_count,
+                "providers": self._provider_counts(sessions),
+                "categories": categories,
+            },
+        }
+        return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+
+    def _provider_counts(self, sessions: list[ChatSession]) -> dict[str, int]:
+        counts: dict[str, int] = defaultdict(int)
+        for session in sessions:
+            counts[session.provider.value] += 1
+        return dict(sorted(counts.items()))
 
     @property
     def vault_root(self) -> Path:
