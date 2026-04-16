@@ -1,0 +1,355 @@
+import { categoryPalette, providerColors, providerLabels } from "../../shared/explorer";
+import type {
+  BackendCategoryGraph,
+  BackendExplorerGraphNode,
+  BackendSessionListItem,
+  ProviderName,
+  SessionCategoryName
+} from "../../shared/types";
+
+export type GraphGroupingMode = "provider" | "kind";
+export type InsightTone = "neutral" | "info" | "warning" | "danger";
+
+export interface CategoryGraphCluster {
+  id: string;
+  label: string;
+  accent: string;
+  mode: GraphGroupingMode;
+  provider?: ProviderName | null;
+  nodeIds: string[];
+  nodeCount: number;
+  edgeCount: number;
+  sessionIds: string[];
+  noteCount: number;
+}
+
+export interface CategoryGraphDenseNode {
+  id: string;
+  label: string;
+  accent: string;
+  kind: string;
+  provider?: ProviderName | null;
+  degree: number;
+  noteCount: number;
+  sessionIds: string[];
+  neighbors: string[];
+  lastUpdated?: string | null;
+}
+
+export interface CategoryGraphStoryline extends CategoryGraphDenseNode {
+  clusterId: string;
+  clusterLabel: string;
+  score: number;
+  summary: string;
+}
+
+export interface CategoryGraphWarning {
+  id: string;
+  tone: InsightTone;
+  label: string;
+  detail: string;
+  sessionIds?: string[];
+}
+
+export interface CategoryGraphInsights {
+  clusters: CategoryGraphCluster[];
+  denseNodes: CategoryGraphDenseNode[];
+  storylines: CategoryGraphStoryline[];
+  warnings: CategoryGraphWarning[];
+  graphSessionIds: string[];
+  corroboratedNodes: number;
+  singleSourceNodes: number;
+  orphanNodes: number;
+  uncoveredSessions: number;
+  sessionCoverage: number;
+  averageEdgeWeight: number;
+  averageNodesPerSession: number;
+}
+
+const kindAccents = ["#0f8a84", "#c77724", "#2477c7", "#b04d37", "#2f855a", "#0ea5a4"];
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function titleCase(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function uniqueStrings(values: Iterable<string>): string[] {
+  return Array.from(new Set(values));
+}
+
+function latestSessionTimestamp(sessionIds: string[], sessionTimestampById: Map<string, string | null | undefined>): string | null {
+  let latest: string | null = null;
+  for (const sessionId of sessionIds) {
+    const candidate = sessionTimestampById.get(sessionId) ?? null;
+    if (candidate && (!latest || candidate > latest)) {
+      latest = candidate;
+    }
+  }
+  return latest;
+}
+
+export function clusterKeyForNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
+  if (groupingMode === "provider") {
+    return node.provider ? `provider:${node.provider}` : "provider:unassigned";
+  }
+  return `kind:${node.kind || "unknown"}`;
+}
+
+export function clusterLabelForNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
+  if (groupingMode === "provider") {
+    return node.provider ? providerLabels[node.provider] : "Unassigned";
+  }
+  return titleCase(node.kind || "Unknown");
+}
+
+export function clusterAccentForNode(
+  node: Pick<BackendExplorerGraphNode, "kind" | "provider">,
+  category: SessionCategoryName,
+  groupingMode: GraphGroupingMode
+): string {
+  if (groupingMode === "provider" && node.provider) {
+    return providerColors[node.provider];
+  }
+  const kind = node.kind?.trim();
+  if (!kind) {
+    return categoryPalette[category].accent;
+  }
+  return kindAccents[hashString(kind) % kindAccents.length] ?? categoryPalette[category].accent;
+}
+
+export function buildCategoryGraphInsights(
+  graph: BackendCategoryGraph,
+  sessions: BackendSessionListItem[],
+  category: SessionCategoryName,
+  groupingMode: GraphGroupingMode
+): CategoryGraphInsights {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
+  const sessionTimestampById = new Map(sessions.map((session) => [session.id, session.updated_at] as const));
+  const graphSessionIds = new Set<string>();
+  const adjacency = new Map<string, Set<string>>();
+  const weightedNeighbors = new Map<string, Array<{ id: string; weight: number }>>();
+
+  for (const node of graph.nodes) {
+    adjacency.set(node.id, new Set());
+    weightedNeighbors.set(node.id, []);
+    for (const sessionId of node.session_ids) {
+      graphSessionIds.add(sessionId);
+    }
+  }
+
+  type MutableCluster = {
+    id: string;
+    label: string;
+    accent: string;
+    mode: GraphGroupingMode;
+    provider?: ProviderName | null;
+    nodeIds: Set<string>;
+    sessionIds: Set<string>;
+    edgeCount: number;
+  };
+
+  const clusterMap = new Map<string, MutableCluster>();
+
+  for (const node of graph.nodes) {
+    const clusterId = clusterKeyForNode(node, groupingMode);
+    const cluster =
+      clusterMap.get(clusterId) ??
+      (() => {
+        const created: MutableCluster = {
+          id: clusterId,
+          label: clusterLabelForNode(node, groupingMode),
+          accent: clusterAccentForNode(node, category, groupingMode),
+          mode: groupingMode,
+          provider: groupingMode === "provider" ? node.provider ?? null : null,
+          nodeIds: new Set<string>(),
+          sessionIds: new Set<string>(),
+          edgeCount: 0
+        };
+        clusterMap.set(clusterId, created);
+        return created;
+      })();
+
+    cluster.nodeIds.add(node.id);
+    for (const sessionId of node.session_ids) {
+      cluster.sessionIds.add(sessionId);
+    }
+  }
+
+  for (const edge of graph.edges) {
+    const sourceNode = nodeById.get(edge.source);
+    const targetNode = nodeById.get(edge.target);
+    if (!sourceNode || !targetNode) {
+      continue;
+    }
+
+    adjacency.get(sourceNode.id)?.add(targetNode.id);
+    adjacency.get(targetNode.id)?.add(sourceNode.id);
+    weightedNeighbors.get(sourceNode.id)?.push({ id: targetNode.id, weight: edge.weight });
+    weightedNeighbors.get(targetNode.id)?.push({ id: sourceNode.id, weight: edge.weight });
+
+    for (const sessionId of edge.session_ids) {
+      graphSessionIds.add(sessionId);
+    }
+
+    const sourceClusterId = clusterKeyForNode(sourceNode, groupingMode);
+    const targetClusterId = clusterKeyForNode(targetNode, groupingMode);
+    const sourceCluster = clusterMap.get(sourceClusterId);
+    if (sourceCluster) {
+      sourceCluster.edgeCount += 1;
+    }
+    if (sourceClusterId !== targetClusterId) {
+      const targetCluster = clusterMap.get(targetClusterId);
+      if (targetCluster) {
+        targetCluster.edgeCount += 1;
+      }
+    }
+  }
+
+  const clusters = Array.from(clusterMap.values())
+    .map((cluster) => ({
+      id: cluster.id,
+      label: cluster.label,
+      accent: cluster.accent,
+      mode: cluster.mode,
+      provider: cluster.provider,
+      nodeIds: Array.from(cluster.nodeIds),
+      nodeCount: cluster.nodeIds.size,
+      edgeCount: cluster.edgeCount,
+      sessionIds: Array.from(cluster.sessionIds),
+      noteCount: cluster.sessionIds.size
+    }))
+    .sort((left, right) => right.noteCount - left.noteCount || right.edgeCount - left.edgeCount || left.label.localeCompare(right.label));
+
+  const orphanNodes = graph.nodes.filter((node) => (adjacency.get(node.id)?.size ?? 0) === 0);
+  const corroboratedNodes = graph.nodes.filter((node) => node.session_ids.length > 1).length;
+  const singleSourceNodes = graph.nodes.filter((node) => node.session_ids.length <= 1).length;
+
+  const denseNodes = graph.nodes
+    .map((node) => {
+      const neighbors = (weightedNeighbors.get(node.id) ?? [])
+        .sort((left, right) => right.weight - left.weight)
+        .map((neighbor) => nodeById.get(neighbor.id)?.label ?? neighbor.id)
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .slice(0, 4);
+
+      return {
+        id: node.id,
+        label: node.label,
+        accent: clusterAccentForNode(node, category, groupingMode),
+        kind: node.kind,
+        provider: node.provider ?? null,
+        degree: adjacency.get(node.id)?.size ?? 0,
+        noteCount: node.session_ids.length,
+        sessionIds: node.session_ids,
+        neighbors,
+        lastUpdated: node.updated_at ?? latestSessionTimestamp(node.session_ids, sessionTimestampById)
+      };
+    })
+    .sort((left, right) => {
+      const leftScore = left.degree * 4 + left.noteCount * 3;
+      const rightScore = right.degree * 4 + right.noteCount * 3;
+      return rightScore - leftScore || right.noteCount - left.noteCount || left.label.localeCompare(right.label);
+    })
+    .slice(0, 8);
+
+  const storylineMap = new Map(clusters.map((cluster) => [cluster.id, cluster.label] as const));
+  const storylines = graph.nodes
+    .map((node) => {
+      const clusterId = clusterKeyForNode(node, groupingMode);
+      const degree = adjacency.get(node.id)?.size ?? 0;
+      const noteCount = node.session_ids.length;
+      const score = degree * 4 + noteCount * 3 + Math.log(node.size + 1) * 6;
+      const neighbors = (weightedNeighbors.get(node.id) ?? [])
+        .sort((left, right) => right.weight - left.weight)
+        .map((neighbor) => nodeById.get(neighbor.id)?.label ?? neighbor.id)
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .slice(0, 3);
+
+      const summary =
+        neighbors.length > 0
+          ? `Connects with ${neighbors.join(", ")} across ${noteCount} ${noteCount === 1 ? "note" : "notes"}.`
+          : `Appears in ${noteCount} ${noteCount === 1 ? "note" : "notes"} without visible links in this scope.`;
+
+      return {
+        id: node.id,
+        label: node.label,
+        accent: clusterAccentForNode(node, category, groupingMode),
+        kind: node.kind,
+        provider: node.provider ?? null,
+        degree,
+        noteCount,
+        sessionIds: node.session_ids,
+        neighbors,
+        lastUpdated: node.updated_at ?? latestSessionTimestamp(node.session_ids, sessionTimestampById),
+        clusterId,
+        clusterLabel: storylineMap.get(clusterId) ?? clusterId,
+        score,
+        summary
+      };
+    })
+    .sort((left, right) => right.score - left.score || right.noteCount - left.noteCount || left.label.localeCompare(right.label))
+    .slice(0, 6);
+
+  const uncoveredSessionIds = sessions.filter((session) => !graphSessionIds.has(session.id)).map((session) => session.id);
+  const sessionCoverage = sessions.length ? graphSessionIds.size / sessions.length : 0;
+  const averageEdgeWeight = graph.edges.length ? graph.edges.reduce((sum, edge) => sum + edge.weight, 0) / graph.edges.length : 0;
+  const averageNodesPerSession = sessions.length ? graph.nodes.length / sessions.length : 0;
+
+  const warnings: CategoryGraphWarning[] = [];
+
+  if (orphanNodes.length > 0) {
+    warnings.push({
+      id: "orphans",
+      tone: orphanNodes.length >= 6 ? "warning" : "info",
+      label: `${orphanNodes.length} disconnected ${orphanNodes.length === 1 ? "node" : "nodes"}`,
+      detail: "These entities appear in the current scope without visible relationships.",
+      sessionIds: uniqueStrings(orphanNodes.flatMap((node) => node.session_ids))
+    });
+  }
+
+  if (uncoveredSessionIds.length > 0) {
+    warnings.push({
+      id: "coverage",
+      tone: sessionCoverage < 0.6 ? "warning" : "info",
+      label: `${uncoveredSessionIds.length} ${uncoveredSessionIds.length === 1 ? "note is" : "notes are"} outside the graph`,
+      detail: "The scoped note list is larger than the graph evidence available for this view.",
+      sessionIds: uncoveredSessionIds
+    });
+  }
+
+  if (singleSourceNodes > corroboratedNodes && graph.nodes.length > 4) {
+    warnings.push({
+      id: "single-source",
+      tone: "info",
+      label: "Most nodes are single-source",
+      detail: "Cross-note corroboration is still thin in this slice of the graph."
+    });
+  }
+
+  return {
+    clusters,
+    denseNodes,
+    storylines,
+    warnings,
+    graphSessionIds: Array.from(graphSessionIds),
+    corroboratedNodes,
+    singleSourceNodes,
+    orphanNodes: orphanNodes.length,
+    uncoveredSessions: uncoveredSessionIds.length,
+    sessionCoverage,
+    averageEdgeWeight,
+    averageNodesPerSession
+  };
+}

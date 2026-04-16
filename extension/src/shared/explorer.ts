@@ -36,6 +36,7 @@ export const providerColors: Record<ProviderName, string> = {
 };
 
 export type CategorySortMode = "recent" | "title";
+export type CategoryWorkspaceView = "atlas" | "story" | "ops";
 
 export function titleFromSession(session: Pick<BackendSessionListItem, "title" | "provider" | "external_session_id">): string {
   return session.title?.trim() || `${providerLabels[session.provider]} · ${session.external_session_id}`;
@@ -46,6 +47,8 @@ export function categoryPageUrl(state: {
   q?: string;
   provider?: ProviderName | null;
   sort?: CategorySortMode | null;
+  view?: CategoryWorkspaceView | null;
+  bucket?: string | null;
   note?: string | null;
 }): string {
   const url = new URL(chrome.runtime.getURL("category.html"));
@@ -58,6 +61,12 @@ export function categoryPageUrl(state: {
   }
   if (state.sort && state.sort !== "recent") {
     url.searchParams.set("sort", state.sort);
+  }
+  if (state.view && state.view !== "atlas") {
+    url.searchParams.set("view", state.view);
+  }
+  if (state.bucket?.trim()) {
+    url.searchParams.set("bucket", state.bucket.trim());
   }
   if (state.note) {
     url.searchParams.set("note", state.note);
@@ -126,4 +135,8 @@ export function parseProvider(value: string | null): ProviderName | null {
 
 export function parseSortMode(value: string | null): CategorySortMode {
   return value === "title" ? "title" : "recent";
+}
+
+export function parseCategoryWorkspaceView(value: string | null): CategoryWorkspaceView {
+  return value === "story" || value === "ops" ? value : "atlas";
 }

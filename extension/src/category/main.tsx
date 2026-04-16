@@ -5,18 +5,12 @@ import * as Tabs from "@radix-ui/react-tabs";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
-import { ArrowLeft, ExternalLink, Search } from "lucide-react";
+import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, Search, Sparkles, Workflow } from "lucide-react";
 
 import {
   fetchCategoryGraph,
@@ -29,18 +23,19 @@ import {
   categoryDescriptions,
   categoryLabels,
   categoryOrder,
-  categoryPageUrl,
   categoryPalette,
   formatCompactDate,
   formatLongDate,
   notePageUrl,
   parseCategory,
+  parseCategoryWorkspaceView,
   parseProvider,
   parseSortMode,
   providerColors,
   providerLabels,
   titleFromSession,
-  type CategorySortMode
+  type CategorySortMode,
+  type CategoryWorkspaceView
 } from "../shared/explorer";
 import type {
   BackendCategoryGraph,
@@ -59,8 +54,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { CategoryGraph } from "../ui/components/category-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
-import { formatNumber } from "../ui/lib/format";
+import { formatNumber, formatPercent } from "../ui/lib/format";
 import { MarkdownView, NoteOverview, TranscriptView } from "../ui/lib/notes";
+import { buildCategoryGraphInsights, type GraphGroupingMode } from "../ui/lib/category-graph-insights";
 import { useDebouncedValue, useExtensionBootstrap } from "../ui/lib/runtime";
 
 type RouteState = {
@@ -68,6 +64,8 @@ type RouteState = {
   q: string;
   provider: ProviderName | null;
   sort: CategorySortMode;
+  view: CategoryWorkspaceView;
+  bucket: string | null;
   note: string | null;
 };
 
@@ -83,6 +81,8 @@ function readRouteState(): RouteState {
     q: params.get("q")?.trim() ?? "",
     provider: parseProvider(params.get("provider")),
     sort: parseSortMode(params.get("sort")),
+    view: parseCategoryWorkspaceView(params.get("view")),
+    bucket: params.get("bucket")?.trim() ?? null,
     note: params.get("note")
   };
 }
@@ -104,6 +104,16 @@ function writeRouteState(state: RouteState, push = true): void {
     url.searchParams.set("sort", state.sort);
   } else {
     url.searchParams.delete("sort");
+  }
+  if (state.view !== "atlas") {
+    url.searchParams.set("view", state.view);
+  } else {
+    url.searchParams.delete("view");
+  }
+  if (state.bucket) {
+    url.searchParams.set("bucket", state.bucket);
+  } else {
+    url.searchParams.delete("bucket");
   }
   if (state.note) {
     url.searchParams.set("note", state.note);
@@ -178,9 +188,9 @@ function statsCards(stats: BackendCategoryStats): Array<{ label: string; value: 
   if (stats.category === "factual") {
     return [
       { label: "Notes", value: formatNumber(stats.total_sessions) },
-      { label: "Messages", value: formatNumber(stats.total_messages) },
       { label: "Facts", value: formatNumber(stats.total_triplets) },
-      { label: "Entities", value: formatNumber(stats.top_entities.reduce((count, item) => count + item.count, 0)) }
+      { label: "Entities", value: formatNumber(stats.top_entities.reduce((count, item) => count + item.count, 0)) },
+      { label: "Predicates", value: formatNumber(stats.top_predicates.reduce((count, item) => count + item.count, 0)) }
     ];
   }
 
@@ -238,19 +248,58 @@ function signalGroups(stats: BackendCategoryStats): {
   };
 }
 
-function noteListMeta(route: RouteState, total: number, visible: number, focus: GraphFocus | null): string {
-  const providerText = route.provider ? ` in ${providerLabels[route.provider]}` : "";
-  if (focus) {
-    return `${formatNumber(visible)} notes linked to ${focus.label}`;
-  }
-  if (route.q) {
-    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} notes${providerText}`;
-  }
-  return `${formatNumber(total)} notes in view${providerText}`;
-}
-
 function formatTooltipMetric(value: unknown): string {
   return formatNumber(typeof value === "number" ? value : Number(value ?? 0));
+}
+
+function formatBucketLabel(bucket: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(bucket)) {
+    const parsed = new Date(`${bucket}T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+  }
+
+  if (/^\d{4}-\d{2}$/.test(bucket)) {
+    const parsed = new Date(`${bucket}-01T00:00:00`);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+    }
+  }
+
+  return bucket;
+}
+
+function buildActivityBuckets(sessions: BackendSessionListItem[]): Array<{ bucket: string; count: number; label: string }> {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    const bucket = session.updated_at.slice(0, 10);
+    if (!bucket) {
+      continue;
+    }
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-12)
+    .map(([bucket, count]) => ({
+      bucket,
+      count,
+      label: formatBucketLabel(bucket)
+    }));
+}
+
+function noteListMeta(route: RouteState, total: number, visible: number, focus: GraphFocus | null): string {
+  const providerText = route.provider ? ` in ${providerLabels[route.provider]}` : "";
+  const bucketText = route.bucket ? ` · ${formatBucketLabel(route.bucket)}` : "";
+  if (focus) {
+    return `${formatNumber(visible)} notes linked to ${focus.label}${bucketText}`;
+  }
+  if (route.q) {
+    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} notes${providerText}${bucketText}`;
+  }
+  return `${formatNumber(total)} notes in view${providerText}${bucketText}`;
 }
 
 function App() {
@@ -258,6 +307,8 @@ function App() {
   const [route, setRoute] = useState<RouteState>(readRouteState);
   const [graphFocus, setGraphFocus] = useState<GraphFocus | null>(null);
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
+  const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("provider");
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const debouncedQuery = useDebouncedValue(route.q);
 
   useEffect(() => {
@@ -310,7 +361,7 @@ function App() {
 
   const matches = useMemo(() => searchMatchMap(searchQuery.data), [searchQuery.data]);
   const allSessions = sessionsQuery.data ?? [];
-  const visibleSessions = useMemo(() => {
+  const preBucketSessions = useMemo(() => {
     const base = sortSessions(allSessions, route.sort);
     if (!debouncedQuery.trim()) {
       return base;
@@ -318,8 +369,22 @@ function App() {
     const visibleIds = new Set(matches.keys());
     return base.filter((session) => visibleIds.has(session.id));
   }, [allSessions, debouncedQuery, matches, route.sort]);
+  const activityBuckets = useMemo(() => buildActivityBuckets(preBucketSessions), [preBucketSessions]);
 
-  const scopedSessionIds = debouncedQuery.trim() ? visibleSessions.map((session) => session.id) : undefined;
+  useEffect(() => {
+    if (route.bucket && !activityBuckets.some((bucket) => bucket.bucket === route.bucket)) {
+      updateRoute({ bucket: null }, false);
+    }
+  }, [activityBuckets, route.bucket]);
+
+  const visibleSessions = useMemo(() => {
+    if (!route.bucket) {
+      return preBucketSessions;
+    }
+    return preBucketSessions.filter((session) => session.updated_at.startsWith(route.bucket as string));
+  }, [preBucketSessions, route.bucket]);
+
+  const scopedSessionIds = debouncedQuery.trim() || route.bucket ? visibleSessions.map((session) => session.id) : undefined;
 
   const statsQuery = useQuery({
     queryKey: [
@@ -341,7 +406,7 @@ function App() {
             }
           : undefined
       ),
-    enabled: Boolean(settings && !status?.backendValidationError && (!debouncedQuery.trim() || visibleSessions.length > 0))
+    enabled: Boolean(settings && !status?.backendValidationError && (!scopedSessionIds || scopedSessionIds.length > 0))
   });
 
   const graphQuery = useQuery({
@@ -364,7 +429,7 @@ function App() {
             }
           : undefined
       ),
-    enabled: Boolean(settings && !status?.backendValidationError && (!debouncedQuery.trim() || visibleSessions.length > 0))
+    enabled: Boolean(settings && !status?.backendValidationError && (!scopedSessionIds || scopedSessionIds.length > 0))
   });
 
   const noteListItems = useMemo(() => {
@@ -396,9 +461,14 @@ function App() {
   });
 
   const stats =
-    debouncedQuery.trim() && !visibleSessions.length ? createEmptyStats(route.category) : statsQuery.data ?? createEmptyStats(route.category);
+    (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
+      ? createEmptyStats(route.category)
+      : statsQuery.data ?? createEmptyStats(route.category);
   const graph =
-    debouncedQuery.trim() && !visibleSessions.length ? createEmptyGraph(route.category) : graphQuery.data ?? createEmptyGraph(route.category);
+    (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
+      ? createEmptyGraph(route.category)
+      : graphQuery.data ?? createEmptyGraph(route.category);
+
   const signals = signalGroups(stats);
   const providerPie = stats.provider_counts.map((item) => ({
     provider: item.provider,
@@ -406,22 +476,82 @@ function App() {
     count: item.count,
     color: providerColors[item.provider]
   }));
+  const graphInsights = useMemo(
+    () => buildCategoryGraphInsights(graph, visibleSessions, route.category, groupingMode),
+    [graph, groupingMode, route.category, visibleSessions]
+  );
+  const scopePills = [
+    { key: "category", label: "Category", value: categoryLabels[route.category] },
+    route.provider ? { key: "provider", label: "Provider", value: providerLabels[route.provider] } : null,
+    route.q ? { key: "query", label: "Query", value: route.q } : null,
+    route.bucket ? { key: "bucket", label: "Time", value: formatBucketLabel(route.bucket) } : null,
+    graphFocus ? { key: "focus", label: "Focus", value: graphFocus.label } : null
+  ].filter((item): item is { key: string; label: string; value: string } => Boolean(item));
+
+  useEffect(() => {
+    const allowedClusters = new Set(graphInsights.clusters.map((cluster) => cluster.id));
+    setCollapsedGroups((current) => {
+      const next = current.filter((clusterId) => allowedClusters.has(clusterId));
+      return next.length === current.length && next.every((clusterId, index) => clusterId === current[index]) ? current : next;
+    });
+  }, [graphInsights.clusters]);
 
   function handleCategorySwitch(category: SessionCategoryName): void {
     setGraphFocus(null);
-    updateRoute({ category, note: null }, true);
+    setCollapsedGroups([]);
+    updateRoute({ category, note: null, bucket: null, view: "atlas" }, true);
+  }
+
+  function activateFocus(label: string, sessionIds: string[], nextView?: CategoryWorkspaceView): void {
+    setGraphFocus({ label, sessionIds });
+    const nextId = visibleSessions.find((item) => sessionIds.includes(item.id))?.id ?? sessionIds[0] ?? null;
+    updateRoute({ note: nextId, view: nextView ?? route.view }, false);
   }
 
   function handleFocus(label: string, sessionIds: string[]): void {
-    setGraphFocus({ label, sessionIds });
-    if (sessionIds.length > 0) {
-      const nextId = noteListItems.find((item) => sessionIds.includes(item.id))?.id ?? sessionIds[0] ?? null;
-      updateRoute({ note: nextId }, false);
-    }
+    activateFocus(label, sessionIds);
   }
 
+  function handleBucketToggle(bucket: string): void {
+    setGraphFocus(null);
+    updateRoute({ bucket: route.bucket === bucket ? null : bucket, note: null }, true);
+  }
+
+  function clearScope(): void {
+    setGraphFocus(null);
+    setCollapsedGroups([]);
+    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, note: null, view: "atlas" }, true);
+  }
+
+  const workspaceCards = [
+    {
+      value: "atlas" as const,
+      label: "Atlas",
+      accent: categoryPalette[route.category].accent,
+      icon: BrainCircuit,
+      metric: `${formatNumber(graph.node_count)} nodes`,
+      detail: `${formatNumber(graph.edge_count)} relationships`
+    },
+    {
+      value: "story" as const,
+      label: "Storylines",
+      accent: "#c77724",
+      icon: Sparkles,
+      metric: `${formatNumber(graphInsights.storylines.length)} trails`,
+      detail: `${formatNumber(graphInsights.corroboratedNodes)} corroborated nodes`
+    },
+    {
+      value: "ops" as const,
+      label: "Graph Ops",
+      accent: "#2477c7",
+      icon: Workflow,
+      metric: `${formatPercent(graphInsights.sessionCoverage * 100)}% coverage`,
+      detail: graphInsights.warnings.length ? `${graphInsights.warnings.length} lint signals` : "Scope is connected"
+    }
+  ];
+
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
+    <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
       <Card className="p-5">
         <CardHeader>
           <div className="space-y-2">
@@ -434,15 +564,66 @@ function App() {
             Overview
           </Button>
         </CardHeader>
+
+        <CardContent className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_1fr]">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { label: "Notes in scope", value: formatNumber(visibleSessions.length), icon: Database },
+              {
+                label: route.category === "factual" ? "Facts" : "Messages",
+                value: route.category === "factual" ? formatNumber(stats.total_triplets) : formatNumber(stats.total_messages),
+                icon: route.category === "factual" ? BrainCircuit : Activity
+              },
+              {
+                label: "Graph coverage",
+                value: `${formatPercent(graphInsights.sessionCoverage * 100)}%`,
+                icon: Workflow
+              },
+              {
+                label: "Last updated",
+                value: formatCompactDate(stats.latest_updated_at, "No data"),
+                icon: Activity
+              }
+            ].map((metric) => (
+              <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                <metric.icon className="h-4 w-4 text-zinc-400" />
+                <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{metric.label}</div>
+                <div className="mt-2 text-2xl font-semibold leading-none text-zinc-950">{metric.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Current scope</div>
+            <div className="mt-2 text-lg font-semibold text-zinc-950">
+              {graphFocus ? graphFocus.label : route.q ? `Search: ${route.q}` : "Entire category"}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {scopePills.map((pill) => (
+                <div key={pill.key} className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
+                  <span className="text-zinc-400">{pill.label}</span> {pill.value}
+                </div>
+              ))}
+              {!scopePills.length ? (
+                <div className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
+                  Full category
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-4 text-sm leading-6 text-zinc-600">
+              {noteListMeta(route, allSessions.length, visibleSessions.length, graphFocus)}
+            </div>
+          </div>
+        </CardContent>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
+      <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
         <div className="space-y-4">
           <Card className="p-4">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Categories</div>
-                <CardTitle className="mt-1 text-lg">Switch collection</CardTitle>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Collections</div>
+                <CardTitle className="mt-1 text-lg">Switch category</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="mt-4 grid gap-2">
@@ -457,10 +638,7 @@ function App() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold">{categoryLabels[category]}</span>
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: categoryPalette[category].accent }}
-                    />
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: categoryPalette[category].accent }} />
                   </div>
                 </button>
               ))}
@@ -471,10 +649,12 @@ function App() {
             <CardHeader>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Explore</div>
-                <CardTitle className="mt-1 text-lg">Search and filter</CardTitle>
+                <CardTitle className="mt-1 text-lg">Query and scope</CardTitle>
               </div>
+              <div className="text-sm text-zinc-500">Everything here reshapes the graph, storylines, and note list.</div>
             </CardHeader>
-            <CardContent className="mt-4 space-y-3">
+
+            <CardContent className="mt-4 space-y-4">
               <label className="block">
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Search</div>
                 <div className="relative">
@@ -487,7 +667,7 @@ function App() {
                       updateRoute({ q: event.target.value, note: null }, true);
                     }}
                     placeholder="Search notes, entities, or transcript text"
-                    className="h-11 w-full rounded-[8px] border border-zinc-200 bg-white pl-10 pr-3 text-sm outline-none ring-0 transition focus:border-zinc-300"
+                    className="h-11 w-full rounded-[8px] border border-zinc-200 bg-white pl-10 pr-3 text-sm outline-none transition focus:border-zinc-300"
                   />
                 </div>
               </label>
@@ -516,10 +696,7 @@ function App() {
 
                 <div>
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Sort</div>
-                  <Select
-                    value={route.sort}
-                    onValueChange={(value) => updateRoute({ sort: value as CategorySortMode }, true)}
-                  >
+                  <Select value={route.sort} onValueChange={(value) => updateRoute({ sort: value as CategorySortMode }, true)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -530,6 +707,38 @@ function App() {
                   </Select>
                 </div>
               </div>
+
+              <div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Recent activity buckets</div>
+                <div className="flex flex-wrap gap-2">
+                  {activityBuckets.map((bucket) => (
+                    <button
+                      key={bucket.bucket}
+                      type="button"
+                      onClick={() => handleBucketToggle(bucket.bucket)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                        route.bucket === bucket.bucket
+                          ? "border-zinc-950 bg-zinc-950 text-white"
+                          : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {bucket.label} · {formatNumber(bucket.count)}
+                    </button>
+                  ))}
+                  {!activityBuckets.length ? <p className="text-sm text-zinc-500">No recent activity buckets yet.</p> : null}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={clearScope}>
+                  Clear scope
+                </Button>
+                {graphFocus ? (
+                  <Button size="sm" variant="ghost" onClick={() => setGraphFocus(null)}>
+                    Clear focus
+                  </Button>
+                ) : null}
+              </div>
             </CardContent>
           </Card>
 
@@ -537,7 +746,7 @@ function App() {
             <CardHeader>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Snapshot</div>
-                <CardTitle className="mt-1 text-lg">What this view contains</CardTitle>
+                <CardTitle className="mt-1 text-lg">What this scope contains</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="mt-4 grid grid-cols-2 gap-2">
@@ -554,73 +763,35 @@ function App() {
             <CardHeader>
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Signals</div>
-                <CardTitle className="mt-1 text-lg">Activity and composition</CardTitle>
+                <CardTitle className="mt-1 text-lg">Recurring concepts</CardTitle>
               </div>
-              <div className="text-sm text-zinc-500">{noteListMeta(route, allSessions.length, visibleSessions.length, graphFocus)}</div>
             </CardHeader>
-            <CardContent className="mt-4 space-y-4">
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Activity</div>
-                <div className="h-[180px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={stats.activity}>
-                      <defs>
-                        <linearGradient id="categoryActivity" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={categoryPalette[route.category].accent} stopOpacity={0.3} />
-                          <stop offset="100%" stopColor={categoryPalette[route.category].accent} stopOpacity={0.05} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="bucket" tickFormatter={(value) => String(value).slice(5)} tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="count" stroke={categoryPalette[route.category].accent} fill="url(#categoryActivity)" strokeWidth={2.5} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+            <CardContent className="mt-4 space-y-3">
+              <div className="space-y-2">
+                {signals.primary.slice(0, 5).map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      updateRoute({ q: item.label, note: null, view: "atlas" }, true);
+                      setGraphFocus(null);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:bg-white"
+                  >
+                    <span className="truncate text-sm text-zinc-700">{item.label}</span>
+                    <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
+                  </button>
+                ))}
+                {!signals.primary.length ? <p className="text-sm text-zinc-500">No recurring signals yet.</p> : null}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Providers</div>
-                  <div className="h-[180px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={providerPie} dataKey="count" nameKey="label" innerRadius={40} outerRadius={64}>
-                          {providerPie.map((item) => (
-                            <Cell key={item.provider} fill={item.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip formatter={(value, name) => [`${formatTooltipMetric(value)} notes`, String(name ?? "Provider")]} />
-                      </PieChart>
-                    </ResponsiveContainer>
+              <div className="space-y-2">
+                {signals.secondary.slice(0, 4).map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-2">
+                    <span className="truncate text-sm text-zinc-700">{item.label}</span>
+                    <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
                   </div>
-                </div>
-
-                <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Top signals</div>
-                  <div className="space-y-2">
-                    {signals.primary.slice(0, 5).map((item) => (
-                      <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-2">
-                        <span className="truncate text-sm text-zinc-700">{item.label}</span>
-                        <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
-                      </div>
-                    ))}
-                    {!signals.primary.length ? <p className="text-sm text-zinc-500">No recurring signals yet.</p> : null}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Secondary signals</div>
-                <div className="space-y-2">
-                  {signals.secondary.slice(0, 5).map((item) => (
-                    <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-2">
-                      <span className="truncate text-sm text-zinc-700">{item.label}</span>
-                      <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
-                    </div>
-                  ))}
-                </div>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -630,41 +801,427 @@ function App() {
           <Card className="p-5">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Graph</div>
-                <CardTitle className="mt-1 text-lg">{route.category === "factual" ? "Knowledge graph" : "Note relationships"}</CardTitle>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Workspace</div>
+                <CardTitle className="mt-1 text-lg">
+                  {route.category === "factual" ? "Knowledge graph workspace" : "Context workspace"}
+                </CardTitle>
                 <CardDescription>
-                  {graphFocus
-                    ? `${graph.node_count} nodes · ${graph.edge_count} edges · focus on ${graphFocus.label}`
-                    : `${graph.node_count} nodes · ${graph.edge_count} edges`}
+                  Atlas for structure, storylines for guided exploration, and graph ops for maintenance and retrieval quality.
                 </CardDescription>
               </div>
-              {graphFocus ? (
-                <Button variant="secondary" onClick={() => setGraphFocus(null)}>
-                  Clear focus
-                </Button>
-              ) : null}
             </CardHeader>
-            <CardContent className="mt-4">
-              <CategoryGraph
-                graph={graph}
-                category={route.category}
-                focusSessionIds={graphFocus?.sessionIds}
-                onFocus={handleFocus}
-              />
+
+            <CardContent className="mt-5">
+              <Tabs.Root value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
+                <Tabs.List className="grid gap-3 lg:grid-cols-3">
+                  {workspaceCards.map((card) => (
+                    <Tabs.Trigger
+                      key={card.value}
+                      value={card.value}
+                      className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 text-left outline-none transition data-[state=active]:border-zinc-950 data-[state=active]:bg-white data-[state=active]:shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{card.label}</div>
+                          <div className="mt-2 text-xl font-semibold text-zinc-950">{card.metric}</div>
+                          <div className="mt-1 text-sm text-zinc-500">{card.detail}</div>
+                        </div>
+                        <div className="rounded-[8px] border border-zinc-200 bg-white p-2">
+                          <card.icon className="h-4 w-4" style={{ color: card.accent }} />
+                        </div>
+                      </div>
+                    </Tabs.Trigger>
+                  ))}
+                </Tabs.List>
+
+                <Tabs.Content value="atlas" className="mt-5 outline-none">
+                  <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={groupingMode === "provider" ? "primary" : "secondary"}
+                            onClick={() => setGroupingMode("provider")}
+                          >
+                            Group by provider
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={groupingMode === "kind" ? "primary" : "secondary"}
+                            onClick={() => setGroupingMode("kind")}
+                          >
+                            Group by concept
+                          </Button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setCollapsedGroups(graphInsights.clusters.map((cluster) => cluster.id))}
+                            disabled={!graphInsights.clusters.length}
+                          >
+                            Collapse all
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setCollapsedGroups([])} disabled={!collapsedGroups.length}>
+                            Expand all
+                          </Button>
+                          {graphFocus ? (
+                            <Button size="sm" variant="secondary" onClick={() => setGraphFocus(null)}>
+                              Clear focus
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <CategoryGraph
+                        graph={graph}
+                        category={route.category}
+                        groupingMode={groupingMode}
+                        collapsedGroups={collapsedGroups}
+                        focusSessionIds={graphFocus?.sessionIds}
+                        onFocus={handleFocus}
+                      />
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Scope summary</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {scopePills.map((pill) => (
+                            <Badge key={pill.key} tone="neutral">
+                              {pill.label}: {pill.value}
+                            </Badge>
+                          ))}
+                          {!scopePills.length ? <Badge tone="neutral">Full category</Badge> : null}
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          {[
+                            { label: "Linked notes", value: formatNumber(graphInsights.graphSessionIds.length) },
+                            { label: "Outside graph", value: formatNumber(graphInsights.uncoveredSessions) },
+                            { label: "Clusters", value: formatNumber(graphInsights.clusters.length) },
+                            { label: "Collapsed", value: formatNumber(collapsedGroups.length) }
+                          ].map((metric) => (
+                            <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
+                              <div className="mt-2 text-lg font-semibold text-zinc-950">{metric.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Semantic groups</div>
+                            <div className="mt-1 text-base font-semibold text-zinc-950">
+                              {groupingMode === "provider" ? "Provider clusters" : "Concept clusters"}
+                            </div>
+                          </div>
+                          <Badge tone="neutral">{formatNumber(graphInsights.clusters.length)}</Badge>
+                        </div>
+
+                        <ScrollArea className="h-[448px] pr-4">
+                          <div className="space-y-3">
+                            {graphInsights.clusters.map((cluster) => {
+                              const collapsed = collapsedGroups.includes(cluster.id);
+                              return (
+                                <div key={cluster.id} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cluster.accent }} />
+                                        <div className="truncate text-sm font-semibold text-zinc-950">{cluster.label}</div>
+                                      </div>
+                                      <div className="mt-1 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                                        {formatNumber(cluster.nodeCount)} entities · {formatNumber(cluster.noteCount)} notes
+                                      </div>
+                                    </div>
+                                    {collapsed ? <Badge tone="info">Collapsed</Badge> : null}
+                                  </div>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <Button size="sm" variant="secondary" onClick={() => activateFocus(cluster.label, cluster.sessionIds)}>
+                                      Focus
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() =>
+                                        setCollapsedGroups((current) =>
+                                          current.includes(cluster.id)
+                                            ? current.filter((value) => value !== cluster.id)
+                                            : [...current, cluster.id]
+                                        )
+                                      }
+                                    >
+                                      {collapsed ? "Expand" : "Collapse"}
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {!graphInsights.clusters.length ? <p className="text-sm text-zinc-500">No clusters available in this scope yet.</p> : null}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  </div>
+                </Tabs.Content>
+
+                <Tabs.Content value="story" className="mt-5 outline-none">
+                  <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {graphInsights.storylines.map((storyline) => (
+                        <button
+                          key={storyline.id}
+                          type="button"
+                          onClick={() => activateFocus(storyline.label, storyline.sessionIds, "atlas")}
+                          className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-300 hover:bg-white"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{storyline.clusterLabel}</div>
+                              <div className="mt-1 truncate text-lg font-semibold text-zinc-950">{storyline.label}</div>
+                            </div>
+                            <span className="h-3 w-3 rounded-full" style={{ backgroundColor: storyline.accent }} />
+                          </div>
+
+                          <p className="mt-3 text-sm leading-6 text-zinc-600">{storyline.summary}</p>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Badge tone="neutral">{formatNumber(storyline.noteCount)} notes</Badge>
+                            <Badge tone="neutral">{formatNumber(storyline.degree)} links</Badge>
+                          </div>
+                          <div className="mt-4 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                            Updated {formatCompactDate(storyline.lastUpdated, "No recent change")}
+                          </div>
+                        </button>
+                      ))}
+                      {!graphInsights.storylines.length ? (
+                        <div className="rounded-[8px] border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500 md:col-span-2">
+                          No storylines are available in this scope yet.
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Activity lane</div>
+                        <div className="mt-1 text-base font-semibold text-zinc-950">Recent note movement</div>
+                        <div className="mt-4 flex justify-center">
+                          <AreaChart width={292} height={220} data={activityBuckets}>
+                            <defs>
+                              <linearGradient id="categoryActivity" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={categoryPalette[route.category].accent} stopOpacity={0.28} />
+                                <stop offset="100%" stopColor={categoryPalette[route.category].accent} stopOpacity={0.04} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="label" tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} />
+                            <YAxis tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                            <Tooltip formatter={(value) => `${formatTooltipMetric(value)} notes`} />
+                            <Area
+                              type="monotone"
+                              dataKey="count"
+                              stroke={categoryPalette[route.category].accent}
+                              fill="url(#categoryActivity)"
+                              strokeWidth={2.5}
+                            />
+                          </AreaChart>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {activityBuckets.map((bucket) => (
+                            <button
+                              key={bucket.bucket}
+                              type="button"
+                              onClick={() => handleBucketToggle(bucket.bucket)}
+                              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                                route.bucket === bucket.bucket
+                                  ? "border-zinc-950 bg-zinc-950 text-white"
+                                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                              }`}
+                            >
+                              {bucket.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Dense nodes</div>
+                        <div className="mt-1 text-base font-semibold text-zinc-950">High-traffic concepts</div>
+                        <div className="mt-4 space-y-2">
+                          {graphInsights.denseNodes.slice(0, 6).map((node) => (
+                            <button
+                              key={node.id}
+                              type="button"
+                              onClick={() => activateFocus(node.label, node.sessionIds, "atlas")}
+                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-3 text-left transition hover:bg-zinc-50"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold text-zinc-950">{node.label}</div>
+                                <div className="mt-1 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                                  {formatNumber(node.degree)} links · {formatNumber(node.noteCount)} notes
+                                </div>
+                              </div>
+                              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: node.accent }} />
+                            </button>
+                          ))}
+                          {!graphInsights.denseNodes.length ? <p className="text-sm text-zinc-500">No dense nodes in this scope yet.</p> : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Tabs.Content>
+
+                <Tabs.Content value="ops" className="mt-5 outline-none">
+                  <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+                    <div className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        {[
+                          { label: "Coverage", value: `${formatPercent(graphInsights.sessionCoverage * 100)}%`, detail: `${formatNumber(graphInsights.graphSessionIds.length)} linked notes` },
+                          { label: "Corroborated", value: formatNumber(graphInsights.corroboratedNodes), detail: "Nodes shared across notes" },
+                          { label: "Orphans", value: formatNumber(graphInsights.orphanNodes), detail: "Disconnected nodes in scope" },
+                          { label: "Clusters", value: formatNumber(graphInsights.clusters.length), detail: `${groupingMode === "provider" ? "Provider" : "Concept"} groups` }
+                        ].map((metric) => (
+                          <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
+                            <div className="mt-2 text-3xl font-semibold text-zinc-950">{metric.value}</div>
+                            <div className="mt-2 text-sm text-zinc-500">{metric.detail}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Graph hygiene</div>
+                            <div className="mt-1 text-base font-semibold text-zinc-950">Lint and maintenance cues</div>
+                          </div>
+                          <Badge tone={graphInsights.warnings.length ? "warning" : "success"}>
+                            {graphInsights.warnings.length ? `${graphInsights.warnings.length} signals` : "Healthy"}
+                          </Badge>
+                        </div>
+
+                        <div className="space-y-3">
+                          {graphInsights.warnings.map((warning) => (
+                            <div key={warning.id} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-zinc-950">{warning.label}</div>
+                                  <div className="mt-1 text-sm leading-6 text-zinc-600">{warning.detail}</div>
+                                </div>
+                                <Badge tone={warning.tone === "warning" ? "warning" : warning.tone === "danger" ? "danger" : "info"}>
+                                  {warning.tone}
+                                </Badge>
+                              </div>
+                              {warning.sessionIds?.length ? (
+                                <div className="mt-3">
+                                  <Button size="sm" variant="secondary" onClick={() => activateFocus(warning.label, warning.sessionIds ?? [], "atlas")}>
+                                    Inspect in atlas
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ))}
+
+                          {!graphInsights.warnings.length ? (
+                            <div className="rounded-[8px] border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                              The current scope is reasonably connected. Use atlas grouping to inspect clusters or storyline view to follow the dominant paths.
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Query surface</div>
+                        <div className="mt-1 text-base font-semibold text-zinc-950">What the retriever can see right now</div>
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          {[
+                            { label: "Visible notes", value: formatNumber(visibleSessions.length) },
+                            { label: "Average link weight", value: graphInsights.averageEdgeWeight.toFixed(1) },
+                            { label: "Nodes per note", value: graphInsights.averageNodesPerSession.toFixed(1) },
+                            { label: "Single-source nodes", value: formatNumber(graphInsights.singleSourceNodes) }
+                          ].map((metric) => (
+                            <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
+                              <div className="mt-2 text-lg font-semibold text-zinc-950">{metric.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Provider mix</div>
+                        <div className="mt-1 text-base font-semibold text-zinc-950">Evidence by source</div>
+                        <div className="mt-4 space-y-3">
+                          {providerPie.map((item) => {
+                            const maxCount = Math.max(...providerPie.map((provider) => provider.count), 1);
+                            return (
+                              <div key={item.provider} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="text-sm font-medium text-zinc-700">{item.label}</div>
+                                  <div className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</div>
+                                </div>
+                                <div className="mt-2 h-2 rounded-full bg-zinc-100">
+                                  <div
+                                    className="h-full rounded-full"
+                                    style={{
+                                      width: `${(item.count / maxCount) * 100}%`,
+                                      backgroundColor: item.color
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {!providerPie.length ? <p className="text-sm text-zinc-500">No provider evidence in this scope yet.</p> : null}
+                        </div>
+                      </div>
+
+                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Top signals</div>
+                        <div className="mt-1 text-base font-semibold text-zinc-950">Most repeated labels in scope</div>
+                        <div className="mt-4 space-y-2">
+                          {signals.primary.slice(0, 6).map((item) => (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => {
+                                setGraphFocus(null);
+                                updateRoute({ q: item.label, view: "atlas", note: null }, true);
+                              }}
+                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-3 text-left transition hover:bg-zinc-50"
+                            >
+                              <span className="truncate text-sm font-medium text-zinc-700">{item.label}</span>
+                              <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
+                            </button>
+                          ))}
+                          {!signals.primary.length ? <p className="text-sm text-zinc-500">No repeated labels yet.</p> : null}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </Tabs.Content>
+              </Tabs.Root>
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 2xl:grid-cols-[360px_1fr]">
+          <div className="grid gap-4 2xl:grid-cols-[360px_minmax(0,1fr)]">
             <Card className="p-4">
               <CardHeader>
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Results</div>
-                  <CardTitle className="mt-1 text-lg">Matching notes</CardTitle>
+                  <CardTitle className="mt-1 text-lg">Notes in scope</CardTitle>
                 </div>
                 <div className="text-sm text-zinc-500">{noteListMeta(route, allSessions.length, noteListItems.length, graphFocus)}</div>
               </CardHeader>
               <CardContent className="mt-4">
-                <ScrollArea className="h-[520px] pr-4">
+                <ScrollArea className="h-[560px] pr-4">
                   <div className="space-y-2">
                     {noteListItems.map((session) => {
                       const match = matches.get(session.id);
@@ -710,7 +1267,7 @@ function App() {
                           formatLongDate(noteQuery.data.updated_at),
                           `${formatNumber(noteQuery.data.word_count)} words`
                         ].join(" · ")
-                      : "Select a note, graph node, or search result to inspect it."}
+                      : "Select a note, graph node, or storyline to inspect it."}
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -759,7 +1316,7 @@ function App() {
                       ))}
                     </Tabs.List>
 
-                    <ScrollArea className="h-[520px] pr-4">
+                    <ScrollArea className="h-[560px] pr-4">
                       <Tabs.Content value="overview" className="outline-none">
                         <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
                       </Tabs.Content>
@@ -773,7 +1330,7 @@ function App() {
                   </Tabs.Root>
                 ) : (
                   <div className="rounded-[8px] border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">
-                    Select a note from the list or graph to inspect its structured summary, transcript, and markdown.
+                    Select a note from the list, atlas, or storyline view to inspect its summary, transcript, and markdown.
                   </div>
                 )}
               </CardContent>
@@ -782,7 +1339,7 @@ function App() {
         </div>
       </div>
 
-      {(error || sessionsQuery.error || searchQuery.error || statsQuery.error || graphQuery.error || noteQuery.error || status?.backendValidationError) ? (
+      {error || sessionsQuery.error || searchQuery.error || statsQuery.error || graphQuery.error || noteQuery.error || status?.backendValidationError ? (
         <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {status?.backendValidationError ||
             error ||

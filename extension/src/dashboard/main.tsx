@@ -12,7 +12,13 @@ import {
   fetchSessions,
   fetchSystemStatus
 } from "../background/backend";
-import { categoryDescriptions, categoryLabels, categoryPageUrl, titleFromSession } from "../shared/explorer";
+import {
+  categoryDescriptions,
+  categoryLabels,
+  categoryPageUrl,
+  titleFromSession,
+  type CategoryWorkspaceView
+} from "../shared/explorer";
 import type { BackendSessionListItem, ExtensionSettings, ProviderName, SessionCategoryName } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
@@ -57,8 +63,8 @@ function readHighlightedCategory(): SessionCategoryName | null {
   return raw === "factual" || raw === "ideas" || raw === "journal" || raw === "todo" ? raw : null;
 }
 
-function openCategory(category: SessionCategoryName): void {
-  window.location.href = categoryPageUrl({ category });
+function openCategory(category: SessionCategoryName, view: CategoryWorkspaceView = "atlas"): void {
+  window.location.href = categoryPageUrl({ category, view });
 }
 
 function sessionActivity(sessions: BackendSessionListItem[]): Array<{ day: string; sessions: number }> {
@@ -160,6 +166,8 @@ function App() {
         })),
     [nodes]
   );
+  const supportRichEdges = useMemo(() => edges.filter((edge) => edge.support_count > 1).length, [edges]);
+  const connectedNodes = useMemo(() => nodes.filter((node) => node.degree > 0).length, [nodes]);
   const recentSessions = useMemo(
     () => [...sessions].sort((left, right) => right.updated_at.localeCompare(left.updated_at)).slice(0, 8),
     [sessions]
@@ -402,12 +410,46 @@ function App() {
         </Tabs.Content>
 
         <Tabs.Content value="knowledge" className="mt-4 space-y-4 outline-none">
+          <div className="grid gap-4 xl:grid-cols-3">
+            {[
+              {
+                label: "Atlas",
+                title: "Open the factual graph atlas",
+                detail: `${formatNumber(nodes.length)} nodes · ${formatNumber(edges.length)} relationships`,
+                view: "atlas" as const
+              },
+              {
+                label: "Storylines",
+                title: "Follow the highest-signal trails",
+                detail: `${formatNumber(connectedNodes)} connected nodes ready for exploration`,
+                view: "story" as const
+              },
+              {
+                label: "Graph Ops",
+                title: "Inspect coverage and lint signals",
+                detail: `${formatNumber(supportRichEdges)} relationships have multi-note support`,
+                view: "ops" as const
+              }
+            ].map((surface) => (
+              <button
+                key={surface.view}
+                type="button"
+                onClick={() => openCategory("factual", surface.view)}
+                className="rounded-[8px] border border-zinc-200 bg-white p-5 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
+              >
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{surface.label}</div>
+                <div className="mt-2 text-lg font-semibold text-zinc-950">{surface.title}</div>
+                <div className="mt-2 text-sm leading-6 text-zinc-500">{surface.detail}</div>
+              </button>
+            ))}
+          </div>
+
           <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
             <Card className="p-5">
               <CardHeader>
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Graph coverage</div>
-                  <CardTitle className="mt-1">Knowledge map density</CardTitle>
+                  <CardTitle className="mt-1">Knowledge map readiness</CardTitle>
                 </div>
                 <div className="text-sm text-zinc-500">
                   {formatNumber(nodes.length)} entities · {formatNumber(edges.length)} relationships
@@ -423,10 +465,8 @@ function App() {
                   <div className="mt-2 text-3xl font-semibold text-zinc-950">{formatNumber(edges.length)}</div>
                 </div>
                 <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Facts per session</div>
-                  <div className="mt-2 text-3xl font-semibold text-zinc-950">
-                    {summary?.total_sessions ? (summary.total_triplets / summary.total_sessions).toFixed(1) : "0.0"}
-                  </div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Connected nodes</div>
+                  <div className="mt-2 text-3xl font-semibold text-zinc-950">{formatNumber(connectedNodes)}</div>
                 </div>
               </CardContent>
             </Card>

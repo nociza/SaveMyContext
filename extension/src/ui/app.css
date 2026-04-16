@@ -33,7 +33,7 @@
   }
 
   body {
-    background: #f3f6f4;
+    background: #f5f6f5;
     color: #111827;
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -55,7 +55,7 @@
 
 @layer components {
   .panel-surface {
-    @apply rounded-lg border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(17,24,39,0.04)];
+    @apply rounded-lg border border-zinc-200 bg-white shadow-[0_1px_1px_rgba(17,24,39,0.03)];
   }
 
   .note-prose {
@@ -75,6 +75,6 @@
   }
 
   .react-flow__panel {
-    @apply rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 text-xs text-zinc-600 shadow-sm backdrop-blur;
+    @apply rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 shadow-sm;
   }
 }
