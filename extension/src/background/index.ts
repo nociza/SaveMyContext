@@ -181,7 +181,7 @@ function tabMatchesProviderUrl(url: string | undefined, provider: ProviderName):
     if (provider === "gemini") {
       return /gemini\.google\.com/.test(hostname);
     }
-    return /grok\.com|x\.com/.test(hostname);
+    return hostname === "grok.com" || hostname.endsWith(".grok.com");
   } catch {
     return false;
   }
@@ -1158,18 +1158,20 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
     currentState.lastTopSessionIds ??
     (currentState.lastTopSessionId ? [currentState.lastTopSessionId] : undefined);
   const nextTopSessionIds = update.topSessionIds ?? (update.topSessionId ? [update.topSessionId] : existingTopSessionIds);
-  const patch = {
+  const basePatch = {
     ...currentState,
     lastPageUrl: update.pageUrl,
-    lastTopSessionId: update.topSessionId ?? update.topSessionIds?.[0] ?? currentState.lastTopSessionId,
-    lastTopSessionIds: nextTopSessionIds,
     lastDriftAlert: update.providerDriftAlert ?? currentState.lastDriftAlert
+  };
+  const watermarkPatch = {
+    lastTopSessionId: update.topSessionId ?? update.topSessionIds?.[0] ?? currentState.lastTopSessionId,
+    lastTopSessionIds: nextTopSessionIds
   };
 
   if (update.phase === "started") {
     const startedAt = currentState.lastStartedAt ?? new Date().toISOString();
     await saveProviderHistorySyncState(update.provider, {
-      ...patch,
+      ...basePatch,
       inProgress: true,
       lastStartedAt: startedAt,
       processedCount: update.processedCount ?? currentState.processedCount,
@@ -1199,7 +1201,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   if (update.phase === "completed") {
     if (runError) {
       await saveProviderHistorySyncState(update.provider, {
-        ...patch,
+        ...basePatch,
         inProgress: false,
         lastCompletedAt: completedAt
       });
@@ -1223,7 +1225,8 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
     const providerStateDriftAlert =
       update.providerDriftAlert ?? clearRecoveredProviderDriftAlert(currentState.lastDriftAlert, update.provider);
     await saveProviderHistorySyncState(update.provider, {
-      ...patch,
+      ...basePatch,
+      ...(update.providerDriftAlert ? {} : watermarkPatch),
       inProgress: false,
       lastCompletedAt: completedAt,
       lastConversationCount: update.conversationCount ?? currentState.lastConversationCount,
@@ -1254,7 +1257,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
     const skippedCount = update.skippedCount ?? currentState.skippedCount;
     const providerStateDriftAlert = clearRecoveredProviderDriftAlert(currentState.lastDriftAlert, update.provider);
     await saveProviderHistorySyncState(update.provider, {
-      ...patch,
+      ...basePatch,
       inProgress: false,
       lastCompletedAt: completedAt,
       processedCount,
@@ -1283,7 +1286,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   const providerDriftAlert = update.providerDriftAlert ?? currentStatus.providerDriftAlert;
   const providerStateDriftAlert = update.providerDriftAlert ?? currentState.lastDriftAlert;
   await saveProviderHistorySyncState(update.provider, {
-    ...patch,
+    ...basePatch,
     inProgress: false,
     lastCompletedAt: completedAt,
     processedCount,

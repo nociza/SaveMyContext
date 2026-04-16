@@ -21,6 +21,55 @@ function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
 }
 
+function isGrokHostname(hostname: string): boolean {
+  return hostname === "grok.com" || hostname.endsWith(".grok.com");
+}
+
+function isGrokConversationCaptureRoute(url: URL): boolean {
+  const pathname = url.pathname.replace(/\/$/, "");
+  return (
+    /^\/rest\/app-chat\/conversations\/[^/]+\/(responses|load-responses|user-responses|model-responses)$/.test(pathname) ||
+    pathname === "/rest/app-chat/conversations/new" ||
+    /^\/rest\/app-chat\/read-response\/[^/]+$/.test(pathname) ||
+    /^\/rest\/app-chat\/conversations\/reconnect-response(?:-v2)?\/[^/]+$/.test(pathname)
+  );
+}
+
+function conversationIdFromCapturedUrl(url: URL): string | undefined {
+  const conversationScopedMatch = url.pathname.match(/^\/rest\/app-chat\/conversations\/([^/]+)\//);
+  const conversationId = conversationScopedMatch?.[1] ? decodeURIComponent(conversationScopedMatch[1]) : undefined;
+  if (conversationId && !["new", "exists", "inflight-response", "reconnect-response", "reconnect-response-v2"].includes(conversationId)) {
+    return conversationId;
+  }
+
+  const pageScopedMatch = url.pathname.match(/^\/c\/([^/]+)/);
+  return pageScopedMatch?.[1] ? decodeURIComponent(pageScopedMatch[1]) : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = flattenText(value);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function isGrokConversationListPayload(value: unknown): boolean {
+  const record = asRecord(value);
+  return Boolean(record && Array.isArray(record.conversations) && !Array.isArray(record.messages) && !Array.isArray(record.responses));
+}
+
 function buildExplicitMessage(item: unknown, index: number, externalSessionId: string): NormalizedMessage | null {
   const record = asRecord(item);
   if (!record) {
@@ -28,12 +77,15 @@ function buildExplicitMessage(item: unknown, index: number, externalSessionId: s
   }
 
   const role = normalizeRole(record.role ?? record.sender ?? record.author);
-  const content = flattenText(record.content ?? record.message ?? record.query ?? record.text ?? record.body);
+  const content =
+    role === "user"
+      ? firstText(record.content, record.query, record.message, record.text, record.body)
+      : firstText(record.content, record.message, record.query, record.text, record.body);
   if (!content) {
     return null;
   }
 
-  const explicitId = typeof record.id === "string" && record.id.trim() ? record.id.trim() : undefined;
+  const explicitId = firstString(record.id, record.responseId);
   const parentId =
     typeof record.parentId === "string" && record.parentId.trim()
       ? record.parentId.trim()
@@ -69,7 +121,7 @@ function buildGenericMessage(value: unknown): NormalizedMessage | null {
 
   return {
     id:
-      (typeof record.id === "string" ? record.id : undefined) ??
+      firstString(record.id, record.responseId) ??
       stableId("grok-msg", `${role}:${content}`),
     parentId:
       (typeof record.parentId === "string" ? record.parentId : undefined) ??
@@ -81,9 +133,39 @@ function buildGenericMessage(value: unknown): NormalizedMessage | null {
         ? record.createdAt
         : typeof record.created_at === "string"
           ? record.created_at
-          : undefined,
+          : typeof record.createTime === "string"
+            ? record.createTime
+            : undefined,
     raw: record
   };
+}
+
+function explicitMessagesFromCandidate(candidate: unknown, externalSessionId: string): NormalizedMessage[] {
+  const record = asRecord(candidate);
+  if (!record) {
+    return [];
+  }
+
+  const messages: NormalizedMessage[] = [];
+  for (const key of ["messages", "responses", "modelResponses", "userResponses"]) {
+    const value = record[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    messages.push(
+      ...value
+        .map((message, index) => buildExplicitMessage(message, index, externalSessionId))
+        .filter((message): message is NormalizedMessage => Boolean(message))
+    );
+  }
+
+  const direct = buildExplicitMessage(record.response ?? record, 0, externalSessionId);
+  if (direct) {
+    messages.push(direct);
+  }
+
+  return messages;
 }
 
 export class GrokScraper implements IProviderScraper {
@@ -95,33 +177,32 @@ export class GrokScraper implements IProviderScraper {
       return false;
     }
 
-    return /grok\.com|x\.com/.test(url.hostname) && /app-chat|conversation|grok|chat/i.test(url.pathname + url.search);
+    return isGrokHostname(url.hostname) && isGrokConversationCaptureRoute(url);
   }
 
   parse(event: CapturedNetworkEvent): NormalizedSessionSnapshot | null {
+    const capturedUrl = resolveCapturedUrl(event.url, event.pageUrl);
+    if (!capturedUrl || !isGrokHostname(capturedUrl.hostname) || !isGrokConversationCaptureRoute(capturedUrl)) {
+      return null;
+    }
+
     const requestCandidates = [event.requestBody?.json, ...extractStructuredCandidates(event.requestBody?.text)].filter(Boolean);
     const responseCandidates = [event.response.json, ...extractStructuredCandidates(event.response.text)].filter(Boolean);
     const structured = [...requestCandidates, ...responseCandidates];
+    if (responseCandidates.some(isGrokConversationListPayload)) {
+      return null;
+    }
 
     const messages: NormalizedMessage[] = [];
     let title = findStringByKeys(structured, ["title", "conversationTitle"]);
     const externalSessionId =
       findStringByKeys(structured, ["conversationId", "conversation_id"]) ??
-      event.url.match(/conversations\/([^/?]+)/)?.[1] ??
+      conversationIdFromCapturedUrl(capturedUrl) ??
       sessionIdFromPageUrl(event.pageUrl) ??
       stableId("grok-session", event.pageUrl);
 
     const explicitMessages = dedupeMessages(
-      responseCandidates.flatMap((candidate) => {
-        const record = asRecord(candidate);
-        if (!record || !Array.isArray(record.messages)) {
-          return [];
-        }
-
-        return record.messages
-          .map((message, index) => buildExplicitMessage(message, index, externalSessionId))
-          .filter((message): message is NormalizedMessage => Boolean(message));
-      })
+      responseCandidates.flatMap((candidate) => explicitMessagesFromCandidate(candidate, externalSessionId))
     );
     if (explicitMessages.length) {
       return {
@@ -141,7 +222,7 @@ export class GrokScraper implements IProviderScraper {
       }
 
       title ??= findStringByKeys(record, ["title", "conversationTitle"]);
-      for (const key of ["messages", "items", "conversationItems", "entries"]) {
+      for (const key of ["messages", "responses"]) {
         const value = record[key];
         if (Array.isArray(value)) {
           for (const item of value) {

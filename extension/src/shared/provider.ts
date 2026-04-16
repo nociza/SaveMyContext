@@ -9,7 +9,7 @@ export function detectProviderFromUrl(url: string): ProviderName | null {
     if (/gemini\.google\.com/.test(hostname)) {
       return "gemini";
     }
-    if (/grok\.com|x\.com/.test(hostname)) {
+    if (hostname === "grok.com" || hostname.endsWith(".grok.com")) {
       return "grok";
     }
   } catch {

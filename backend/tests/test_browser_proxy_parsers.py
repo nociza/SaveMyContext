@@ -133,3 +133,104 @@ def test_provider_parsers_extract_messages_for_all_supported_providers(
     assert snapshot is not None
     assert snapshot.external_session_id == expected_session_id
     assert [message.id for message in snapshot.messages] == expected_message_ids
+
+
+def test_grok_parser_extracts_current_responses_array() -> None:
+    parser = PARSER_REGISTRY[ProviderName.GROK]
+    event = CapturedNetworkEvent(
+        provider_hint=ProviderName.GROK,
+        page_url="https://grok.com/c/grok-current-session",
+        request_id="req-grok-current-1",
+        method="GET",
+        url="https://grok.com/rest/app-chat/conversations/grok-current-session/responses?includeThreads=true",
+        captured_at="2026-04-16T18:00:00.000Z",
+        request_body=None,
+        response=CapturedResponse(
+            status=200,
+            ok=True,
+            content_type="application/json",
+            text='{"responses":[{"responseId":"grok-user-current","sender":"USER","query":"What changed in the Grok history API?","createTime":"2026-04-16T17:59:00.000Z"},{"responseId":"grok-assistant-current","sender":"ASSISTANT","message":"The history list returns conversations, while message details live under responses.","parentResponseId":"grok-user-current","createTime":"2026-04-16T17:59:03.000Z"}]}',
+            json={
+                "responses": [
+                    {
+                        "responseId": "grok-user-current",
+                        "sender": "USER",
+                        "query": "What changed in the Grok history API?",
+                        "createTime": "2026-04-16T17:59:00.000Z",
+                    },
+                    {
+                        "responseId": "grok-assistant-current",
+                        "sender": "ASSISTANT",
+                        "message": "The history list returns conversations, while message details live under responses.",
+                        "parentResponseId": "grok-user-current",
+                        "createTime": "2026-04-16T17:59:03.000Z",
+                    },
+                ]
+            },
+        ),
+    )
+
+    assert parser.matches(event) is True
+    snapshot = parser.parse(event)
+
+    assert snapshot is not None
+    assert snapshot.external_session_id == "grok-current-session"
+    assert [message.id for message in snapshot.messages] == ["grok-user-current", "grok-assistant-current"]
+    assert [message.content for message in snapshot.messages] == [
+        "What changed in the Grok history API?",
+        "The history list returns conversations, while message details live under responses.",
+    ]
+    assert snapshot.messages[1].parent_id == "grok-user-current"
+
+
+def test_grok_parser_rejects_history_list_payloads() -> None:
+    parser = PARSER_REGISTRY[ProviderName.GROK]
+    event = CapturedNetworkEvent(
+        provider_hint=ProviderName.GROK,
+        page_url="https://grok.com/",
+        request_id="req-grok-list-1",
+        method="GET",
+        url="https://grok.com/rest/app-chat/conversations?pageSize=60",
+        captured_at="2026-04-16T18:00:00.000Z",
+        request_body=None,
+        response=CapturedResponse(
+            status=200,
+            ok=True,
+            content_type="application/json",
+            text='{"conversations":[{"conversationId":"grok-list-session","title":"A listed conversation"}]}',
+            json={
+                "conversations": [
+                    {
+                        "conversationId": "grok-list-session",
+                        "title": "A listed conversation",
+                    }
+                ]
+            },
+        ),
+    )
+
+    assert parser.matches(event) is False
+    assert parser.parse(event) is None
+
+
+def test_grok_parser_rejects_x_timeline_payloads() -> None:
+    parser = PARSER_REGISTRY[ProviderName.GROK]
+    event = CapturedNetworkEvent(
+        provider_hint=ProviderName.GROK,
+        page_url="https://x.com/home",
+        request_id="req-x-timeline-1",
+        method="GET",
+        url="https://x.com/i/api/graphql/Yf4WJo0fW46TnqrHUw_1Ow/HomeTimeline",
+        captured_at="2026-04-16T18:00:00.000Z",
+        request_body=None,
+        response=CapturedResponse(
+            status=200,
+            ok=True,
+            content_type="application/json",
+            text='{"data":{"home":{"timeline":"not a Grok chat"}}}',
+            json={"data": {"home": {"timeline": "not a Grok chat"}}},
+        ),
+    )
+
+    assert parser.matches(event) is False
+    assert parser.parse(event) is None

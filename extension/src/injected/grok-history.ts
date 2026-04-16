@@ -6,6 +6,7 @@ import { normalizeHistorySessionIds, runWithConcurrency } from "./history-shared
 
 const GROK_HISTORY_PAGE_SIZE = 100;
 const GROK_HISTORY_DETAIL_CONCURRENCY = 4;
+const GROK_ORIGIN = "https://grok.com";
 const nativeFetch = window.fetch.bind(window);
 
 interface GrokHistoryHooks {
@@ -46,6 +47,20 @@ interface GrokSyntheticMessage {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function isGrokHostname(hostname: string): boolean {
+  return hostname === "grok.com" || hostname.endsWith(".grok.com");
+}
+
+function assertGrokPageOrigin(): void {
+  if (!isGrokHostname(location.hostname)) {
+    throw new Error(`Grok history sync must run on grok.com, not ${location.hostname || "an unknown host"}.`);
+  }
+}
+
+function buildGrokUrl(path: string): URL {
+  return new URL(path, GROK_ORIGIN);
 }
 
 function normalizeGrokConversationId(value: unknown): string | null {
@@ -185,7 +200,7 @@ async function listGrokConversationEntries(
   let pageToken: string | undefined;
 
   while (true) {
-    const url = new URL("/rest/app-chat/conversations", location.origin);
+    const url = buildGrokUrl("/rest/app-chat/conversations");
     url.searchParams.set("pageSize", String(GROK_HISTORY_PAGE_SIZE));
     if (pageToken) {
       url.searchParams.set("pageToken", pageToken);
@@ -278,7 +293,7 @@ async function collectGrokHistoryCandidates(
 }
 
 async function fetchGrokConversationResponsesDirect(conversationId: string): Promise<GrokResponseRecord[]> {
-  const url = new URL(`/rest/app-chat/conversations/${conversationId}/responses`, location.origin);
+  const url = buildGrokUrl(`/rest/app-chat/conversations/${conversationId}/responses`);
   url.searchParams.set("includeThreads", "true");
 
   const { response, json } = await fetchJson(url.toString(), {
@@ -306,7 +321,7 @@ async function fetchGrokConversationResponsesDirect(conversationId: string): Pro
 }
 
 async function fetchGrokConversationResponsesViaNodes(conversationId: string): Promise<GrokResponseRecord[]> {
-  const nodeUrl = new URL(`/rest/app-chat/conversations/${conversationId}/response-node`, location.origin);
+  const nodeUrl = buildGrokUrl(`/rest/app-chat/conversations/${conversationId}/response-node`);
   nodeUrl.searchParams.set("includeThreads", "true");
 
   const nodeResult = await fetchJson(nodeUrl.toString(), {
@@ -338,7 +353,7 @@ async function fetchGrokConversationResponsesViaNodes(conversationId: string): P
     return [];
   }
 
-  const loadUrl = new URL(`/rest/app-chat/conversations/${conversationId}/load-responses`, location.origin);
+  const loadUrl = buildGrokUrl(`/rest/app-chat/conversations/${conversationId}/load-responses`);
   const loadResult = await fetchJson(loadUrl.toString(), {
     method: "POST",
     credentials: "include",
@@ -381,11 +396,11 @@ async function fetchGrokConversationCapture(entry: GrokConversationEntry): Promi
 }> {
   const conversationId = entry.conversationId;
   let responses = await fetchGrokConversationResponsesDirect(conversationId);
-  let url = new URL(`/rest/app-chat/conversations/${conversationId}/responses?includeThreads=true`, location.origin).toString();
+  let url = buildGrokUrl(`/rest/app-chat/conversations/${conversationId}/responses?includeThreads=true`).toString();
 
   if (!responses.length) {
     responses = await fetchGrokConversationResponsesViaNodes(conversationId);
-    url = new URL(`/rest/app-chat/conversations/${conversationId}/load-responses`, location.origin).toString();
+    url = buildGrokUrl(`/rest/app-chat/conversations/${conversationId}/load-responses`).toString();
   }
 
   const messages = buildGrokSyntheticMessages(responses);
@@ -424,7 +439,7 @@ async function fetchGrokConversationCapture(entry: GrokConversationEntry): Promi
 }
 
 function buildGrokHistoryPageUrl(conversationId: string): string {
-  return new URL(`/c/${conversationId}`, location.origin).toString();
+  return buildGrokUrl(`/c/${conversationId}`).toString();
 }
 
 function postHistorySyncProgress(
@@ -460,6 +475,8 @@ export async function runGrokHistorySync(
   });
 
   try {
+    assertGrokPageOrigin();
+
     const previousTopSessionId = normalizeGrokConversationId(control?.previousTopSessionId) ?? undefined;
     const syncedSessionIds = normalizeHistorySessionIds("grok", control?.syncedSessionIds);
     const refreshSessionIds = normalizeHistorySessionIds("grok", control?.refreshSessionIds);

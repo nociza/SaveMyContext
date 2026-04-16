@@ -71,7 +71,7 @@ function providerHintFromUrl(url: string): ProviderName | undefined {
     if (/gemini\.google\.com/.test(hostname)) {
       return "gemini";
     }
-    if (/grok\.com|x\.com/.test(hostname)) {
+    if (hostname === "grok.com" || hostname.endsWith(".grok.com")) {
       return "grok";
     }
   } catch {

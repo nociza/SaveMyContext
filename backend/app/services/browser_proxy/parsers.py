@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +25,60 @@ from app.services.browser_proxy.types import CapturedNetworkEvent, NormalizedMes
 
 def as_record(value: Any) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
+
+
+def is_grok_hostname(hostname: str | None) -> bool:
+    return bool(hostname) and (hostname == "grok.com" or hostname.endswith(".grok.com"))
+
+
+def is_grok_conversation_capture_route(parsed) -> bool:
+    pathname = parsed.path.rstrip("/")
+    return (
+        pathname == "/rest/app-chat/conversations/new"
+        or bool(re.match(r"^/rest/app-chat/read-response/[^/]+$", pathname))
+        or bool(re.match(r"^/rest/app-chat/conversations/reconnect-response(?:-v2)?/[^/]+$", pathname))
+        or bool(
+            re.match(
+                r"^/rest/app-chat/conversations/[^/]+/(responses|load-responses|user-responses|model-responses)$",
+                pathname,
+            )
+        )
+    )
+
+
+def grok_conversation_id_from_url(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) >= 5 and segments[:3] == ["rest", "app-chat", "conversations"]:
+        conversation_id = segments[3]
+        if conversation_id not in {"new", "exists", "inflight-response", "reconnect-response", "reconnect-response-v2"}:
+            return conversation_id
+    if len(segments) >= 2 and segments[0] == "c":
+        return segments[1]
+    return None
+
+
+def first_string(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def first_text(*values: Any) -> str:
+    for value in values:
+        text = flatten_text(value)
+        if text:
+            return text
+    return ""
+
+
+def is_grok_conversation_list_payload(value: Any) -> bool:
+    record = as_record(value)
+    return bool(record and isinstance(record.get("conversations"), list) and not isinstance(record.get("messages"), list) and not isinstance(record.get("responses"), list))
 
 
 def sort_messages(messages: list[NormalizedMessage]) -> list[NormalizedMessage]:
@@ -359,13 +414,14 @@ def build_grok_explicit_message(item: Any, index: int, external_session_id: str)
     if record is None:
         return None
     role = normalize_role(record.get("role") or record.get("sender") or record.get("author"))
-    content = flatten_text(record.get("content") or record.get("message") or record.get("query") or record.get("text") or record.get("body"))
+    content = (
+        first_text(record.get("content"), record.get("query"), record.get("message"), record.get("text"), record.get("body"))
+        if role == "user"
+        else first_text(record.get("content"), record.get("message"), record.get("query"), record.get("text"), record.get("body"))
+    )
     if not content:
         return None
-    identifier = record.get("id") if isinstance(record.get("id"), str) and record.get("id").strip() else stable_id(
-        "grok-msg",
-        f"{external_session_id}:{role}:{index}:{content}",
-    )
+    identifier = first_string(record.get("id"), record.get("responseId")) or stable_id("grok-msg", f"{external_session_id}:{role}:{index}:{content}")
     parent_id = (
         record.get("parentId") if isinstance(record.get("parentId"), str) and record.get("parentId").strip() else None
     ) or (
@@ -398,8 +454,10 @@ def build_grok_generic_message(value: Any) -> NormalizedMessage | None:
         occurred_at = record["createdAt"]
     elif isinstance(record.get("created_at"), str):
         occurred_at = record["created_at"]
+    elif isinstance(record.get("createTime"), str):
+        occurred_at = record["createTime"]
     return NormalizedMessage(
-        id=record.get("id") if isinstance(record.get("id"), str) else stable_id("grok-msg", f"{role}:{content}"),
+        id=first_string(record.get("id"), record.get("responseId")) or stable_id("grok-msg", f"{role}:{content}"),
         parent_id=record.get("parentId") if isinstance(record.get("parentId"), str) else record.get("parent_id") if isinstance(record.get("parent_id"), str) else None,
         role=role,  # type: ignore[arg-type]
         content=content,
@@ -416,22 +474,28 @@ class GrokParser(ProviderParser):
         if not resolved:
             return False
         parsed = urlparse(resolved)
-        target = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-        return any(host in (parsed.hostname or "") for host in ("grok.com", "x.com")) and any(
-            token in target.lower() for token in ("app-chat", "conversation", "grok", "chat")
-        )
+        return is_grok_hostname(parsed.hostname) and is_grok_conversation_capture_route(parsed)
 
     def parse(self, event: CapturedNetworkEvent) -> NormalizedSessionSnapshot | None:
+        resolved = resolve_captured_url(event.url, event.page_url)
+        if not resolved:
+            return None
+        parsed = urlparse(resolved)
+        if not is_grok_hostname(parsed.hostname) or not is_grok_conversation_capture_route(parsed):
+            return None
+
         request_candidates = [candidate for candidate in [event.request_body.json if event.request_body else None] if candidate is not None]
         if event.request_body and event.request_body.text:
             request_candidates.extend(extract_structured_candidates(event.request_body.text))
         response_candidates = [candidate for candidate in [event.response.json, *extract_structured_candidates(event.response.text)] if candidate is not None]
         structured = [*request_candidates, *response_candidates]
+        if any(is_grok_conversation_list_payload(candidate) for candidate in response_candidates):
+            return None
 
         title = find_string_by_keys(structured, ["title", "conversationTitle"])
         external_session_id = (
             find_string_by_keys(structured, ["conversationId", "conversation_id"])
-            or _extract_url_tail(event.url)
+            or grok_conversation_id_from_url(resolved)
             or session_id_from_page_url(event.page_url)
             or stable_id("grok-session", event.page_url)
         )
@@ -462,7 +526,7 @@ class GrokParser(ProviderParser):
             if record is None:
                 continue
             title = title or find_string_by_keys(record, ["title", "conversationTitle"])
-            for key in ("messages", "items", "conversationItems", "entries"):
+            for key in ("messages", "responses"):
                 value = record.get(key)
                 if isinstance(value, list):
                     for item in value:
@@ -514,14 +578,20 @@ def _grok_candidate_messages(candidate: Any, external_session_id: str) -> list[N
     record = as_record(candidate)
     if record is None:
         return []
-    messages = record.get("messages")
-    if not isinstance(messages, list):
-        return []
+
     built_messages: list[NormalizedMessage] = []
-    for index, message in enumerate(messages):
-        built = build_grok_explicit_message(message, index, external_session_id)
-        if built is not None:
-            built_messages.append(built)
+    for key in ("messages", "responses", "modelResponses", "userResponses"):
+        messages = record.get(key)
+        if not isinstance(messages, list):
+            continue
+        for index, message in enumerate(messages):
+            built = build_grok_explicit_message(message, index, external_session_id)
+            if built is not None:
+                built_messages.append(built)
+
+    direct = build_grok_explicit_message(record.get("response") or record, 0, external_session_id)
+    if direct is not None:
+        built_messages.append(direct)
     return built_messages
 
 

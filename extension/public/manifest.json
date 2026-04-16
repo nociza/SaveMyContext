@@ -9,7 +9,6 @@
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
-    "https://x.com/*",
     "https://*/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
@@ -35,8 +34,7 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
-        "https://grok.com/*",
-        "https://x.com/*"
+        "https://grok.com/*"
       ],
       "js": ["assets/injected.js"],
       "run_at": "document_start",

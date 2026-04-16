@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { providerRegistry } from "../src/providers/registry";
+import { detectProviderFromUrl } from "../src/shared/provider";
 import type { CapturedNetworkEvent } from "../src/shared/types";
 
 describe("providerRegistry", () => {
@@ -26,5 +27,10 @@ describe("providerRegistry", () => {
 
     expect(() => providerRegistry.find((provider) => provider.matches(event))).not.toThrow();
     expect(providerRegistry.find((provider) => provider.matches(event))?.provider).toBe("gemini");
+  });
+
+  it("does not classify X OAuth pages as Grok provider pages", () => {
+    expect(detectProviderFromUrl("https://x.com/i/oauth2/authorize?redirect_uri=https%3A%2F%2Faccounts.x.ai%2Fexchange-token")).toBeNull();
+    expect(detectProviderFromUrl("https://grok.com/c/example")).toBe("grok");
   });
 });
