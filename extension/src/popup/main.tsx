@@ -2,10 +2,10 @@ import { useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, BrainCircuit, Database, LoaderCircle, Search, Settings2, Sparkles, Workflow } from "lucide-react";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Pie, PieChart, Tooltip } from "recharts";
 
-import { fetchDashboardSummary } from "../background/backend";
-import { categoryLabels, categoryOrder, categoryPageUrl } from "../shared/explorer";
+import { fetchDashboardSummary, fetchSessions } from "../background/backend";
+import { categoryLabels, categoryOrder, categoryPageUrl, providerLabels, titleFromSession } from "../shared/explorer";
 import type {
   BackendDashboardSummary,
   ExtensionSettings,
@@ -95,7 +95,17 @@ function PopupApp() {
     enabled: Boolean(settings && !status?.backendValidationError)
   });
 
+  const sessionsQuery = useQuery({
+    queryKey: ["popup-sessions", settings?.backendUrl, settings?.backendToken],
+    queryFn: () => fetchSessions(settings as ExtensionSettings),
+    enabled: Boolean(settings && !status?.backendValidationError)
+  });
+
   const summary = summaryOrNull(summaryQuery.data, status);
+  const latestSession = useMemo(
+    () => [...(sessionsQuery.data ?? [])].sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] ?? null,
+    [sessionsQuery.data]
+  );
   const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
   const history = settings && status ? historyTone(settings, status) : { label: "Waiting", tone: "neutral" as const };
   const processing = status ? processingTone(status) : { label: "Waiting", tone: "neutral" as const };
@@ -163,7 +173,7 @@ function PopupApp() {
   }
 
   return (
-    <div className="mx-auto flex w-[560px] flex-col gap-3 p-3" data-testid="popup-root">
+    <div className="mx-auto flex w-full max-w-[640px] flex-col gap-3 p-3" data-testid="popup-root">
       <Card className="p-4">
         <CardHeader className="items-start">
           <div className="space-y-1">
@@ -199,10 +209,14 @@ function PopupApp() {
               </div>
 
               <div className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Latest session</div>
-                <div className="truncate text-sm font-medium text-zinc-900">{status?.lastSessionKey ?? "n/a"}</div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Latest note</div>
+                <div className="truncate text-sm font-medium text-zinc-900">
+                  {latestSession ? titleFromSession(latestSession) : "No saved notes yet"}
+                </div>
                 <div className="mt-1 text-xs leading-5 text-zinc-500">
-                  Last sync · {formatCompactDate(status?.lastSuccessAt, "No sync yet")}
+                  {latestSession
+                    ? `${providerLabels[latestSession.provider]} · ${formatCompactDate(latestSession.updated_at)}`
+                    : `Last sync · ${formatCompactDate(status?.lastSuccessAt, "No sync yet")}`}
                 </div>
               </div>
             </div>
@@ -219,30 +233,30 @@ function PopupApp() {
               {summaryQuery.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin text-zinc-400" /> : null}
             </div>
 
-            <div className="h-[136px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={categoryData}
-                    dataKey="count"
-                    nameKey="label"
-                    innerRadius={36}
-                    outerRadius={52}
-                    paddingAngle={3}
-                    strokeWidth={0}
-                  >
-                    {categoryData.map((item) => (
-                      <Cell key={item.category} fill={item.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value, _name, payload) => [
-                      `${formatTooltipNumber(value)} notes`,
-                      payload?.payload?.label ?? "Category"
-                    ]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="flex h-[136px] items-center justify-center">
+              <PieChart width={190} height={136}>
+                <Pie
+                  data={categoryData}
+                  dataKey="count"
+                  nameKey="label"
+                  innerRadius={36}
+                  outerRadius={52}
+                  paddingAngle={3}
+                  strokeWidth={0}
+                  cx={95}
+                  cy={68}
+                >
+                  {categoryData.map((item) => (
+                    <Cell key={item.category} fill={item.color} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value, _name, payload) => [
+                    `${formatTooltipNumber(value)} notes`,
+                    payload?.payload?.label ?? "Category"
+                  ]}
+                />
+              </PieChart>
             </div>
 
             <div className="grid grid-cols-2 gap-2">

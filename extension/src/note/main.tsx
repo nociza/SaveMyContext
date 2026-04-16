@@ -78,14 +78,14 @@ function App() {
         <CardHeader>
           <div className="space-y-2">
             <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">SaveMyContext</div>
-            <CardTitle className="text-3xl leading-tight">{note ? titleFromSession(note) : "Reading note"}</CardTitle>
+            <CardTitle className="break-words text-3xl leading-tight">{note ? titleFromSession(note) : "Reading note"}</CardTitle>
             <CardDescription>
               {note
                 ? [
                     providerLabels[note.provider],
                     categoryLabels[note.category ?? route.category ?? "factual"],
                     formatLongDate(note.updated_at),
-                    note.markdown_path ?? "No markdown path"
+                    `${formatNumber(note.word_count)} words`
                   ].join(" · ")
                 : "Loading saved note, transcript, and markdown."}
             </CardDescription>
@@ -149,7 +149,7 @@ function App() {
             {loading || noteQuery.isLoading ? (
               <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">Loading note…</div>
             ) : note ? (
-              <ScrollArea className="h-[720px] pr-4">
+              <ScrollArea className="min-h-[420px] h-[min(68vh,760px)] pr-4">
                 <Tabs.Content value="overview" className="outline-none">
                   <NoteOverview note={note} />
                 </Tabs.Content>

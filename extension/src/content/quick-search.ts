@@ -1,5 +1,5 @@
 import type { BackendSearchResult, KnowledgeSearchResponse, RuntimeMessage } from "../shared/types";
-import { buildInsertionText, prioritizeKnowledgeResults, resultKindLabel } from "./quick-search-model";
+import { buildInsertionText, prioritizeKnowledgeResults, resultKindLabel, resultSourceLabel } from "./quick-search-model";
 
 type SearchRequester = <TResponse>(message: RuntimeMessage) => Promise<TResponse>;
 
@@ -436,7 +436,7 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
 
       const source = document.createElement("div");
       source.className = "source";
-      source.textContent = result.markdown_path ?? "Stored in the local SaveMyContext knowledge base";
+      source.textContent = resultSourceLabel(result);
 
       const insert = document.createElement("button");
       insert.className = "insert";

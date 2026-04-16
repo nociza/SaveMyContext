@@ -53,6 +53,25 @@ function formatDate(value?: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function formatRecentCapture(status: SyncStatus): string {
+  if (!status.lastSuccessAt) {
+    return "No captures yet";
+  }
+  const provider =
+    status.lastProvider === "chatgpt"
+      ? "ChatGPT"
+      : status.lastProvider === "gemini"
+        ? "Gemini"
+        : status.lastProvider === "grok"
+          ? "Grok"
+          : "Capture";
+  const messageCount =
+    typeof status.lastSyncedMessageCount === "number" && status.lastSyncedMessageCount > 0
+      ? `, ${status.lastSyncedMessageCount} messages`
+      : "";
+  return `${provider} · ${formatDate(status.lastSuccessAt)}${messageCount}`;
+}
+
 function formatHistorySync(settings: ExtensionSettings, status: SyncStatus): string {
   if (!settings.autoSyncHistory) {
     return "Disabled";
@@ -160,7 +179,7 @@ function render(settings: ExtensionSettings, status: SyncStatus): void {
     lastSuccess.textContent = formatDate(status.lastSuccessAt);
   }
   if (lastSession) {
-    lastSession.textContent = status.lastSessionKey ?? "n/a";
+    lastSession.textContent = formatRecentCapture(status);
   }
   if (lastError) {
     lastError.textContent = status.historySyncLastError ?? status.lastError ?? "None";

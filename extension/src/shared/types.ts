@@ -337,6 +337,37 @@ export interface BackendCategoryGraph {
   edges: BackendExplorerGraphEdge[];
 }
 
+export interface BackendTodoItem {
+  text: string;
+  done: boolean;
+}
+
+export interface BackendTodoGitStatus {
+  versioning_enabled: boolean;
+  available: boolean;
+  repository_ready: boolean;
+  branch?: string | null;
+  clean?: boolean | null;
+  last_commit_short?: string | null;
+  last_commit_message?: string | null;
+  last_commit_at?: string | null;
+}
+
+export interface BackendTodoListRead {
+  title: string;
+  content: string;
+  items: BackendTodoItem[];
+  active_count: number;
+  completed_count: number;
+  total_count: number;
+  git: BackendTodoGitStatus;
+}
+
+export interface BackendTodoListUpdate {
+  items: BackendTodoItem[];
+  summary?: string;
+}
+
 export interface BackendSessionNoteRead extends BackendSessionRead {
   raw_markdown?: string | null;
   related_entities: string[];

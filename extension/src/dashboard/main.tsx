@@ -10,7 +10,8 @@ import {
   fetchGraphEdges,
   fetchGraphNodes,
   fetchSessions,
-  fetchSystemStatus
+  fetchSystemStatus,
+  fetchTodoList
 } from "../background/backend";
 import {
   categoryDescriptions,
@@ -101,6 +102,38 @@ function formatTooltipMetric(value: unknown): string {
   return formatNumber(typeof value === "number" ? value : Number(value ?? 0));
 }
 
+function todoGitLabel(todo?: { git: { versioning_enabled: boolean; available: boolean; repository_ready: boolean; clean?: boolean | null; branch?: string | null } } | null): string {
+  if (!todo?.git.versioning_enabled) {
+    return "Versioning off";
+  }
+  if (!todo.git.available) {
+    return "Git unavailable";
+  }
+  if (!todo.git.repository_ready) {
+    return "Ready on first edit";
+  }
+  if (todo.git.clean === false) {
+    return "Pending changes";
+  }
+  return todo.git.branch ?? "Tracked";
+}
+
+function todoGitDetail(todo?: { git: { versioning_enabled: boolean; available: boolean; repository_ready: boolean; last_commit_message?: string | null; last_commit_at?: string | null } } | null): string {
+  if (!todo?.git.versioning_enabled) {
+    return "Checklist edits still update the shared markdown file.";
+  }
+  if (!todo.git.available) {
+    return "The backend cannot run git on this machine right now.";
+  }
+  if (!todo.git.repository_ready) {
+    return "The first checklist edit will initialize repository tracking.";
+  }
+  if (todo.git.last_commit_message) {
+    return `${todo.git.last_commit_message} · ${formatCompactDate(todo.git.last_commit_at)}`;
+  }
+  return "Checklist tracking is ready.";
+}
+
 function App() {
   const { settings, status, loading, error, reload } = useExtensionBootstrap();
   const [currentTab, setCurrentTab] = useState<"overview" | "knowledge" | "operations">(readInitialTab());
@@ -133,6 +166,12 @@ function App() {
   const sessionsQuery = useQuery({
     queryKey: ["dashboard-sessions", settings?.backendUrl, settings?.backendToken],
     queryFn: () => fetchSessions(settings as ExtensionSettings),
+    enabled: Boolean(settings && !status?.backendValidationError)
+  });
+
+  const todoQuery = useQuery({
+    queryKey: ["dashboard-todo", settings?.backendUrl, settings?.backendToken],
+    queryFn: () => fetchTodoList(settings as ExtensionSettings),
     enabled: Boolean(settings && !status?.backendValidationError)
   });
 
@@ -172,6 +211,7 @@ function App() {
     () => [...sessions].sort((left, right) => right.updated_at.localeCompare(left.updated_at)).slice(0, 8),
     [sessions]
   );
+  const latestSession = recentSessions[0] ?? null;
 
   async function refreshAll(): Promise<void> {
     await reload();
@@ -180,7 +220,8 @@ function App() {
       systemQuery.refetch(),
       nodesQuery.refetch(),
       edgesQuery.refetch(),
-      sessionsQuery.refetch()
+      sessionsQuery.refetch(),
+      todoQuery.refetch()
     ]);
   }
 
@@ -261,7 +302,7 @@ function App() {
             ))}
           </Tabs.List>
 
-          {summaryQuery.isFetching || systemQuery.isFetching || nodesQuery.isFetching || sessionsQuery.isFetching ? (
+          {summaryQuery.isFetching || systemQuery.isFetching || nodesQuery.isFetching || sessionsQuery.isFetching || todoQuery.isFetching ? (
             <div className="text-sm text-zinc-500">Refreshing data…</div>
           ) : null}
         </div>
@@ -545,7 +586,8 @@ function App() {
                   <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Processing</div>
                   <div className="mt-2 text-sm font-semibold text-zinc-950">{status ? formatProcessing(status) : "Loading"}</div>
                   <p className="mt-2 text-sm leading-6 text-zinc-600">
-                    Pending jobs · {formatNumber(status?.processingPendingCount)} · last session {status?.lastSessionKey ?? "n/a"}
+                    Pending jobs · {formatNumber(status?.processingPendingCount)} · latest note{" "}
+                    {latestSession ? `${titleFromSession(latestSession)} · ${formatCompactDate(latestSession.updated_at)}` : "not indexed yet"}
                   </p>
                 </div>
                 <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 sm:col-span-2">
@@ -566,21 +608,35 @@ function App() {
               <CardHeader>
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Storage</div>
-                  <CardTitle className="mt-1">Service footprint</CardTitle>
+                  <CardTitle className="mt-1">Vault readiness</CardTitle>
                 </div>
               </CardHeader>
               <CardContent className="mt-4 space-y-3 text-sm leading-6 text-zinc-600">
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Vault root</div>
-                  <div className="mt-2 break-all text-zinc-900">{systemQuery.data?.vault_root ?? "Loading"}</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Shared list</div>
+                    <div className="mt-2 text-lg font-semibold text-zinc-950">{formatNumber(todoQuery.data?.total_count)} items</div>
+                    <div className="mt-1 text-sm text-zinc-500">
+                      {formatNumber(todoQuery.data?.active_count)} active · {formatNumber(todoQuery.data?.completed_count)} completed
+                    </div>
+                  </div>
+                  <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Git tracking</div>
+                    <div className="mt-2 break-words text-lg font-semibold text-zinc-950">{todoGitLabel(todoQuery.data)}</div>
+                    <div className="mt-1 text-sm text-zinc-500">{todoGitDetail(todoQuery.data)}</div>
+                  </div>
                 </div>
                 <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Markdown root</div>
-                  <div className="mt-2 break-all text-zinc-900">{systemQuery.data?.markdown_root ?? "Loading"}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Backend access</div>
+                  <div className="mt-2 text-zinc-900">
+                    {systemQuery.data?.auth_mode === "app_token" ? "Token-protected backend" : "Local bootstrap backend"}
+                  </div>
                 </div>
                 <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Auth mode</div>
-                  <div className="mt-2 text-zinc-900">{systemQuery.data?.auth_mode ?? "Loading"}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Corpus footprint</div>
+                  <div className="mt-2 text-zinc-900">
+                    {formatNumber(summary?.total_sessions)} notes · {formatNumber(nodes.length)} graph nodes · {formatNumber(edges.length)} relationships
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -588,7 +644,7 @@ function App() {
         </Tabs.Content>
       </Tabs.Root>
 
-      {(error || summaryQuery.error || systemQuery.error || nodesQuery.error || edgesQuery.error || sessionsQuery.error) && (
+      {(error || summaryQuery.error || systemQuery.error || nodesQuery.error || edgesQuery.error || sessionsQuery.error || todoQuery.error) && (
         <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error ||
             (summaryQuery.error instanceof Error && summaryQuery.error.message) ||
@@ -596,6 +652,7 @@ function App() {
             (nodesQuery.error instanceof Error && nodesQuery.error.message) ||
             (edgesQuery.error instanceof Error && edgesQuery.error.message) ||
             (sessionsQuery.error instanceof Error && sessionsQuery.error.message) ||
+            (todoQuery.error instanceof Error && todoQuery.error.message) ||
             "Could not load dashboard data."}
         </div>
       )}

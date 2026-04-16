@@ -105,14 +105,26 @@ def parse_todo_items(markdown: str) -> list[TodoItem]:
 
 
 def render_todo_markdown(items: list[TodoItem]) -> str:
-    active = [item for item in items if not item.done]
-    done = [item for item in items if item.done]
+    normalized_items = sanitize_todo_items(items)
+    active = [item for item in normalized_items if not item.done]
+    done = [item for item in normalized_items if item.done]
     lines = [f"# {TODO_TITLE}", "", "## Active"]
     lines.extend(f"- [ ] {item.text}" for item in active)
     lines.extend(["", "## Done"])
     lines.extend(f"- [x] {item.text}" for item in done)
     lines.append("")
     return "\n".join(lines)
+
+
+def sanitize_todo_items(items: list[TodoItem]) -> list[TodoItem]:
+    normalized: dict[str, TodoItem] = {}
+    for item in items:
+        text = normalize_whitespace(item.text)
+        key = _normalize_item_key(text)
+        if not key:
+            continue
+        normalized[key] = TodoItem(text=text, done=item.done)
+    return list(normalized.values())
 
 
 def heuristic_todo_result(messages: list[ChatMessage], current_markdown: str) -> TodoResult:

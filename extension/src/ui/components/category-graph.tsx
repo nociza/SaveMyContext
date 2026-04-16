@@ -453,7 +453,7 @@ export function CategoryGraph({
     return (
       <div
         className={cn(
-          "flex h-[620px] items-center justify-center rounded-[8px] border border-dashed border-zinc-200 bg-white text-sm text-zinc-500",
+          "flex min-h-[420px] h-[min(62vh,700px)] items-center justify-center rounded-[8px] border border-dashed border-zinc-200 bg-white text-sm text-zinc-500",
           className
         )}
       >
@@ -463,7 +463,7 @@ export function CategoryGraph({
   }
 
   return (
-    <div className={cn("h-[620px] overflow-hidden rounded-[8px] border border-zinc-200 bg-white", className)}>
+    <div className={cn("min-h-[420px] h-[min(62vh,700px)] overflow-hidden rounded-[8px] border border-zinc-200 bg-white", className)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

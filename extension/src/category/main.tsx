@@ -17,7 +17,9 @@ import {
   fetchCategoryStats,
   fetchExplorerSearch,
   fetchSessionNote,
-  fetchSessions
+  fetchSessions,
+  fetchTodoList,
+  updateTodoList
 } from "../background/backend";
 import {
   categoryDescriptions,
@@ -43,6 +45,8 @@ import type {
   BackendSearchResponse,
   BackendSessionListItem,
   BackendSessionNoteRead,
+  BackendTodoItem,
+  BackendTodoListRead,
   ExtensionSettings,
   ProviderName,
   SessionCategoryName
@@ -54,6 +58,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { CategoryGraph } from "../ui/components/category-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
+import { TodoWorkspace } from "../ui/components/todo-workspace";
 import { formatNumber, formatPercent } from "../ui/lib/format";
 import { MarkdownView, NoteOverview, TranscriptView } from "../ui/lib/notes";
 import { buildCategoryGraphInsights, type GraphGroupingMode } from "../ui/lib/category-graph-insights";
@@ -184,7 +189,7 @@ function searchMatchMap(search: BackendSearchResponse | undefined): Map<string, 
   return matches;
 }
 
-function statsCards(stats: BackendCategoryStats): Array<{ label: string; value: string }> {
+function statsCards(stats: BackendCategoryStats, todo: BackendTodoListRead | null): Array<{ label: string; value: string }> {
   if (stats.category === "factual") {
     return [
       { label: "Notes", value: formatNumber(stats.total_sessions) },
@@ -214,9 +219,10 @@ function statsCards(stats: BackendCategoryStats): Array<{ label: string; value: 
 
   return [
     { label: "Notes", value: formatNumber(stats.total_sessions) },
-    { label: "Messages", value: formatNumber(stats.total_messages) },
+    { label: "Shared tasks", value: formatNumber(todo?.total_count) },
+    { label: "Active", value: formatNumber(todo?.active_count) },
+    { label: "Completed", value: formatNumber(todo?.completed_count) },
     { label: "Task updates", value: formatNumber(stats.notes_with_todo_summary) },
-    { label: "Share posts", value: formatNumber(stats.notes_with_share_post) }
   ];
 }
 
@@ -246,6 +252,23 @@ function signalGroups(stats: BackendCategoryStats): {
       { label: "Share posts", count: stats.notes_with_share_post }
     ]
   };
+}
+
+function sessionPreviewText(
+  session: BackendSessionListItem,
+  match: { snippet: string; kind: string } | undefined,
+  category: SessionCategoryName
+): string {
+  if (match?.snippet) {
+    return match.snippet;
+  }
+  if (session.share_post) {
+    return session.share_post;
+  }
+  if (category === "todo") {
+    return "Open this saved update to see how the shared checklist changed.";
+  }
+  return "Open to inspect this note.";
 }
 
 function formatTooltipMetric(value: unknown): string {
@@ -293,13 +316,14 @@ function buildActivityBuckets(sessions: BackendSessionListItem[]): Array<{ bucke
 function noteListMeta(route: RouteState, total: number, visible: number, focus: GraphFocus | null): string {
   const providerText = route.provider ? ` in ${providerLabels[route.provider]}` : "";
   const bucketText = route.bucket ? ` · ${formatBucketLabel(route.bucket)}` : "";
+  const collectionLabel = route.category === "todo" ? "update notes" : "notes";
   if (focus) {
-    return `${formatNumber(visible)} notes linked to ${focus.label}${bucketText}`;
+    return `${formatNumber(visible)} ${collectionLabel} linked to ${focus.label}${bucketText}`;
   }
   if (route.q) {
-    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} notes${providerText}${bucketText}`;
+    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} ${collectionLabel}${providerText}${bucketText}`;
   }
-  return `${formatNumber(total)} notes in view${providerText}${bucketText}`;
+  return `${formatNumber(total)} ${collectionLabel} in view${providerText}${bucketText}`;
 }
 
 function App() {
@@ -309,6 +333,9 @@ function App() {
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
   const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("provider");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const [todoDraft, setTodoDraft] = useState("");
+  const [todoActionError, setTodoActionError] = useState<string | null>(null);
+  const [todoSavingSummary, setTodoSavingSummary] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(route.q);
 
   useEffect(() => {
@@ -460,6 +487,12 @@ function App() {
     enabled: Boolean(settings && !status?.backendValidationError && selectedSessionId)
   });
 
+  const todoQuery = useQuery({
+    queryKey: ["category-todo", settings?.backendUrl, settings?.backendToken],
+    queryFn: () => fetchTodoList(settings as ExtensionSettings),
+    enabled: Boolean(settings && !status?.backendValidationError && route.category === "todo")
+  });
+
   const stats =
     (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
       ? createEmptyStats(route.category)
@@ -468,6 +501,7 @@ function App() {
     (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
       ? createEmptyGraph(route.category)
       : graphQuery.data ?? createEmptyGraph(route.category);
+  const todo = route.category === "todo" ? todoQuery.data ?? null : null;
 
   const signals = signalGroups(stats);
   const providerPie = stats.provider_counts.map((item) => ({
@@ -550,6 +584,73 @@ function App() {
     }
   ];
 
+  async function persistTodoItems(nextItems: BackendTodoItem[], summary: string): Promise<void> {
+    if (!settings || route.category !== "todo") {
+      return;
+    }
+
+    setTodoActionError(null);
+    setTodoSavingSummary(summary);
+    try {
+      await updateTodoList(settings as ExtensionSettings, {
+        items: nextItems,
+        summary
+      });
+      setTodoDraft("");
+      await todoQuery.refetch();
+    } catch (todoError) {
+      setTodoActionError(todoError instanceof Error ? todoError.message : "Could not update the shared checklist.");
+    } finally {
+      setTodoSavingSummary(null);
+    }
+  }
+
+  async function handleTodoAdd(): Promise<void> {
+    const text = todoDraft.trim();
+    if (!text || !todo) {
+      return;
+    }
+
+    const nextItems = [...todo.items.filter((item) => item.text.toLowerCase() !== text.toLowerCase()), { text, done: false }];
+    await persistTodoItems(nextItems, `Add task: ${text}`);
+  }
+
+  async function handleTodoToggle(item: BackendTodoItem, done: boolean): Promise<void> {
+    if (!todo) {
+      return;
+    }
+
+    const nextItems = todo.items.map((current) => (current.text === item.text ? { ...current, done } : current));
+    await persistTodoItems(nextItems, done ? `Check off: ${item.text}` : `Reopen: ${item.text}`);
+  }
+
+  const headerMetrics =
+    route.category === "todo"
+      ? [
+          { label: "Shared tasks", value: formatNumber(todo?.total_count), icon: Database },
+          { label: "Active", value: formatNumber(todo?.active_count), icon: Workflow },
+          { label: "Completed", value: formatNumber(todo?.completed_count), icon: Activity },
+          { label: "Last updated", value: formatCompactDate(stats.latest_updated_at, "No data"), icon: Activity }
+        ]
+      : [
+          { label: "Notes in scope", value: formatNumber(visibleSessions.length), icon: Database },
+          {
+            label: route.category === "factual" ? "Facts" : "Messages",
+            value: route.category === "factual" ? formatNumber(stats.total_triplets) : formatNumber(stats.total_messages),
+            icon: route.category === "factual" ? BrainCircuit : Activity
+          },
+          {
+            label: "Graph coverage",
+            value: `${formatPercent(graphInsights.sessionCoverage * 100)}%`,
+            icon: Workflow
+          },
+          {
+            label: "Last updated",
+            value: formatCompactDate(stats.latest_updated_at, "No data"),
+            icon: Activity
+          }
+        ];
+
   return (
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
       <Card className="p-5">
@@ -567,28 +668,11 @@ function App() {
 
         <CardContent className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_1fr]">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              { label: "Notes in scope", value: formatNumber(visibleSessions.length), icon: Database },
-              {
-                label: route.category === "factual" ? "Facts" : "Messages",
-                value: route.category === "factual" ? formatNumber(stats.total_triplets) : formatNumber(stats.total_messages),
-                icon: route.category === "factual" ? BrainCircuit : Activity
-              },
-              {
-                label: "Graph coverage",
-                value: `${formatPercent(graphInsights.sessionCoverage * 100)}%`,
-                icon: Workflow
-              },
-              {
-                label: "Last updated",
-                value: formatCompactDate(stats.latest_updated_at, "No data"),
-                icon: Activity
-              }
-            ].map((metric) => (
+            {headerMetrics.map((metric) => (
               <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
                 <metric.icon className="h-4 w-4 text-zinc-400" />
                 <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{metric.label}</div>
-                <div className="mt-2 text-2xl font-semibold leading-none text-zinc-950">{metric.value}</div>
+                <div className="mt-2 break-words text-2xl font-semibold leading-none text-zinc-950">{metric.value}</div>
               </div>
             ))}
           </div>
@@ -750,7 +834,7 @@ function App() {
               </div>
             </CardHeader>
             <CardContent className="mt-4 grid grid-cols-2 gap-2">
-              {statsCards(stats).map((metric) => (
+              {statsCards(stats, todo).map((metric) => (
                 <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-3">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
                   <div className="mt-2 text-2xl font-semibold text-zinc-950">{metric.value}</div>
@@ -803,16 +887,35 @@ function App() {
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Workspace</div>
                 <CardTitle className="mt-1 text-lg">
-                  {route.category === "factual" ? "Knowledge graph workspace" : "Context workspace"}
+                  {route.category === "todo"
+                    ? "Shared list workspace"
+                    : route.category === "factual"
+                      ? "Knowledge graph workspace"
+                      : "Context workspace"}
                 </CardTitle>
                 <CardDescription>
-                  Atlas for structure, storylines for guided exploration, and graph ops for maintenance and retrieval quality.
+                  {route.category === "todo"
+                    ? "Check tasks off, review git-backed list history, and keep note evidence close to the shared checklist."
+                    : "Atlas for structure, storylines for guided exploration, and graph ops for maintenance and retrieval quality."}
                 </CardDescription>
               </div>
             </CardHeader>
 
             <CardContent className="mt-5">
-              <Tabs.Root value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
+              {route.category === "todo" ? (
+                <TodoWorkspace
+                  todo={todo}
+                  loading={todoQuery.isLoading}
+                  error={todoActionError || (todoQuery.error instanceof Error ? todoQuery.error.message : null)}
+                  savingSummary={todoSavingSummary}
+                  taskUpdateCount={stats.notes_with_todo_summary}
+                  draft={todoDraft}
+                  onDraftChange={setTodoDraft}
+                  onAddTask={() => void handleTodoAdd()}
+                  onToggleTask={(item, done) => void handleTodoToggle(item, done)}
+                />
+              ) : (
+                <Tabs.Root value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
                 <Tabs.List className="grid gap-3 lg:grid-cols-3">
                   {workspaceCards.map((card) => (
                     <Tabs.Trigger
@@ -881,6 +984,7 @@ function App() {
                         groupingMode={groupingMode}
                         collapsedGroups={collapsedGroups}
                         focusSessionIds={graphFocus?.sessionIds}
+                        className="min-h-[420px] h-[min(62vh,700px)]"
                         onFocus={handleFocus}
                       />
                     </div>
@@ -922,7 +1026,7 @@ function App() {
                           <Badge tone="neutral">{formatNumber(graphInsights.clusters.length)}</Badge>
                         </div>
 
-                        <ScrollArea className="h-[448px] pr-4">
+                        <ScrollArea className="h-[min(46vh,448px)] pr-4">
                           <div className="space-y-3">
                             {graphInsights.clusters.map((cluster) => {
                               const collapsed = collapsedGroups.includes(cluster.id);
@@ -1207,7 +1311,8 @@ function App() {
                     </div>
                   </div>
                 </Tabs.Content>
-              </Tabs.Root>
+                </Tabs.Root>
+              )}
             </CardContent>
           </Card>
 
@@ -1216,12 +1321,12 @@ function App() {
               <CardHeader>
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Results</div>
-                  <CardTitle className="mt-1 text-lg">Notes in scope</CardTitle>
+                  <CardTitle className="mt-1 text-lg">{route.category === "todo" ? "Change log notes" : "Notes in scope"}</CardTitle>
                 </div>
                 <div className="text-sm text-zinc-500">{noteListMeta(route, allSessions.length, noteListItems.length, graphFocus)}</div>
               </CardHeader>
               <CardContent className="mt-4">
-                <ScrollArea className="h-[560px] pr-4">
+                <ScrollArea className="h-[min(56vh,560px)] pr-4">
                   <div className="space-y-2">
                     {noteListItems.map((session) => {
                       const match = matches.get(session.id);
@@ -1242,8 +1347,8 @@ function App() {
                           <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-zinc-500"}>
                             {formatCompactDate(session.updated_at)}
                           </div>
-                          <p className={isActive ? "mt-2 line-clamp-3 text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 text-sm leading-6 text-zinc-600"}>
-                            {match?.snippet || session.share_post || session.markdown_path || "Open to inspect this note."}
+                          <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-zinc-600"}>
+                            {sessionPreviewText(session, match, route.category)}
                           </p>
                         </button>
                       );
@@ -1316,7 +1421,7 @@ function App() {
                       ))}
                     </Tabs.List>
 
-                    <ScrollArea className="h-[560px] pr-4">
+                    <ScrollArea className="h-[min(56vh,560px)] pr-4">
                       <Tabs.Content value="overview" className="outline-none">
                         <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
                       </Tabs.Content>
@@ -1339,7 +1444,7 @@ function App() {
         </div>
       </div>
 
-      {error || sessionsQuery.error || searchQuery.error || statsQuery.error || graphQuery.error || noteQuery.error || status?.backendValidationError ? (
+      {error || sessionsQuery.error || searchQuery.error || statsQuery.error || graphQuery.error || noteQuery.error || todoQuery.error || status?.backendValidationError ? (
         <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {status?.backendValidationError ||
             error ||
@@ -1348,6 +1453,7 @@ function App() {
             (statsQuery.error instanceof Error && statsQuery.error.message) ||
             (graphQuery.error instanceof Error && graphQuery.error.message) ||
             (noteQuery.error instanceof Error && noteQuery.error.message) ||
+            (todoQuery.error instanceof Error && todoQuery.error.message) ||
             "Could not load the category explorer."}
         </div>
       ) : null}

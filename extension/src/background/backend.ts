@@ -14,6 +14,8 @@ import type {
   BackendSessionRead,
   BackendStorageSettings,
   BackendSystemStatus,
+  BackendTodoListRead,
+  BackendTodoListUpdate,
   ExtensionSettings,
   ProcessingCompleteResponse,
   ProcessingTaskResponse,
@@ -214,6 +216,30 @@ export async function fetchSystemStatus(
   capabilities?: BackendCapabilities
 ): Promise<BackendSystemStatus> {
   return fetchBackendJson<BackendSystemStatus>(settings, "/system/status", capabilities);
+}
+
+export async function fetchTodoList(
+  settings: ExtensionSettings,
+  capabilities?: BackendCapabilities
+): Promise<BackendTodoListRead> {
+  return fetchBackendJson<BackendTodoListRead>(settings, "/todo", capabilities);
+}
+
+export async function updateTodoList(
+  settings: ExtensionSettings,
+  payload: BackendTodoListUpdate,
+  capabilities?: BackendCapabilities
+): Promise<BackendTodoListRead> {
+  const response = await fetch(backendApiUrl(settings, "/todo", capabilities), {
+    method: "PUT",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Shared to-do update failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return (await response.json()) as BackendTodoListRead;
 }
 
 export async function fetchGraphNodes(

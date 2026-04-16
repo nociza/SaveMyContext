@@ -45,7 +45,7 @@ function NoteSection({
   return (
     <section className="rounded-[8px] border border-zinc-200 bg-zinc-50/70 p-4">
       <h3 className="mb-3 text-sm font-semibold text-zinc-900">{title}</h3>
-      <div className="space-y-3 text-sm leading-6 text-zinc-700">{children}</div>
+      <div className="space-y-3 break-words text-sm leading-6 text-zinc-700">{children}</div>
     </section>
   );
 }
@@ -58,9 +58,44 @@ function NoteList({ items }: { items: string[] }) {
   return (
     <ul className="space-y-2 pl-5">
       {items.map((item) => (
-        <li key={item}>{item}</li>
+        <li key={item} className="break-words">
+          {item}
+        </li>
       ))}
     </ul>
+  );
+}
+
+function TripletList({
+  items
+}: {
+  items: BackendSessionNoteRead["triplets"];
+}) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.map((triplet) => (
+        <div key={triplet.id} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(120px,auto)_minmax(0,1fr)]">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Subject</div>
+              <div className="mt-1 break-words text-sm text-zinc-900">{triplet.subject}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Relation</div>
+              <div className="mt-1 break-words text-sm text-zinc-900">{triplet.predicate}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Object</div>
+              <div className="mt-1 break-words text-sm text-zinc-900">{triplet.object}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -77,12 +112,14 @@ export function NoteOverview({
 
   return (
     <div className="space-y-4">
-      <NoteSection title="Summary">
-        <p>
-          {titleFromSession(note)} · {providerLabels[note.provider]} · {categoryLabels[note.category ?? "factual"]} ·{" "}
-          {formatCompactDate(note.updated_at)}
-        </p>
-      </NoteSection>
+      {compact ? (
+        <NoteSection title="Session">
+          <p>
+            {titleFromSession(note)} · {providerLabels[note.provider]} · {categoryLabels[note.category ?? "factual"]} ·{" "}
+            {formatCompactDate(note.updated_at)}
+          </p>
+        </NoteSection>
+      ) : null}
 
       {note.category === "factual" ? (
         <>
@@ -93,11 +130,7 @@ export function NoteOverview({
           ) : null}
           {note.triplets.length ? (
             <NoteSection title="Fact Triplets">
-              <NoteList
-                items={(compact ? note.triplets.slice(0, 5) : note.triplets).map(
-                  (triplet) => `${triplet.subject} | ${triplet.predicate} | ${triplet.object}`
-                )}
-              />
+              <TripletList items={compact ? note.triplets.slice(0, 5) : note.triplets} />
             </NoteSection>
           ) : null}
           {note.related_entities.length ? (
@@ -187,7 +220,7 @@ export function NoteOverview({
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
                   {message.role} · {formatCompactDate(message.occurred_at ?? message.created_at)}
                 </div>
-                <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700">{message.content}</p>
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">{message.content}</p>
               </article>
             ))}
           </div>
@@ -213,7 +246,7 @@ export function TranscriptView({ note }: { note: BackendSessionNoteRead }) {
             <span>{message.role}</span>
             <span>{formatCompactDate(message.occurred_at ?? message.created_at)}</span>
           </div>
-          <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-700">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">{message.content}</p>
         </article>
       ))}
     </div>

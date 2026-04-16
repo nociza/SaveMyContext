@@ -5,6 +5,8 @@ SaveMyContext captures your ChatGPT, Gemini, and Grok conversations, syncs them 
 ## What You Get
 
 - Chrome extension for automatic chat capture and history backfill
+- page and selection capture from regular web pages
+- extension popup, dashboard, and quick search for working with saved context
 - self-hosted backend with SQLite storage
 - Markdown vault with session notes, a shared `To-Do List.md`, entity notes, and index notes
 - simple agent-friendly API for ingest, search, graph, and system status
@@ -143,11 +145,16 @@ SaveMyContext/
   Ideas/
   Todo/
   Sessions/
+  Captures/
+  Sources/
   Graph/
     Entities/
     Indexes/
   Dashboards/
     To-Do List.md
+  README.md
+  AGENTS.md
+  manifest.json
 ```
 
 ## Useful Commands
@@ -195,7 +202,11 @@ pnpm test:e2e
 
 ## Docs
 
-- [Architecture](docs/architecture.md)
-- [Agentic System Design](docs/agentic-system-design.md)
-- [CLI Service Design](docs/cli-service-design.md)
-- [Product Platform Design](docs/product-platform-design.md)
+- [Overview](docs/index.md)
+- [Getting Started](docs/getting-started.md)
+- [Using SaveMyContext](docs/using-save-my-context.md)
+- [Dashboard and Search](docs/dashboard-and-search.md)
+- [Vault and Storage](docs/vault-and-storage.md)
+- [Security and Access](docs/security-and-access.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Contributing](docs/contributing.md)

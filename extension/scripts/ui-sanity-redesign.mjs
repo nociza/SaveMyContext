@@ -83,6 +83,34 @@ const sessions = [
     updated_at: "2026-04-16T08:05:00Z",
     last_captured_at: "2026-04-16T08:05:00Z",
     last_processed_at: "2026-04-16T08:09:00Z"
+  },
+  {
+    id: "t1",
+    provider: "chatgpt",
+    external_session_id: "todo-001",
+    title: "Sprint checklist cleanup",
+    category: "todo",
+    custom_tags: ["shared-list"],
+    markdown_path: "todo/sprint-checklist-cleanup.md",
+    share_post: "Closed two stale tasks and reopened release notes for final review.",
+    todo_summary: "Checked off 'Archive stale branches' and reopened 'Review release notes'.",
+    updated_at: "2026-04-16T10:15:00Z",
+    last_captured_at: "2026-04-16T10:15:00Z",
+    last_processed_at: "2026-04-16T10:18:00Z"
+  },
+  {
+    id: "t2",
+    provider: "gemini",
+    external_session_id: "todo-002",
+    title: "Product launch board",
+    category: "todo",
+    custom_tags: ["launch"],
+    markdown_path: "todo/product-launch-board.md",
+    share_post: "Added the rollout checklist and marked launch copy review complete.",
+    todo_summary: "Added 'Dry run launch email' and marked 'Review launch copy' done.",
+    updated_at: "2026-04-16T12:40:00Z",
+    last_captured_at: "2026-04-16T12:40:00Z",
+    last_processed_at: "2026-04-16T12:42:00Z"
   }
 ];
 
@@ -94,7 +122,7 @@ const notes = Object.fromEntries(
       source_url: `https://example.com/${session.id}`,
       classification_reason: "Mocked for browser sanity check",
       journal_entry: null,
-      todo_summary: null,
+      todo_summary: session.todo_summary ?? null,
       idea_summary: null,
       created_at: session.updated_at,
       messages: [
@@ -115,25 +143,28 @@ const notes = Object.fromEntries(
           created_at: session.updated_at
         }
       ],
-      triplets: [
-        {
-          id: `${session.id}-t1`,
-          subject: session.title.split(" ")[0],
-          predicate: "relates_to",
-          object: "Context",
-          created_at: session.updated_at
-        }
-      ],
+      triplets:
+        session.category === "factual"
+          ? [
+              {
+                id: `${session.id}-t1`,
+                subject: session.title.split(" ")[0],
+                predicate: "relates_to",
+                object: "Context",
+                created_at: session.updated_at
+              }
+            ]
+          : [],
       raw_markdown: `# ${session.title}
 
-${session.share_post}
+${session.todo_summary ?? session.share_post}
 
 ## Why it matters
 
 - Persistent context needs shape
 - Retrieval should be inspectable
 - Notes need evidence and provenance`,
-      related_entities: ["Context", "Retrieval", "Memory"],
+      related_entities: session.category === "factual" ? ["Context", "Retrieval", "Memory"] : [],
       word_count: 180 + index * 14
     }
   ])
@@ -220,6 +251,40 @@ const fullGraph = {
   ]
 };
 
+const sharedTodo = {
+  title: "To-Do List",
+  content: `# To-Do List
+
+## Active
+- [ ] Dry run launch email
+- [ ] Review release notes
+- [ ] Ship popup polish
+
+## Done
+- [x] Archive stale branches
+- [x] Review launch copy
+`,
+  items: [
+    { text: "Dry run launch email", done: false },
+    { text: "Review release notes", done: false },
+    { text: "Ship popup polish", done: false },
+    { text: "Archive stale branches", done: true },
+    { text: "Review launch copy", done: true }
+  ],
+  active_count: 3,
+  completed_count: 2,
+  total_count: 5,
+  git: {
+    versioning_enabled: true,
+    available: true,
+    repository_ready: true,
+    branch: "main",
+    clean: true,
+    last_commit_message: "Check off checklist items",
+    last_commit_at: "2026-04-16T13:05:00Z"
+  }
+};
+
 function filteredSessions(url) {
   const provider = url.searchParams.get("provider");
   const category = url.searchParams.get("category");
@@ -229,6 +294,15 @@ function filteredSessions(url) {
 }
 
 function filteredGraph(url) {
+  if ((url.searchParams.get("category") ?? "factual") !== "factual") {
+    return {
+      category: url.searchParams.get("category") ?? "factual",
+      node_count: 0,
+      edge_count: 0,
+      nodes: [],
+      edges: []
+    };
+  }
   const scopedIds = new Set(url.searchParams.getAll("session_id"));
   const hasScope = scopedIds.size > 0;
   const allowedSessionIds = new Set(filteredSessions(url).map((session) => session.id));
@@ -241,7 +315,7 @@ function filteredGraph(url) {
   );
 
   return {
-    category: "factual",
+    category: url.searchParams.get("category") ?? "factual",
     node_count: nodes.length,
     edge_count: edges.length,
     nodes,
@@ -251,6 +325,7 @@ function filteredGraph(url) {
 
 function buildStats(url) {
   const availableSessions = filteredSessions(url);
+  const category = url.searchParams.get("category") ?? "factual";
   const scopedIds = new Set(url.searchParams.getAll("session_id"));
   const visibleSessions = scopedIds.size
     ? availableSessions.filter((session) => scopedIds.has(session.id))
@@ -277,28 +352,36 @@ function buildStats(url) {
   }
 
   return {
-    category: "factual",
+    category,
     total_sessions: visibleSessions.length,
     total_messages: visibleSessions.length * 24,
-    total_triplets: graph.edges.reduce((sum, edge) => sum + edge.weight, 0),
+    total_triplets: category === "factual" ? graph.edges.reduce((sum, edge) => sum + edge.weight, 0) : 0,
     latest_updated_at: visibleSessions[0]?.updated_at ?? null,
     avg_messages_per_session: visibleSessions.length ? 24 : 0,
     avg_triplets_per_session: visibleSessions.length
-      ? graph.edges.reduce((sum, edge) => sum + edge.weight, 0) / visibleSessions.length
+      ? (category === "factual" ? graph.edges.reduce((sum, edge) => sum + edge.weight, 0) : 0) / visibleSessions.length
       : 0,
     notes_with_share_post: visibleSessions.filter((session) => session.share_post).length,
     notes_with_idea_summary: 0,
     notes_with_journal_entry: 0,
-    notes_with_todo_summary: 0,
+    notes_with_todo_summary: visibleSessions.filter((session) => session.category === "todo" && session.todo_summary).length,
     provider_counts: providerCounts,
     activity: Array.from(activityMap.entries())
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([bucket, count]) => ({ bucket, count })),
-    top_tags: [],
-    top_entities: entityCounts,
-    top_predicates: Array.from(predicateCounts.entries())
-      .map(([label, count]) => ({ label, count }))
-      .sort((left, right) => right.count - left.count)
+    top_tags: Array.from(
+      visibleSessions
+        .flatMap((session) => session.custom_tags)
+        .reduce((counts, tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1), new Map())
+        .entries()
+    ).map(([label, count]) => ({ label, count })),
+    top_entities: category === "factual" ? entityCounts : [],
+    top_predicates:
+      category === "factual"
+        ? Array.from(predicateCounts.entries())
+            .map(([label, count]) => ({ label, count }))
+            .sort((left, right) => right.count - left.count)
+        : []
   };
 }
 
@@ -317,6 +400,61 @@ function buildSearch(url) {
     }));
 
   return { query, count: results.length, results };
+}
+
+function buildDashboardSummary() {
+  const categories = ["factual", "ideas", "journal", "todo"].map((category) => ({
+    category,
+    count: sessions.filter((session) => session.category === category).length
+  }));
+  return {
+    total_sessions: sessions.length,
+    total_messages: sessions.length * 24,
+    total_triplets: fullGraph.edges.reduce((sum, edge) => sum + edge.weight, 0),
+    total_sync_events: sessions.length,
+    active_tokens: 0,
+    latest_sync_at: sessions.map((session) => session.updated_at).sort().at(-1),
+    categories
+  };
+}
+
+function buildSystemStatus() {
+  return {
+    product: "savemycontext",
+    version: "0.2.0",
+    server_time: new Date().toISOString(),
+    markdown_root: "/tmp/mock-markdown",
+    vault_root: "/tmp/mock-vault/SaveMyContext",
+    todo_list_path: "/tmp/mock-vault/SaveMyContext/Dashboards/To-Do List.md",
+    public_url: null,
+    auth_mode: "bootstrap_local",
+    git_versioning_enabled: true,
+    git_available: true,
+    total_sessions: sessions.length,
+    total_messages: sessions.length * 24,
+    total_triplets: fullGraph.edges.reduce((sum, edge) => sum + edge.weight, 0)
+  };
+}
+
+function buildGraphNodes() {
+  return fullGraph.nodes.map((node) => ({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    degree: node.size,
+    note_path: null
+  }));
+}
+
+function buildGraphEdges() {
+  return fullGraph.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    predicate: edge.label,
+    support_count: edge.weight,
+    session_ids: edge.session_ids
+  }));
 }
 
 function attachDebug(page, label) {
@@ -378,11 +516,21 @@ async function main() {
         };
       } else if (url.pathname.endsWith("/processing/status")) {
         body = { enabled: true, mode: "immediate", worker_model: "mock-worker", pending_count: 0 };
+      } else if (url.pathname.endsWith("/dashboard/summary")) {
+        body = buildDashboardSummary();
+      } else if (url.pathname.endsWith("/system/status")) {
+        body = buildSystemStatus();
+      } else if (url.pathname.endsWith("/graph/nodes")) {
+        body = buildGraphNodes();
+      } else if (url.pathname.endsWith("/graph/edges")) {
+        body = buildGraphEdges();
+      } else if (url.pathname.endsWith("/todo")) {
+        body = sharedTodo;
       } else if (url.pathname.endsWith("/sessions")) {
         body = filteredSessions(url);
-      } else if (url.pathname.includes("/categories/factual/stats")) {
+      } else if (url.pathname.includes("/categories/") && url.pathname.endsWith("/stats")) {
         body = buildStats(url);
-      } else if (url.pathname.includes("/categories/factual/graph")) {
+      } else if (url.pathname.includes("/categories/") && url.pathname.endsWith("/graph")) {
         body = filteredGraph(url);
       } else if (url.pathname.endsWith("/search")) {
         body = buildSearch(url);
@@ -420,6 +568,24 @@ async function main() {
     await optionsPage.locator("#settings-form").evaluate((form) => form.requestSubmit());
     await optionsPage.locator("#save-status").waitFor({ state: "visible" });
     console.log("options-saved");
+
+    const popupPage = await context.newPage();
+    attachDebug(popupPage, "popup");
+    console.log("opening-popup");
+    await popupPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
+    await popupPage.locator("text=Context Workspace").waitFor();
+    await popupPage.screenshot({ path: "/tmp/smc-popup-redesign.png", fullPage: true });
+    console.log("popup-done");
+
+    const dashboardPage = await context.newPage();
+    attachDebug(dashboardPage, "dashboard");
+    console.log("opening-dashboard");
+    await dashboardPage.goto(`chrome-extension://${extensionId}/dashboard.html?view=processing`, {
+      waitUntil: "domcontentloaded"
+    });
+    await dashboardPage.locator("text=Vault readiness").waitFor();
+    await dashboardPage.screenshot({ path: "/tmp/smc-dashboard-ops-redesign.png", fullPage: true });
+    console.log("dashboard-done");
 
     const atlasPage = await context.newPage();
     attachDebug(atlasPage, "atlas");
@@ -459,11 +625,24 @@ async function main() {
     await opsPage.screenshot({ path: "/tmp/smc-category-ops-redesign.png", fullPage: true });
     console.log("ops-done");
 
+    const todoPage = await context.newPage();
+    attachDebug(todoPage, "todo");
+    console.log("opening-todo");
+    await todoPage.goto(`chrome-extension://${extensionId}/category.html?category=todo`, {
+      waitUntil: "domcontentloaded"
+    });
+    await todoPage.locator("text=Shared list workspace").waitFor();
+    await todoPage.screenshot({ path: "/tmp/smc-category-todo-redesign.png", fullPage: true });
+    console.log("todo-done");
+
     console.log(
       JSON.stringify({
+        popup: "/tmp/smc-popup-redesign.png",
+        dashboard: "/tmp/smc-dashboard-ops-redesign.png",
         atlas: "/tmp/smc-category-atlas-redesign.png",
         story: "/tmp/smc-category-story-redesign.png",
-        ops: "/tmp/smc-category-ops-redesign.png"
+        ops: "/tmp/smc-category-ops-redesign.png",
+        todo: "/tmp/smc-category-todo-redesign.png"
       })
     );
   } finally {

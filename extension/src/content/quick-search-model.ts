@@ -77,3 +77,28 @@ export function resultKindLabel(result: BackendSearchResult): string {
   }
   return "Session";
 }
+
+export function resultSourceLabel(result: BackendSearchResult): string {
+  if (result.kind === "entity") {
+    return "Knowledge graph entity";
+  }
+  if (result.kind === "source_capture") {
+    return "Saved source capture";
+  }
+  if (result.kind === "todo_list") {
+    return "Shared checklist";
+  }
+  if (result.category === "factual") {
+    return "Saved factual note";
+  }
+  if (result.category === "ideas") {
+    return "Saved idea note";
+  }
+  if (result.category === "journal") {
+    return "Saved journal note";
+  }
+  if (result.category === "todo") {
+    return "Saved checklist update";
+  }
+  return "Saved session note";
+}
