@@ -4,6 +4,29 @@
 
 @theme {
   --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino", "Hoefler Text", "Georgia", serif;
+
+  --color-paper: #f7f4ec;
+  --color-paper-raised: #fbf9f3;
+  --color-paper-sunken: #efeadf;
+  --color-ink: #0f1b2c;
+  --color-ink-soft: #4e5c6e;
+  --color-ink-subtle: #8693a2;
+  --color-line: #ebe4d1;
+  --color-line-strong: #d7cfb9;
+
+  --color-factual: #0f8a84;
+  --color-ideas: #d18425;
+  --color-journal: #4968ab;
+  --color-todo: #c15a40;
+
+  --color-accent: #0f8a84;
+  --color-accent-strong: #076b66;
+  --color-accent-soft: #e2f1ef;
+}
+
+:root {
+  color-scheme: light;
 }
 
 @layer base {
@@ -20,29 +43,33 @@
 
   html[data-page="popup"],
   body[data-page="popup"] {
-    width: 640px;
+    width: 420px;
     height: 560px;
-    min-width: 640px;
+    min-width: 420px;
     min-height: 560px;
-    max-width: 640px;
+    max-width: 420px;
     max-height: 560px;
     overflow: hidden;
   }
 
   #root[data-page="popup"] {
-    width: 640px;
+    width: 420px;
     height: 560px;
-    min-width: 640px;
+    min-width: 420px;
     min-height: 560px;
-    max-width: 640px;
+    max-width: 420px;
     max-height: 560px;
     overflow: hidden;
   }
 
   body {
-    background: #f5f6f5;
-    color: #111827;
+    background:
+      radial-gradient(circle at 12% -4%, rgba(15, 138, 132, 0.08), transparent 42%),
+      radial-gradient(circle at 92% 4%, rgba(209, 132, 37, 0.07), transparent 45%),
+      var(--color-paper);
+    color: var(--color-ink);
     font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -58,30 +85,164 @@
   textarea {
     font: inherit;
   }
+
+  ::selection {
+    background: rgba(15, 138, 132, 0.2);
+    color: var(--color-ink);
+  }
 }
 
 @layer components {
+  .surface,
   .panel-surface {
-    @apply rounded-lg border border-zinc-200 bg-white shadow-[0_1px_1px_rgba(17,24,39,0.03)];
+    border-radius: 16px;
+    border: 1px solid var(--color-line);
+    background: var(--color-paper-raised);
+    box-shadow:
+      0 1px 1px rgba(15, 27, 44, 0.02),
+      0 12px 32px -12px rgba(15, 27, 44, 0.08);
+  }
+
+  .surface-sunken {
+    border-radius: 14px;
+    background: var(--color-paper-sunken);
+  }
+
+  .surface-flat {
+    border-radius: 14px;
+    border: 1px solid var(--color-line);
+    background: var(--color-paper-raised);
+  }
+
+  .display-serif {
+    font-family: var(--font-display);
+    font-feature-settings: "lnum", "kern", "liga";
+    letter-spacing: -0.01em;
+  }
+
+  .eyebrow {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-ink-subtle);
+  }
+
+  .hairline {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--color-line-strong) 16%, var(--color-line-strong) 84%, transparent);
+  }
+
+  .stamp {
+    position: relative;
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--color-paper-raised);
+    border: 1px solid var(--color-line);
+    transition: transform 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+  }
+
+  .stamp:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-line-strong);
+    box-shadow: 0 6px 18px -10px rgba(15, 27, 44, 0.15);
+  }
+
+  .stamp::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--stamp-color, var(--color-accent));
+  }
+
+  .input-paper {
+    width: 100%;
+    height: 44px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid var(--color-line);
+    background: var(--color-paper-raised);
+    color: var(--color-ink);
+    outline: none;
+    transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+  }
+
+  .input-paper:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(15, 138, 132, 0.15);
+  }
+
+  .input-paper::placeholder {
+    color: var(--color-ink-subtle);
   }
 
   .note-prose {
-    @apply prose prose-zinc max-w-none prose-headings:mb-3 prose-headings:font-semibold prose-p:text-zinc-700 prose-li:text-zinc-700 prose-pre:rounded-lg prose-pre:border prose-pre:border-zinc-200 prose-pre:bg-zinc-950 prose-pre:text-zinc-50 prose-code:rounded prose-code:bg-zinc-100 prose-code:px-1 prose-code:py-0.5 prose-code:text-zinc-900 prose-code:before:content-[''] prose-code:after:content-[''];
+    @apply prose max-w-none;
+    --tw-prose-body: var(--color-ink);
+    --tw-prose-headings: var(--color-ink);
+    --tw-prose-links: var(--color-accent-strong);
+    --tw-prose-bold: var(--color-ink);
+    --tw-prose-bullets: var(--color-ink-subtle);
+    --tw-prose-quotes: var(--color-ink-soft);
+    --tw-prose-code: var(--color-ink);
+    --tw-prose-pre-bg: #111b2a;
+    --tw-prose-pre-code: #f1f0ea;
+    --tw-prose-borders: var(--color-line);
+  }
+
+  .note-prose :is(h1, h2, h3) {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  .note-prose pre {
+    @apply rounded-xl border border-ink/0 bg-[#111b2a] text-[#f1f0ea];
+  }
+
+  .note-prose code::before,
+  .note-prose code::after {
+    content: "";
+  }
+
+  .note-prose code {
+    @apply rounded bg-[#efeadf] px-1 py-0.5 text-[var(--color-ink)];
   }
 
   .react-flow__controls {
-    @apply overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm;
+    @apply overflow-hidden rounded-xl border;
+    border-color: var(--color-line);
+    background: var(--color-paper-raised);
   }
 
   .react-flow__controls-button {
-    @apply !h-9 !w-9 !border-zinc-200 !bg-white !text-zinc-700 hover:!bg-zinc-50;
+    @apply !h-9 !w-9;
+    background: var(--color-paper-raised) !important;
+    border-color: var(--color-line) !important;
+    color: var(--color-ink) !important;
+  }
+
+  .react-flow__controls-button:hover {
+    background: var(--color-paper-sunken) !important;
   }
 
   .react-flow__minimap {
-    @apply overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm;
+    @apply overflow-hidden rounded-xl border;
+    border-color: var(--color-line);
+    background: var(--color-paper-raised);
   }
 
   .react-flow__panel {
-    @apply rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-600 shadow-sm;
+    @apply rounded-xl border px-3 py-2 text-xs;
+    border-color: var(--color-line);
+    background: var(--color-paper-raised);
+    color: var(--color-ink-soft);
+  }
+
+  .scroll-fade-bottom {
+    mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
   }
 }

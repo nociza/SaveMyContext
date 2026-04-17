@@ -1,9 +1,24 @@
 import { useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import * as Tabs from "@radix-ui/react-tabs";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, BrainCircuit, Database, FolderKanban, RefreshCcw, Settings2 } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
+import {
+  ArrowRight,
+  BookOpen,
+  ExternalLink,
+  LoaderCircle,
+  RefreshCcw,
+  Search,
+  Settings2
+} from "lucide-react";
 
 import {
   fetchDashboardSummary,
@@ -15,20 +30,23 @@ import {
 } from "../background/backend";
 import {
   categoryDescriptions,
+  categoryGlyphs,
   categoryLabels,
+  categoryOrder,
   categoryPageUrl,
-  titleFromSession,
-  type CategoryWorkspaceView
+  categoryPalette,
+  titleFromSession
 } from "../shared/explorer";
-import type { BackendSessionListItem, ExtensionSettings, ProviderName, SessionCategoryName } from "../shared/types";
+import type {
+  BackendSessionListItem,
+  ExtensionSettings,
+  ProviderName,
+  SessionCategoryName
+} from "../shared/types";
 import { mountApp } from "../ui/boot";
-import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
-import { ScrollArea } from "../ui/components/scroll-area";
 import {
   connectionTone,
-  enabledProviderLabels,
   formatBackendLabel,
   formatBackendStatus,
   formatCompactDate,
@@ -39,49 +57,25 @@ import {
   processingTone,
   providerLabels
 } from "../ui/lib/format";
-import { useExtensionBootstrap } from "../ui/lib/runtime";
+import { sendRuntimeMessage, useExtensionBootstrap } from "../ui/lib/runtime";
+import type { SourceCaptureResponse } from "../shared/types";
 
-const categoryColors: Record<SessionCategoryName, string> = {
-  factual: "#0f8a84",
-  ideas: "#c77724",
-  journal: "#1d8aac",
-  todo: "#b4543a"
-};
-
-function readInitialTab(): "overview" | "knowledge" | "operations" {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("view") === "processing") {
-    return "operations";
-  }
-  if (params.get("focus") === "triplets") {
-    return "knowledge";
-  }
-  return "overview";
-}
-
-function readHighlightedCategory(): SessionCategoryName | null {
-  const raw = new URLSearchParams(window.location.search).get("category");
-  return raw === "factual" || raw === "ideas" || raw === "journal" || raw === "todo" ? raw : null;
-}
-
-function openCategory(category: SessionCategoryName, view: CategoryWorkspaceView = "atlas"): void {
-  window.location.href = categoryPageUrl({ category, view });
+function openCategory(category: SessionCategoryName): void {
+  window.location.href = categoryPageUrl({ category });
 }
 
 function sessionActivity(sessions: BackendSessionListItem[]): Array<{ day: string; sessions: number }> {
   const map = new Map<string, number>();
   for (const session of sessions) {
     const date = new Date(session.updated_at);
-    if (Number.isNaN(date.getTime())) {
-      continue;
-    }
+    if (Number.isNaN(date.getTime())) continue;
     const key = date.toISOString().slice(5, 10);
     map.set(key, (map.get(key) ?? 0) + 1);
   }
 
   return Array.from(map.entries())
-    .sort(([left], [right]) => left.localeCompare(right))
-    .slice(-14)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(-21)
     .map(([day, count]) => ({ day, sessions: count }));
 }
 
@@ -98,46 +92,10 @@ function providerMix(sessions: BackendSessionListItem[]): Array<{ provider: Prov
   }));
 }
 
-function formatTooltipMetric(value: unknown): string {
-  return formatNumber(typeof value === "number" ? value : Number(value ?? 0));
-}
-
-function todoGitLabel(todo?: { git: { versioning_enabled: boolean; available: boolean; repository_ready: boolean; clean?: boolean | null; branch?: string | null } } | null): string {
-  if (!todo?.git.versioning_enabled) {
-    return "Versioning off";
-  }
-  if (!todo.git.available) {
-    return "Git unavailable";
-  }
-  if (!todo.git.repository_ready) {
-    return "Ready on first edit";
-  }
-  if (todo.git.clean === false) {
-    return "Pending changes";
-  }
-  return todo.git.branch ?? "Tracked";
-}
-
-function todoGitDetail(todo?: { git: { versioning_enabled: boolean; available: boolean; repository_ready: boolean; last_commit_message?: string | null; last_commit_at?: string | null } } | null): string {
-  if (!todo?.git.versioning_enabled) {
-    return "Checklist edits still update the shared markdown file.";
-  }
-  if (!todo.git.available) {
-    return "The backend cannot run git on this machine right now.";
-  }
-  if (!todo.git.repository_ready) {
-    return "The first checklist edit will initialize repository tracking.";
-  }
-  if (todo.git.last_commit_message) {
-    return `${todo.git.last_commit_message} · ${formatCompactDate(todo.git.last_commit_at)}`;
-  }
-  return "Checklist tracking is ready.";
-}
-
 function App() {
   const { settings, status, loading, error, reload } = useExtensionBootstrap();
-  const [currentTab, setCurrentTab] = useState<"overview" | "knowledge" | "operations">(readInitialTab());
-  const highlightedCategory = readHighlightedCategory();
+  const [captureState, setCaptureState] = useState<"idle" | "saving" | "done" | "error">("idle");
+  const [captureMessage, setCaptureMessage] = useState<string>("");
 
   const summaryQuery = useQuery({
     queryKey: ["dashboard-summary", settings?.backendUrl, settings?.backendToken],
@@ -176,42 +134,46 @@ function App() {
   });
 
   const summary = status?.backendValidationError ? null : summaryQuery.data ?? null;
+  const systemStatus = systemQuery.data;
   const nodes = nodesQuery.data ?? [];
   const edges = edgesQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
   const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
   const processing = status ? processingTone(status) : { label: "Waiting", tone: "neutral" as const };
 
+  const totalSessions = summary?.total_sessions ?? 0;
+  const totalMessages = summary?.total_messages ?? 0;
+  const totalTriplets = summary?.total_triplets ?? 0;
+  const totalSyncEvents = summary?.total_sync_events ?? 0;
+
+  const uniqueEntities = useMemo(() => {
+    const labels = new Set<string>();
+    for (const node of nodes) labels.add(node.label);
+    return labels.size;
+  }, [nodes]);
+
   const categoryData = useMemo(() => {
     const counts = new Map(summary?.categories.map((item) => [item.category, item.count] as const) ?? []);
-    return (["factual", "ideas", "journal", "todo"] as const).map((category) => ({
+    return categoryOrder.map((category) => ({
       category,
       label: categoryLabels[category],
       count: counts.get(category) ?? 0,
-      color: categoryColors[category]
+      accent: categoryPalette[category].accent,
+      description: categoryDescriptions[category]
     }));
   }, [summary]);
 
   const providerData = useMemo(() => providerMix(sessions), [sessions]);
+  const maxProviderCount = Math.max(...providerData.map((item) => item.count), 1);
   const activityData = useMemo(() => sessionActivity(sessions), [sessions]);
   const topEntities = useMemo(
-    () =>
-      [...nodes]
-        .sort((left, right) => right.degree - left.degree)
-        .slice(0, 8)
-        .map((node) => ({
-          label: node.label.length > 18 ? `${node.label.slice(0, 18)}…` : node.label,
-          degree: node.degree
-        })),
+    () => [...nodes].sort((a, b) => b.degree - a.degree).slice(0, 6),
     [nodes]
   );
-  const supportRichEdges = useMemo(() => edges.filter((edge) => edge.support_count > 1).length, [edges]);
-  const connectedNodes = useMemo(() => nodes.filter((node) => node.degree > 0).length, [nodes]);
   const recentSessions = useMemo(
-    () => [...sessions].sort((left, right) => right.updated_at.localeCompare(left.updated_at)).slice(0, 8),
+    () => [...sessions].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6),
     [sessions]
   );
-  const latestSession = recentSessions[0] ?? null;
 
   async function refreshAll(): Promise<void> {
     await reload();
@@ -225,427 +187,498 @@ function App() {
     ]);
   }
 
+  async function handleQuickSave(): Promise<void> {
+    setCaptureState("saving");
+    setCaptureMessage("Saving current page…");
+    try {
+      const response = await sendRuntimeMessage<SourceCaptureResponse>({
+        type: "SAVE_CURRENT_PAGE_SOURCE",
+        payload: { saveMode: "ai" }
+      });
+      if (!response.ok) throw new Error(response.error ?? "Could not save.");
+      setCaptureState("done");
+      setCaptureMessage(`Saved · ${response.title ?? "page"}`);
+      await summaryQuery.refetch();
+      await sessionsQuery.refetch();
+    } catch (captureError) {
+      setCaptureState("error");
+      setCaptureMessage(captureError instanceof Error ? captureError.message : "Save failed");
+    }
+  }
+
+  async function handleQuickSearch(): Promise<void> {
+    await sendRuntimeMessage<{ ok: boolean; error?: string }>({ type: "OPEN_QUICK_SEARCH" });
+  }
+
+  const hasBackendError = Boolean(status?.backendValidationError);
+  const connectionDot =
+    connection.tone === "success"
+      ? "bg-[var(--color-factual)]"
+      : connection.tone === "warning"
+        ? "bg-[var(--color-ideas)]"
+        : connection.tone === "danger"
+          ? "bg-[var(--color-todo)]"
+          : "bg-[var(--color-ink-subtle)]";
+
+  const isFetching =
+    summaryQuery.isFetching ||
+    systemQuery.isFetching ||
+    nodesQuery.isFetching ||
+    sessionsQuery.isFetching ||
+    todoQuery.isFetching;
+
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
-      <Card className="p-5">
-        <CardHeader>
-          <div className="space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">SaveMyContext Dashboard</div>
-            <CardTitle className="text-3xl leading-none">Context Operations</CardTitle>
-            <CardDescription>
-              Monitor corpus growth, graph coverage, provider capture, and backend storage from one place.
-            </CardDescription>
+    <div className="mx-auto max-w-[1180px] px-6 py-10 sm:px-10">
+      <header className="mb-10 flex items-start justify-between gap-6">
+        <div className="flex items-start gap-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-[var(--color-ink)] text-[var(--color-paper)]">
+            <span className="display-serif text-[22px] font-semibold leading-none">C</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Badge tone={connection.tone}>{connection.label}</Badge>
-            <Button variant="secondary" onClick={() => void refreshAll()}>
-              <RefreshCcw className="h-4 w-4" />
-              Refresh
-            </Button>
-            <Button variant="secondary" onClick={() => void chrome.runtime.openOptionsPage()}>
-              <Settings2 className="h-4 w-4" />
-              Settings
-            </Button>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${connectionDot}`} />
+              <span className="eyebrow">{connection.label}</span>
+              {isFetching ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--color-ink-subtle)]" /> : null}
+            </div>
+            <h1 className="display-serif mt-1 text-[38px] font-semibold leading-[1.05] text-[var(--color-ink)]">
+              Your context, collected.
+            </h1>
+            <p className="mt-2 max-w-[48ch] text-[15px] leading-relaxed text-[var(--color-ink-soft)]">
+              {settings ? formatBackendLabel(settings) : loading ? "Loading…" : "Unavailable"}
+              {status ? ` · ${formatBackendStatus(status)}` : ""}
+            </p>
           </div>
-        </CardHeader>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => void refreshAll()} disabled={isFetching}>
+            <RefreshCcw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void chrome.runtime.openOptionsPage()}>
+            <Settings2 className="h-3.5 w-3.5" />
+            Settings
+          </Button>
+        </div>
+      </header>
 
-        <CardContent className="mt-5 grid gap-3 md:grid-cols-[1.7fr_1fr]">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              { label: "Sessions", value: formatNumber(summary?.total_sessions), icon: Database },
-              { label: "Messages", value: formatNumber(summary?.total_messages), icon: Activity },
-              { label: "Facts", value: formatNumber(summary?.total_triplets), icon: BrainCircuit },
-              { label: "Graph nodes", value: formatNumber(nodes.length), icon: FolderKanban }
-            ].map((metric) => (
-              <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                <metric.icon className="h-4 w-4 text-zinc-400" />
-                <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{metric.label}</div>
-                <div className="mt-2 text-3xl font-semibold leading-none text-zinc-950">{metric.value}</div>
-              </div>
-            ))}
-          </div>
+      {hasBackendError ? (
+        <div
+          id="backend-alert"
+          className="mb-6 rounded-[14px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-5 py-4 text-sm text-[#8a3b27]"
+        >
+          <strong className="font-semibold">Backend unavailable.</strong> {status?.backendValidationError}
+        </div>
+      ) : (
+        <div id="backend-alert" hidden aria-hidden="true" />
+      )}
 
-          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Backend</div>
-                <div className="mt-1 text-base font-semibold text-zinc-950">
-                  {settings ? formatBackendLabel(settings) : loading ? "Loading" : "Unavailable"}
+      <section className="mb-10 grid gap-4 md:grid-cols-[1.25fr_1fr]">
+        <div className="surface overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-[var(--color-line)] px-6 py-4">
+            <div>
+              <div className="eyebrow">Now</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">Capture & recall</div>
+            </div>
+            <div className="text-xs text-[var(--color-ink-subtle)]">
+              Sync {formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "idle")}
+            </div>
+          </div>
+          <div className="grid gap-2 p-4 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => void handleQuickSave()}
+              disabled={captureState === "saving"}
+              className="group flex items-center justify-between gap-3 rounded-[12px] bg-[var(--color-ink)] px-5 py-4 text-left text-[var(--color-paper)] transition hover:bg-[#1a2c44] disabled:opacity-70"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-white/10">
+                  {captureState === "saving" ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <BookOpen className="h-4 w-4" />
+                  )}
+                </div>
+                <div>
+                  <div className="text-[14px] font-semibold">Save current page</div>
+                  <div className="text-[12px] text-white/60">
+                    {captureMessage || "Drop the active tab into your vault"}
+                  </div>
                 </div>
               </div>
-              <Badge tone={processing.tone}>{processing.label}</Badge>
+              <ArrowRight className="h-4 w-4 text-white/80 transition group-hover:translate-x-0.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleQuickSearch()}
+              className="flex items-center justify-between gap-3 rounded-[12px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-5 py-4 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[#e6dfcd]"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[var(--color-paper-raised)]">
+                  <Search className="h-4 w-4 text-[var(--color-ink)]" />
+                </div>
+                <div>
+                  <div className="text-[14px] font-semibold text-[var(--color-ink)]">Quick search</div>
+                  <div className="text-[12px] text-[var(--color-ink-subtle)]">
+                    Find and inject a fact into the focused page
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-[var(--color-ink-subtle)]" />
+            </button>
+          </div>
+        </div>
+
+        <div className="surface grid grid-cols-2 gap-px overflow-hidden bg-[var(--color-line)] p-0">
+          {[
+            { label: "Sessions", value: formatNumber(totalSessions), id: "metric-sessions" },
+            { label: "Messages", value: formatNumber(totalMessages), id: "metric-messages" },
+            { label: "Facts", value: formatNumber(totalTriplets), id: "metric-triplets" },
+            { label: "Sync events", value: formatNumber(totalSyncEvents), id: "metric-sync-events" }
+          ].map((metric) => (
+            <div key={metric.label} className="bg-[var(--color-paper-raised)] px-5 py-4">
+              <div className="eyebrow">{metric.label}</div>
+              <div
+                id={metric.id}
+                className="display-serif mt-2 text-[28px] font-semibold leading-none tabular-nums text-[var(--color-ink)]"
+              >
+                {metric.value}
+              </div>
             </div>
-            <div className="space-y-2 text-sm leading-6 text-zinc-600">
-              <p>{status ? formatBackendStatus(status) : error ?? "Checking backend configuration"}</p>
-              <p>{settings && status ? formatHistorySync(settings, status) : "Loading sync status"}</p>
-              <p>{status ? formatProcessing(status) : "Loading processing state"}</p>
+          ))}
+        </div>
+      </section>
+
+      <section className="mb-10">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="eyebrow">Collections</div>
+            <h2 className="display-serif mt-1 text-[24px] font-semibold text-[var(--color-ink)]">
+              Four shelves for every capture
+            </h2>
+          </div>
+          <div id="category-total-label" className="text-sm text-[var(--color-ink-subtle)]">
+            {formatNumber(totalSessions)} indexed sessions
+          </div>
+        </div>
+
+        <div id="category-list" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {categoryData.map((item) => (
+            <button
+              key={item.category}
+              type="button"
+              onClick={() => openCategory(item.category)}
+              className="group relative overflow-hidden rounded-[16px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-5 text-left transition hover:-translate-y-0.5 hover:border-[var(--color-line-strong)] hover:shadow-[0_14px_32px_-18px_rgba(15,27,44,0.22)]"
+            >
+              <div
+                className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-50 transition group-hover:opacity-80"
+                style={{ background: `radial-gradient(circle, ${item.accent}22, transparent 65%)` }}
+              />
+              <div className="flex items-start justify-between">
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-[10px]"
+                  style={{ backgroundColor: `${item.accent}1a`, color: item.accent }}
+                >
+                  <span className="display-serif text-[19px] leading-none">{categoryGlyphs[item.category]}</span>
+                </div>
+                <span
+                  className="display-serif text-[28px] font-semibold tabular-nums"
+                  style={{ color: "var(--color-ink)" }}
+                >
+                  {formatNumber(item.count)}
+                </span>
+              </div>
+              <div className="mt-5">
+                <div className="display-serif text-[20px] font-semibold text-[var(--color-ink)]">{item.label}</div>
+                <p className="mt-1.5 line-clamp-2 text-[13px] leading-5 text-[var(--color-ink-soft)]">
+                  {item.description}
+                </p>
+              </div>
+              <div className="mt-4 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.1em]" style={{ color: item.accent }}>
+                Open shelf
+                <ArrowRight className="h-3 w-3" />
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mb-10 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+        <div className="surface overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-[var(--color-line)] px-6 py-4">
+            <div>
+              <div className="eyebrow">Pulse</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">Capture activity</div>
+            </div>
+            <div className="text-xs text-[var(--color-ink-subtle)]">{activityData.length} active days</div>
+          </div>
+          <div className="h-[260px] px-4 pb-4 pt-6">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={activityData}>
+                <defs>
+                  <linearGradient id="sessionFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#0f8a84" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#0f8a84" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="#ebe4d1" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: "#8693a2", fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fill: "#8693a2", fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={26} />
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: 10,
+                    border: "1px solid #ebe4d1",
+                    background: "#fbf9f3",
+                    fontSize: 12
+                  }}
+                  cursor={{ stroke: "#d7cfb9" }}
+                />
+                <Area type="monotone" dataKey="sessions" stroke="#0f8a84" fill="url(#sessionFill)" strokeWidth={2.25} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="surface p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Sources</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">Where it comes from</div>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Tabs.Root value={currentTab} onValueChange={(value) => setCurrentTab(value as typeof currentTab)}>
-        <div className="flex items-center justify-between gap-4">
-          <Tabs.List className="inline-flex rounded-[8px] border border-zinc-200 bg-white p-1 shadow-sm">
-            {[
-              { value: "overview", label: "Overview" },
-              { value: "knowledge", label: "Knowledge" },
-              { value: "operations", label: "Operations" }
-            ].map((tab) => (
-              <Tabs.Trigger
-                key={tab.value}
-                value={tab.value}
-                className="rounded-[6px] px-3 py-2 text-sm font-medium text-zinc-500 outline-none transition data-[state=active]:bg-zinc-950 data-[state=active]:text-white"
-              >
-                {tab.label}
-              </Tabs.Trigger>
+          <div className="mt-5 space-y-3">
+            {providerData.map((item) => (
+              <div key={item.provider} className="space-y-1.5">
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="font-medium text-[var(--color-ink)]">{item.label}</span>
+                  <span className="tabular-nums text-[var(--color-ink-soft)]">{formatNumber(item.count)}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-paper-sunken)]">
+                  <div
+                    className="h-full rounded-full transition-[width] duration-500"
+                    style={{
+                      width: `${(item.count / maxProviderCount) * 100}%`,
+                      backgroundColor:
+                        item.provider === "chatgpt"
+                          ? "var(--color-factual)"
+                          : item.provider === "gemini"
+                            ? "var(--color-ideas)"
+                            : "var(--color-journal)"
+                    }}
+                  />
+                </div>
+              </div>
             ))}
-          </Tabs.List>
+          </div>
+        </div>
+      </section>
 
-          {summaryQuery.isFetching || systemQuery.isFetching || nodesQuery.isFetching || sessionsQuery.isFetching || todoQuery.isFetching ? (
-            <div className="text-sm text-zinc-500">Refreshing data…</div>
+      <section className="mb-10 grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <div className="surface p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Graph</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">
+                Top connected entities
+              </div>
+              <div id="graph-summary" className="mt-1 text-xs text-[var(--color-ink-subtle)]">
+                <span id="metric-entities">{formatNumber(uniqueEntities)}</span> entities,{" "}
+                <span id="metric-edges">{formatNumber(edges.length)}</span> edges
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => openCategory("factual")}>
+              Atlas
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <div id="top-entities" className="mt-4 space-y-2">
+            {topEntities.map((node) => (
+              <div
+                key={node.id}
+                className="flex items-center justify-between gap-3 rounded-[10px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-semibold text-[var(--color-ink)]">{node.label}</div>
+                  <div className="mt-0.5 text-[10.5px] uppercase tracking-[0.08em] text-[var(--color-ink-subtle)]">
+                    {node.kind}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="h-1 w-16 overflow-hidden rounded-full bg-[var(--color-paper-sunken)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--color-factual)]"
+                      style={{
+                        width: `${Math.min(100, (node.degree / Math.max(topEntities[0]?.degree ?? 1, 1)) * 100)}%`
+                      }}
+                    />
+                  </div>
+                  <span className="w-6 text-right text-[12px] font-semibold tabular-nums text-[var(--color-ink)]">
+                    {node.degree}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {!topEntities.length ? (
+              <div className="rounded-[10px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-4 py-6 text-center text-sm text-[var(--color-ink-subtle)]">
+                No entities yet — save a chat to populate the graph.
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="surface p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="eyebrow">Latest</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">
+                Recently indexed
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {recentSessions.map((session) => {
+              const category = (session.category ?? "factual") as SessionCategoryName;
+              const accent = categoryPalette[category].accent;
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => openCategory(category)}
+                  className="group flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left transition hover:bg-[var(--color-paper-sunken)]"
+                >
+                  <span className="h-8 w-1 shrink-0 rounded-full" style={{ backgroundColor: accent }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-semibold text-[var(--color-ink)]">
+                      {titleFromSession(session)}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11.5px] text-[var(--color-ink-subtle)]">
+                      {categoryLabels[category]} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
+                    </span>
+                  </span>
+                  <ArrowRight className="h-3.5 w-3.5 text-[var(--color-ink-subtle)] opacity-0 transition group-hover:opacity-100" />
+                </button>
+              );
+            })}
+            {!recentSessions.length ? (
+              <div className="rounded-[10px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-4 py-6 text-center text-sm text-[var(--color-ink-subtle)]">
+                Recent captures will appear here.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
+        <div className="surface p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="eyebrow">System</div>
+              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">Vault & processing</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="eyebrow">{processing.label}</span>
+            </div>
+          </div>
+
+          <dl className="mt-5 grid gap-px overflow-hidden rounded-[12px] border border-[var(--color-line)] bg-[var(--color-line)] sm:grid-cols-2">
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <dt className="eyebrow">Auth mode</dt>
+              <dd id="system-auth-mode" className="mt-2 text-[14px] font-medium text-[var(--color-ink)]">
+                {systemStatus?.auth_mode ?? "—"}
+              </dd>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <dt className="eyebrow">Processing</dt>
+              <dd className="mt-2 text-[14px] font-medium text-[var(--color-ink)]">
+                {status ? formatProcessing(status) : "—"}
+              </dd>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4 sm:col-span-2">
+              <dt className="eyebrow">Vault</dt>
+              <dd className="mt-2 break-all text-[13px] text-[var(--color-ink)]">
+                {systemStatus?.vault_root ?? "—"}
+              </dd>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4 sm:col-span-2">
+              <dt className="eyebrow">Shared list</dt>
+              <dd id="system-todo-path" className="mt-2 break-all text-[13px] text-[var(--color-ink)]">
+                {systemStatus?.todo_list_path ?? "—"}
+              </dd>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <dt className="eyebrow">History sync</dt>
+              <dd className="mt-2 text-[13px] text-[var(--color-ink)]">
+                {settings && status ? formatHistorySync(settings, status) : "—"}
+              </dd>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <dt className="eyebrow">Last error</dt>
+              <dd id="health-last-error" className="mt-2 break-all text-[13px] text-[var(--color-ink)]">
+                {status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None"}
+              </dd>
+            </div>
+          </dl>
+
+          {status?.providerDriftAlert ? (
+            <div className="mt-4 rounded-[12px] border border-[rgba(209,132,37,0.35)] bg-[rgba(209,132,37,0.08)] px-4 py-3 text-[13px] text-[#8a561a]">
+              {formatProviderDriftAlert(status.providerDriftAlert)}
+            </div>
           ) : null}
         </div>
 
-        <Tabs.Content value="overview" className="mt-4 space-y-4 outline-none">
-          <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Corpus mix</div>
-                  <CardTitle className="mt-1">What is stored</CardTitle>
-                </div>
-                <div className="text-sm text-zinc-500">
-                  {summary ? `${formatNumber(summary.total_sessions)} indexed sessions` : "No corpus data yet"}
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4 grid gap-4 lg:grid-cols-[260px_1fr]">
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={categoryData} dataKey="count" nameKey="label" innerRadius={60} outerRadius={92} paddingAngle={3}>
-                        {categoryData.map((entry) => (
-                          <Cell key={entry.category} fill={entry.color} onClick={() => openCategory(entry.category)} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value, name) => [`${formatTooltipMetric(value)} notes`, String(name ?? "Category")]} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {categoryData.map((item) => (
-                    <button
-                      key={item.category}
-                      type="button"
-                      onClick={() => openCategory(item.category)}
-                      className={`rounded-[8px] border p-4 text-left transition hover:border-zinc-300 hover:bg-zinc-50 ${
-                        highlightedCategory === item.category ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white"
-                      }`}
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                          <span className="text-sm font-semibold">{item.label}</span>
-                        </div>
-                        <span className="text-lg font-semibold">{formatNumber(item.count)}</span>
-                      </div>
-                      <p className={highlightedCategory === item.category ? "text-sm text-white/80" : "text-sm text-zinc-500"}>
-                        {categoryDescriptions[item.category]}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Capture activity</div>
-                  <CardTitle className="mt-1">Recent session flow</CardTitle>
-                </div>
-                <div className="text-sm text-zinc-500">{activityData.length ? "Last 14 active buckets" : "No recent activity yet"}</div>
-              </CardHeader>
-              <CardContent className="mt-4">
-                <div className="h-[280px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={activityData}>
-                      <defs>
-                        <linearGradient id="sessionFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#0f8a84" stopOpacity={0.32} />
-                          <stop offset="100%" stopColor="#0f8a84" stopOpacity={0.04} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="day" tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <Tooltip />
-                      <Area type="monotone" dataKey="sessions" stroke="#0f8a84" fill="url(#sessionFill)" strokeWidth={2.5} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="surface p-5">
+          <div>
+            <div className="eyebrow">Shared list</div>
+            <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">To-Do pulse</div>
           </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Providers</div>
-                  <CardTitle className="mt-1">Where context is coming from</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4">
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={providerData}>
-                      <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <Tooltip formatter={(value) => `${formatTooltipMetric(value)} sessions`} />
-                      <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                        {providerData.map((entry) => (
-                          <Cell
-                            key={entry.provider}
-                            fill={entry.provider === "chatgpt" ? "#0f8a84" : entry.provider === "gemini" ? "#c77724" : "#1d8aac"}
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Recent notes</div>
-                  <CardTitle className="mt-1">Latest indexed sessions</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4">
-                <ScrollArea className="h-[240px] pr-4">
-                  <div className="space-y-2">
-                    {recentSessions.map((session) => (
-                      <button
-                        key={session.id}
-                        type="button"
-                        onClick={() => openCategory((session.category ?? "factual") as SessionCategoryName)}
-                        className="w-full rounded-[8px] border border-zinc-200 bg-white p-3 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
-                      >
-                        <div className="mb-1 text-sm font-semibold text-zinc-900">{titleFromSession(session)}</div>
-                        <div className="text-xs uppercase tracking-[0.08em] text-zinc-500">
-                          {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
-                        </div>
-                      </button>
-                    ))}
-                    {!recentSessions.length ? <p className="text-sm text-zinc-500">No indexed sessions yet.</p> : null}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </div>
-        </Tabs.Content>
-
-        <Tabs.Content value="knowledge" className="mt-4 space-y-4 outline-none">
-          <div className="grid gap-4 xl:grid-cols-3">
-            {[
-              {
-                label: "Atlas",
-                title: "Open the factual graph atlas",
-                detail: `${formatNumber(nodes.length)} nodes · ${formatNumber(edges.length)} relationships`,
-                view: "atlas" as const
-              },
-              {
-                label: "Storylines",
-                title: "Follow the highest-signal trails",
-                detail: `${formatNumber(connectedNodes)} connected nodes ready for exploration`,
-                view: "story" as const
-              },
-              {
-                label: "Graph Ops",
-                title: "Inspect coverage and lint signals",
-                detail: `${formatNumber(supportRichEdges)} relationships have multi-note support`,
-                view: "ops" as const
-              }
-            ].map((surface) => (
-              <button
-                key={surface.view}
-                type="button"
-                onClick={() => openCategory("factual", surface.view)}
-                className="rounded-[8px] border border-zinc-200 bg-white p-5 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
-              >
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">{surface.label}</div>
-                <div className="mt-2 text-lg font-semibold text-zinc-950">{surface.title}</div>
-                <div className="mt-2 text-sm leading-6 text-zinc-500">{surface.detail}</div>
-              </button>
-            ))}
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Graph coverage</div>
-                  <CardTitle className="mt-1">Knowledge map readiness</CardTitle>
-                </div>
-                <div className="text-sm text-zinc-500">
-                  {formatNumber(nodes.length)} entities · {formatNumber(edges.length)} relationships
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4 grid gap-3 sm:grid-cols-3">
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Graph nodes</div>
-                  <div className="mt-2 text-3xl font-semibold text-zinc-950">{formatNumber(nodes.length)}</div>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Graph edges</div>
-                  <div className="mt-2 text-3xl font-semibold text-zinc-950">{formatNumber(edges.length)}</div>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Connected nodes</div>
-                  <div className="mt-2 text-3xl font-semibold text-zinc-950">{formatNumber(connectedNodes)}</div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Backend reach</div>
-                  <CardTitle className="mt-1">Enabled providers</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4 flex flex-wrap gap-2">
-                {settings
-                  ? enabledProviderLabels(settings).map((label) => (
-                      <Badge key={label} tone="neutral">
-                        {label}
-                      </Badge>
-                    ))
-                  : null}
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card className="p-5">
-            <CardHeader>
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Top entities</div>
-                <CardTitle className="mt-1">Most connected nodes</CardTitle>
+          <div className="mt-5 grid grid-cols-3 gap-px overflow-hidden rounded-[12px] border border-[var(--color-line)] bg-[var(--color-line)]">
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <div className="eyebrow">Total</div>
+              <div className="display-serif mt-2 text-[22px] font-semibold text-[var(--color-ink)]">
+                {formatNumber(todoQuery.data?.total_count)}
               </div>
-              <div className="text-sm text-zinc-500">Highest degree entities in the current corpus</div>
-            </CardHeader>
-            <CardContent className="mt-4">
-              <div className="h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topEntities} layout="vertical" margin={{ left: 12 }}>
-                    <CartesianGrid stroke="#e4e4e7" strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" tick={{ fill: "#71717a", fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <YAxis
-                      type="category"
-                      dataKey="label"
-                      tick={{ fill: "#71717a", fontSize: 12 }}
-                      tickLine={false}
-                      axisLine={false}
-                      width={140}
-                    />
-                    <Tooltip formatter={(value) => `${formatTooltipMetric(value)} edges`} />
-                    <Bar dataKey="degree" fill="#0f8a84" radius={[0, 8, 8, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <div className="eyebrow">Active</div>
+              <div className="display-serif mt-2 text-[22px] font-semibold text-[var(--color-ink)]">
+                {formatNumber(todoQuery.data?.active_count)}
               </div>
-            </CardContent>
-          </Card>
-        </Tabs.Content>
-
-        <Tabs.Content value="operations" className="mt-4 space-y-4 outline-none">
-          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Runtime health</div>
-                  <CardTitle className="mt-1">Extension and backend</CardTitle>
-                </div>
-                <div className="text-sm text-zinc-500">
-                  Latest success · {formatCompactDate(status?.lastSuccessAt, "No sync yet")}
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Backend</div>
-                  <div className="mt-2 text-sm font-semibold text-zinc-950">
-                    {settings ? formatBackendLabel(settings) : "Unavailable"}
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600">{status ? formatBackendStatus(status) : error ?? "Loading"}</p>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Processing</div>
-                  <div className="mt-2 text-sm font-semibold text-zinc-950">{status ? formatProcessing(status) : "Loading"}</div>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600">
-                    Pending jobs · {formatNumber(status?.processingPendingCount)} · latest note{" "}
-                    {latestSession ? `${titleFromSession(latestSession)} · ${formatCompactDate(latestSession.updated_at)}` : "not indexed yet"}
-                  </p>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 sm:col-span-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">History sync</div>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600">
-                    {settings && status ? formatHistorySync(settings, status) : "Loading sync status"}
-                  </p>
-                </div>
-                {status?.providerDriftAlert ? (
-                  <div className="rounded-[8px] border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800 sm:col-span-2">
-                    {formatProviderDriftAlert(status.providerDriftAlert)}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card className="p-5">
-              <CardHeader>
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Storage</div>
-                  <CardTitle className="mt-1">Vault readiness</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="mt-4 space-y-3 text-sm leading-6 text-zinc-600">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Shared list</div>
-                    <div className="mt-2 text-lg font-semibold text-zinc-950">{formatNumber(todoQuery.data?.total_count)} items</div>
-                    <div className="mt-1 text-sm text-zinc-500">
-                      {formatNumber(todoQuery.data?.active_count)} active · {formatNumber(todoQuery.data?.completed_count)} completed
-                    </div>
-                  </div>
-                  <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Git tracking</div>
-                    <div className="mt-2 break-words text-lg font-semibold text-zinc-950">{todoGitLabel(todoQuery.data)}</div>
-                    <div className="mt-1 text-sm text-zinc-500">{todoGitDetail(todoQuery.data)}</div>
-                  </div>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Backend access</div>
-                  <div className="mt-2 text-zinc-900">
-                    {systemQuery.data?.auth_mode === "app_token" ? "Token-protected backend" : "Local bootstrap backend"}
-                  </div>
-                </div>
-                <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Corpus footprint</div>
-                  <div className="mt-2 text-zinc-900">
-                    {formatNumber(summary?.total_sessions)} notes · {formatNumber(nodes.length)} graph nodes · {formatNumber(edges.length)} relationships
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            </div>
+            <div className="bg-[var(--color-paper-raised)] p-4">
+              <div className="eyebrow">Done</div>
+              <div className="display-serif mt-2 text-[22px] font-semibold text-[var(--color-ink)]">
+                {formatNumber(todoQuery.data?.completed_count)}
+              </div>
+            </div>
           </div>
-        </Tabs.Content>
-      </Tabs.Root>
+          <Button variant="secondary" size="sm" className="mt-5 w-full justify-center" onClick={() => openCategory("todo")}>
+            Open To-Do shelf
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
 
-      {(error || summaryQuery.error || systemQuery.error || nodesQuery.error || edgesQuery.error || sessionsQuery.error || todoQuery.error) && (
-        <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {systemStatus?.public_url ? (
+            <a
+              href={systemStatus.public_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 flex items-center justify-center gap-1 text-[12px] text-[var(--color-ink-subtle)] hover:text-[var(--color-ink)]"
+            >
+              <ExternalLink className="h-3 w-3" /> Public endpoint
+            </a>
+          ) : null}
+        </div>
+      </section>
+
+      {error ||
+      summaryQuery.error ||
+      systemQuery.error ||
+      nodesQuery.error ||
+      edgesQuery.error ||
+      sessionsQuery.error ||
+      todoQuery.error ? (
+        <div className="mt-6 rounded-[12px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-4 py-3 text-sm text-[#8a3b27]">
           {error ||
             (summaryQuery.error instanceof Error && summaryQuery.error.message) ||
             (systemQuery.error instanceof Error && systemQuery.error.message) ||
@@ -655,7 +688,7 @@ function App() {
             (todoQuery.error instanceof Error && todoQuery.error.message) ||
             "Could not load dashboard data."}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

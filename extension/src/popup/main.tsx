@@ -1,11 +1,27 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, BrainCircuit, Database, LoaderCircle, MessageSquare, Search, Settings2, Sparkles } from "lucide-react";
-import { Cell, Pie, PieChart, Tooltip } from "recharts";
+import {
+  ArrowRight,
+  BookOpen,
+  Inbox,
+  LoaderCircle,
+  Search,
+  Settings2,
+  Sparkles
+} from "lucide-react";
 
 import { fetchDashboardSummary, fetchSessions } from "../background/backend";
-import { categoryLabels, categoryOrder, categoryPageUrl, notePageUrl, providerLabels, titleFromSession } from "../shared/explorer";
+import {
+  categoryGlyphs,
+  categoryLabels,
+  categoryOrder,
+  categoryPageUrl,
+  categoryPalette,
+  notePageUrl,
+  providerLabels,
+  titleFromSession
+} from "../shared/explorer";
 import type {
   BackendDashboardSummary,
   BackendSessionListItem,
@@ -15,21 +31,15 @@ import type {
   SyncStatus
 } from "../shared/types";
 import { mountApp } from "../ui/boot";
-import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/components/card";
 import {
   connectionTone,
-  formatBackendLabel,
-  formatBackendStatus,
   formatCompactDate,
-  formatHistorySync,
   formatNumber,
   formatProcessing,
+  formatHistorySync,
   formatProviderDriftAlert,
-  historyTone,
-  processingButtonState,
-  processingTone
+  processingButtonState
 } from "../ui/lib/format";
 import { sendRuntimeMessage, useExtensionBootstrap } from "../ui/lib/runtime";
 
@@ -39,24 +49,11 @@ type DashboardRouteState = {
   focus?: "triplets" | null;
 };
 
-const categoryColors: Record<SessionCategoryName, string> = {
-  factual: "#0f8a84",
-  ideas: "#c77724",
-  journal: "#1d8aac",
-  todo: "#b4543a"
-};
-
 function dashboardUrl(state: DashboardRouteState = {}): string {
   const url = new URL(chrome.runtime.getURL("dashboard.html"));
-  if (state.category) {
-    url.searchParams.set("category", state.category);
-  }
-  if (state.view) {
-    url.searchParams.set("view", state.view);
-  }
-  if (state.focus) {
-    url.searchParams.set("focus", state.focus);
-  }
+  if (state.category) url.searchParams.set("category", state.category);
+  if (state.view) url.searchParams.set("view", state.view);
+  if (state.focus) url.searchParams.set("focus", state.focus);
   return url.toString();
 }
 
@@ -78,21 +75,36 @@ function openNote(session: BackendSessionListItem): void {
 }
 
 function summaryOrNull(summary: BackendDashboardSummary | undefined, status: SyncStatus | null): BackendDashboardSummary | null {
-  if (!summary || status?.backendValidationError) {
-    return null;
-  }
+  if (!summary || status?.backendValidationError) return null;
   return summary;
 }
 
-function formatTooltipNumber(value: unknown): string {
-  return formatNumber(typeof value === "number" ? value : Number(value ?? 0));
+function providerFromUrl(urlString: string | undefined): "chatgpt" | "gemini" | "grok" | null {
+  if (!urlString) return null;
+  try {
+    const host = new URL(urlString).hostname;
+    if (host.includes("chatgpt") || host.includes("openai")) return "chatgpt";
+    if (host.includes("gemini") || host.includes("google")) return "gemini";
+    if (host.includes("grok") || host.includes("x.ai") || host.includes("twitter")) return "grok";
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function PopupApp() {
   const { settings, status, loading, error, reload } = useExtensionBootstrap();
   const [captureStatus, setCaptureStatus] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
-  const [hoveredCategory, setHoveredCategory] = useState<SessionCategoryName | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [activeTabInfo, setActiveTabInfo] = useState<{ url?: string; title?: string } | null>(null);
+
+  useEffect(() => {
+    void chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+      const tab = tabs[0];
+      if (tab) setActiveTabInfo({ url: tab.url, title: tab.title });
+    });
+  }, []);
 
   const summaryQuery = useQuery({
     queryKey: ["popup-summary", settings?.backendUrl, settings?.backendToken],
@@ -108,35 +120,37 @@ function PopupApp() {
 
   const summary = summaryOrNull(summaryQuery.data, status);
   const recentSessions = useMemo(
-    () => [...(sessionsQuery.data ?? [])].sort((left, right) => right.updated_at.localeCompare(left.updated_at)).slice(0, 4),
+    () => [...(sessionsQuery.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3),
     [sessionsQuery.data]
   );
+
   const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
-  const history = settings && status ? historyTone(settings, status) : { label: "Waiting", tone: "neutral" as const };
-  const processing = status ? processingTone(status) : { label: "Waiting", tone: "neutral" as const };
   const runQueueState = status ? processingButtonState(status) : { disabled: true, label: "Run queue", title: "Loading" };
 
   const categoryData = useMemo(() => {
     const counts = new Map(summary?.categories.map((item) => [item.category, item.count] as const) ?? []);
-    const total = summary?.categories.reduce((current, item) => current + item.count, 0) ?? 0;
-    return categoryOrder.map((category) => {
-      const count = counts.get(category) ?? 0;
-      return {
-        category,
-        label: categoryLabels[category],
-        count,
-        share: total ? (count / total) * 100 : 0,
-        color: categoryColors[category]
-      };
-    });
+    return categoryOrder.map((category) => ({
+      category,
+      label: categoryLabels[category],
+      count: counts.get(category) ?? 0,
+      accent: categoryPalette[category].accent
+    }));
   }, [summary]);
-  const featuredCategory = hoveredCategory ?? categoryData.find((item) => item.count > 0)?.category ?? "factual";
-  const featuredCategoryData = categoryData.find((item) => item.category === featuredCategory) ?? categoryData[0];
-  const lastErrorText = status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None";
 
-  async function handleSaveCurrentPage(): Promise<void> {
-    setCaptureStatus("Saving current page…");
+  const activeProvider = providerFromUrl(activeTabInfo?.url);
+  const isProviderTab = Boolean(activeProvider);
+  const primaryLabel = isProviderTab
+    ? `Capture this ${providerLabels[activeProvider as "chatgpt"]} chat`
+    : "Save this page";
+
+  const lastErrorText = status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None";
+  const lastSyncLabel = formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "never");
+  const totalNotes = summary?.total_sessions ?? 0;
+
+  async function handleSave(): Promise<void> {
+    setCaptureStatus("");
     setActionError(null);
+    setIsSaving(true);
 
     try {
       const response = await sendRuntimeMessage<SourceCaptureResponse>({
@@ -144,17 +158,17 @@ function PopupApp() {
         payload: { saveMode: "ai" }
       });
 
-      if (!response.ok) {
-        throw new Error(response.error ?? "Could not save the current page.");
-      }
+      if (!response.ok) throw new Error(response.error ?? "Could not save the current page.");
 
-      setCaptureStatus(`Saved ${response.title ?? "page"} to SaveMyContext.`);
+      setCaptureStatus(`Saved · ${response.title ?? "page"}`);
       await reload();
       await summaryQuery.refetch();
     } catch (captureError) {
       const message = captureError instanceof Error ? captureError.message : "Could not save the current page.";
       setCaptureStatus(message);
       setActionError(message);
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -175,295 +189,247 @@ function PopupApp() {
       setActionError(response.error ?? "AI processing failed.");
       return;
     }
-
     await reload();
     await summaryQuery.refetch();
   }
 
   const summaryErrorMessage =
-    summaryQuery.error instanceof Error ? summaryQuery.error.message : summaryQuery.error ? "Could not load dashboard summary." : "";
-  const statusMessage =
-    status?.providerDriftAlert
-      ? formatProviderDriftAlert(status.providerDriftAlert)
-      : captureStatus || actionError || summaryErrorMessage;
-  const lastSyncLabel = formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "No sync yet");
+    summaryQuery.error instanceof Error ? summaryQuery.error.message : summaryQuery.error ? "Could not load summary." : "";
+  const toastMessage = actionError || summaryErrorMessage;
+  const hasDrift = Boolean(status?.providerDriftAlert);
+
+  const connectionDotClass =
+    connection.tone === "success"
+      ? "bg-[var(--color-factual)]"
+      : connection.tone === "warning"
+        ? "bg-[var(--color-ideas)]"
+        : connection.tone === "danger"
+          ? "bg-[var(--color-todo)]"
+          : "bg-[var(--color-ink-subtle)]";
 
   return (
     <div
-      className="relative mx-auto grid h-[560px] w-full max-w-[640px] grid-rows-[54px_50px_58px_1fr_36px] gap-2 overflow-hidden p-3"
+      className="relative flex h-[560px] w-[420px] flex-col overflow-hidden"
       data-testid="popup-root"
     >
       <div className="sr-only">
         <span id="last-session">{status?.lastSessionKey ?? ""}</span>
         <span id="last-error">{lastErrorText}</span>
+        <span id="history-sync">{settings && status ? formatHistorySync(settings, status) : "Loading"}</span>
+        <span id="processing-status">{status ? formatProcessing(status) : "Loading"}</span>
       </div>
 
-      <header className="grid min-h-0 grid-cols-[1fr_292px] items-stretch gap-2">
-        <div className="flex min-w-0 flex-col justify-center">
-          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500">
-            <span>SaveMyContext</span>
-            <span className="h-1 w-1 rounded-full bg-zinc-300" />
-            <span className="truncate">Last sync · {lastSyncLabel}</span>
+      <header className="flex items-center justify-between px-5 pb-2 pt-4">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--color-ink)] text-[var(--color-paper)]">
+            <span className="display-serif text-[15px] font-semibold leading-none">C</span>
           </div>
-          <h1 className="mt-0.5 text-2xl font-semibold leading-none text-zinc-950">Context Workspace</h1>
+          <div className="flex flex-col leading-none">
+            <span className="display-serif text-[15px] font-semibold tracking-tight text-[var(--color-ink)]">
+              SaveMyContext
+            </span>
+            <span className="mt-0.5 text-[10.5px] text-[var(--color-ink-subtle)]">
+              {loading ? "Loading…" : `${formatNumber(totalNotes)} notes · synced ${lastSyncLabel}`}
+            </span>
+          </div>
         </div>
-
-        <div className="panel-surface flex min-w-0 items-center justify-between gap-3 rounded-[8px] px-3 py-2">
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-zinc-500">Backend</div>
-            <div className="mt-0.5 truncate text-sm font-semibold leading-none text-zinc-950">
-              {settings ? formatBackendLabel(settings) : loading ? "Loading" : "Unavailable"}
-            </div>
-            <div className="mt-1 truncate text-[11px] leading-none text-zinc-500">{status ? formatBackendStatus(status) : error ?? "Checking"}</div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {summaryQuery.isFetching || sessionsQuery.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin text-zinc-400" /> : null}
-            <Badge tone={connection.tone}>{connection.label}</Badge>
-          </div>
+        <div className="flex items-center gap-1.5">
+          {summaryQuery.isFetching || sessionsQuery.isFetching ? (
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--color-ink-subtle)]" />
+          ) : null}
+          <span className={`h-2 w-2 rounded-full ${connectionDotClass}`} title={connection.label} />
         </div>
       </header>
 
-      <div className="panel-surface grid min-h-0 grid-cols-2 overflow-hidden rounded-[8px]">
-        <div className="border-r border-zinc-200 px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[11px] font-semibold text-zinc-500">History</div>
-            <Badge tone={history.tone} className="px-2 py-0.5 text-[10px]">
-              {history.label}
-            </Badge>
-          </div>
-          <div id="history-sync" className="mt-1 truncate text-xs leading-none text-zinc-700">
-            {settings && status ? formatHistorySync(settings, status) : "Loading"}
-          </div>
-        </div>
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[11px] font-semibold text-zinc-500">Processing</div>
-            <Badge tone={processing.tone} className="px-2 py-0.5 text-[10px]">
-              {processing.label}
-            </Badge>
-          </div>
-          <div id="processing-status" className="mt-1 truncate text-xs leading-none text-zinc-700">
-            {status ? formatProcessing(status) : "Loading"}
-          </div>
+      <div className="mx-5 mb-3 flex-none">
+        <div className="relative overflow-hidden rounded-[14px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+          <div
+            className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-60"
+            style={{ background: "radial-gradient(circle, rgba(15,138,132,0.18), transparent 65%)" }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isSaving}
+            className="group relative flex w-full items-center justify-between gap-3 rounded-[10px] bg-[var(--color-ink)] px-4 py-3 text-left text-[var(--color-paper)] transition hover:bg-[#1a2c44] disabled:opacity-70"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-white/10">
+                {isSaving ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : isProviderTab ? (
+                  <Sparkles className="h-4 w-4" />
+                ) : (
+                  <BookOpen className="h-4 w-4" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold leading-tight">{primaryLabel}</div>
+                <div className="mt-0.5 truncate text-[11px] text-white/60">
+                  {activeTabInfo?.title ?? "Capture the current tab to your vault"}
+                </div>
+              </div>
+            </div>
+            <ArrowRight className="h-4 w-4 shrink-0 text-white/80 transition group-hover:translate-x-0.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleQuickSearch()}
+            className="mt-2 flex w-full items-center gap-3 rounded-[10px] border border-[var(--color-line)] bg-[var(--color-paper)] px-4 py-2.5 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]"
+          >
+            <Search className="h-4 w-4 shrink-0 text-[var(--color-ink-soft)]" />
+            <span className="text-[13px] text-[var(--color-ink-soft)]">Search your vault on this page…</span>
+            <kbd className="ml-auto rounded-md border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-ink-subtle)]">
+              ⏎
+            </kbd>
+          </button>
         </div>
       </div>
 
-      <div className="grid h-[58px] grid-cols-4 gap-2">
-        {[
-          {
-            label: "Sessions",
-            value: formatNumber(summary?.total_sessions),
-            icon: Database,
-            onClick: () => openDashboard({ view: "notes" })
-          },
-          {
-            label: "Messages",
-            value: formatNumber(summary?.total_messages),
-            icon: MessageSquare,
-            onClick: () => openDashboard({ view: "notes" })
-          },
-          {
-            label: "Facts",
-            value: formatNumber(summary?.total_triplets),
-            icon: BrainCircuit,
-            onClick: () => openCategory("factual")
-          },
-          {
-            label: "Queued AI",
-            value: formatNumber(status?.processingPendingCount),
-            icon: Sparkles,
-            onClick: () => openDashboard({ view: "processing" })
-          }
-        ].map((metric) => (
+      <div className="mx-5 mb-3 grid grid-cols-2 gap-2">
+        {categoryData.map((item) => (
           <button
-            key={metric.label}
+            key={item.category}
             type="button"
-            onClick={metric.onClick}
-            className="panel-surface flex items-center justify-between gap-2 rounded-[8px] px-3 py-2 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
+            data-testid={`popup-category-${item.category}`}
+            onClick={() => openCategory(item.category)}
+            className="group relative flex items-center justify-between gap-2 rounded-[12px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2.5 text-left transition hover:-translate-y-px hover:border-[var(--color-line-strong)] hover:shadow-[0_8px_22px_-12px_rgba(15,27,44,0.18)]"
           >
-            <div className="flex min-w-0 items-center gap-2">
-              <metric.icon className="h-4 w-4 shrink-0 text-zinc-400" />
-              <div className="text-[11px] font-semibold text-zinc-500">{metric.label}</div>
-            </div>
-            <div
-              id={metric.label === "Queued AI" ? "processing-pending" : undefined}
-              className="w-[46px] shrink-0 text-right text-xl font-semibold leading-none tabular-nums text-zinc-950"
-            >
-              {metric.value}
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[14px]"
+                style={{
+                  backgroundColor: `${item.accent}1a`,
+                  color: item.accent,
+                  fontFamily: "var(--font-display)"
+                }}
+              >
+                {categoryGlyphs[item.category]}
+              </div>
+              <div className="flex min-w-0 flex-col leading-none">
+                <span className="text-[13px] font-semibold text-[var(--color-ink)]">{item.label}</span>
+                <span className="mt-1 text-[10.5px] uppercase tracking-[0.12em] text-[var(--color-ink-subtle)]">
+                  {item.count === 1 ? "1 note" : `${formatNumber(item.count)} notes`}
+                </span>
+              </div>
             </div>
           </button>
         ))}
       </div>
 
-      <div className="grid min-h-0 grid-cols-[1.08fr_0.92fr] gap-2">
-        <Card className="min-h-0 p-3">
-          <CardHeader className="items-center">
-            <div>
-              <div className="text-[11px] font-semibold text-zinc-500">Corpus mix</div>
-              <CardTitle className="mt-0.5 text-base">Choose a collection</CardTitle>
-            </div>
-            <div className="text-xs text-zinc-500">{summary ? `${formatNumber(summary.total_sessions)} indexed` : "No data yet"}</div>
-          </CardHeader>
-
-          <CardContent className="mt-2 grid min-h-0 grid-cols-[150px_1fr] gap-3">
-            <button
-              type="button"
-              onClick={() => openCategory(featuredCategory)}
-              className="relative flex h-[168px] items-center justify-center rounded-[8px] border border-zinc-200 bg-zinc-50 transition hover:border-zinc-300 hover:bg-white"
-              aria-label={`Open ${featuredCategoryData.label}`}
-            >
-              <PieChart width={142} height={142}>
-                <Pie
-                  data={categoryData}
-                  dataKey="count"
-                  nameKey="label"
-                  innerRadius={38}
-                  outerRadius={58}
-                  paddingAngle={3}
-                  strokeWidth={0}
-                  cx={71}
-                  cy={71}
-                  isAnimationActive={false}
-                >
-                  {categoryData.map((item) => (
-                    <Cell
-                      key={item.category}
-                      fill={item.color}
-                      opacity={featuredCategory === item.category ? 1 : 0.48}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openCategory(item.category);
-                      }}
-                      onMouseEnter={() => setHoveredCategory(item.category)}
-                      onMouseLeave={() => setHoveredCategory(null)}
-                      style={{ cursor: "pointer" }}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, _name, payload) => [
-                    `${formatTooltipNumber(value)} notes`,
-                    payload?.payload?.label ?? "Category"
-                  ]}
-                />
-              </PieChart>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <div className="text-lg font-semibold leading-none tabular-nums text-zinc-950">{formatNumber(featuredCategoryData.count)}</div>
-                <div className="mt-1 text-[11px] font-medium tabular-nums text-zinc-500">{featuredCategoryData.share.toFixed(0)}%</div>
-              </div>
-            </button>
-
-            <div className="grid min-h-0 grid-rows-4 gap-2">
-              {categoryData.map((item) => (
-                <button
-                  key={item.category}
-                  type="button"
-                  onClick={() => openCategory(item.category)}
-                  onMouseEnter={() => setHoveredCategory(item.category)}
-                  onMouseLeave={() => setHoveredCategory(null)}
-                  className={`flex items-center justify-between gap-2 rounded-[8px] border px-2 py-1.5 text-left transition hover:border-zinc-300 ${
-                    featuredCategory === item.category ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-900"
-                  }`}
-                  data-testid={`popup-category-${item.category}`}
-                >
-                  <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
-                    {item.label}
-                  </span>
-                  <span className="w-8 text-right text-sm font-semibold tabular-nums">{formatNumber(item.count)}</span>
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="min-h-0 p-3">
-          <CardHeader className="items-center">
-            <div>
-              <div className="text-[11px] font-semibold text-zinc-500">Recent notes</div>
-              <CardTitle className="mt-0.5 text-base">Rolling history</CardTitle>
-            </div>
-            <button type="button" className="text-xs font-medium text-zinc-600 hover:text-zinc-950" onClick={() => openDashboard({ view: "notes" })}>
-              View all
-            </button>
-          </CardHeader>
-          <CardContent className="mt-2 grid gap-2">
-            {recentSessions.map((session) => {
+      <div className="mx-5 flex min-h-0 flex-1 flex-col">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="eyebrow">Latest</span>
+          <button
+            type="button"
+            onClick={() => openDashboard({ view: "notes" })}
+            className="text-[11px] font-medium text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
+          >
+            View all →
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
+          {recentSessions.length ? (
+            recentSessions.map((session) => {
               const category = session.category ?? "factual";
+              const accent = categoryPalette[category].accent;
               return (
                 <button
                   key={session.id}
                   type="button"
                   onClick={() => openNote(session)}
-                  className="grid h-[35px] grid-cols-[auto_1fr] items-center gap-2 rounded-[8px] border border-zinc-200 bg-white px-2 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
+                  className="flex w-full items-center gap-3 rounded-[10px] border border-transparent bg-transparent px-2 py-2 text-left transition hover:border-[var(--color-line)] hover:bg-[var(--color-paper-raised)]"
                 >
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: categoryColors[category] }} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-semibold text-zinc-950">{titleFromSession(session)}</span>
-                    <span className="block truncate text-[11px] text-zinc-500">
+                  <span className="h-8 w-1 rounded-full shrink-0" style={{ backgroundColor: accent }} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-semibold leading-tight text-[var(--color-ink)]">
+                      {titleFromSession(session)}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10.5px] text-[var(--color-ink-subtle)]">
                       {categoryLabels[category]} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
                     </span>
                   </span>
                 </button>
               );
-            })}
-            {!recentSessions.length ? (
-              <div className="flex h-[164px] items-center justify-center rounded-[8px] border border-dashed border-zinc-200 bg-zinc-50 px-4 text-center text-sm text-zinc-500">
-                Saved notes will appear here after capture.
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className={`grid gap-2 ${status?.processingMode === "extension_browser" ? "grid-cols-5" : "grid-cols-4"}`}>
-        <Button size="sm" variant="primary" onClick={() => void handleSaveCurrentPage()}>
-          <BookOpen className="h-4 w-4" />
-          Save
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => void handleQuickSearch()}>
-          <Search className="h-4 w-4" />
-          Search
-        </Button>
-        <Button id="open-dashboard" size="sm" variant="secondary" onClick={() => openDashboard()}>
-          <Database className="h-4 w-4" />
-          Dashboard
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => void chrome.runtime.openOptionsPage()}>
-          <Settings2 className="h-4 w-4" />
-          Settings
-        </Button>
-        {status?.processingMode === "extension_browser" ? (
-          <Button
-            id="run-processing"
-            size="sm"
-            variant="subtle"
-            disabled={runQueueState.disabled}
-            title={runQueueState.title}
-            onClick={() => void handleRunQueue()}
-          >
-            <Sparkles className="h-4 w-4" />
-            {runQueueState.label}
-          </Button>
-        ) : null}
-      </div>
-
-      {statusMessage ? (
-        <div className="absolute bottom-[56px] left-3 right-3">
-          {status?.providerDriftAlert ? (
-            <div id="provider-drift-card" className="truncate rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 shadow-sm">
-              <span id="provider-drift" className="sr-only">
-                {status.providerDriftAlert.provider}: {status.providerDriftAlert.message}
-              </span>
-              {statusMessage}
-            </div>
+            })
           ) : (
-            <div className="truncate rounded-[8px] border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-600 shadow-sm">
-              {statusMessage}
+            <div className="flex items-center gap-3 rounded-[10px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-raised)]/60 px-3 py-4 text-[12px] text-[var(--color-ink-subtle)]">
+              <Inbox className="h-4 w-4" />
+              Saved notes will appear here after your first capture.
             </div>
           )}
         </div>
+      </div>
+
+      {toastMessage || hasDrift || captureStatus ? (
+        <div className="mx-5 mb-2 mt-2 flex-none">
+          {hasDrift ? (
+            <div
+              id="provider-drift-card"
+              className="truncate rounded-[10px] border border-[rgba(209,132,37,0.35)] bg-[rgba(209,132,37,0.1)] px-3 py-2 text-[11.5px] font-medium text-[#8b561a]"
+            >
+              <span id="provider-drift" className="sr-only">
+                {status?.providerDriftAlert?.provider}: {status?.providerDriftAlert?.message}
+              </span>
+              {formatProviderDriftAlert(status?.providerDriftAlert)}
+            </div>
+          ) : toastMessage ? (
+            <div className="truncate rounded-[10px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2 text-[11.5px] text-[var(--color-ink-soft)]">
+              {toastMessage || error}
+            </div>
+          ) : captureStatus ? (
+            <div className="truncate rounded-[10px] border border-[rgba(15,138,132,0.2)] bg-[rgba(15,138,132,0.08)] px-3 py-2 text-[11.5px] font-medium text-[#076b66]">
+              {captureStatus}
+            </div>
+          ) : null}
+        </div>
       ) : null}
+
+      <footer className="flex items-center gap-1 border-t border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2">
+        <Button
+          id="open-dashboard"
+          size="sm"
+          variant="ghost"
+          className="flex-1 justify-center"
+          onClick={() => openDashboard()}
+        >
+          Dashboard
+        </Button>
+        <span className="h-4 w-px bg-[var(--color-line)]" />
+        <Button
+          size="sm"
+          variant="ghost"
+          className="flex-1 justify-center"
+          onClick={() => void chrome.runtime.openOptionsPage()}
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          Settings
+        </Button>
+        {status?.processingMode === "extension_browser" ? (
+          <>
+            <span className="h-4 w-px bg-[var(--color-line)]" />
+            <Button
+              id="run-processing"
+              size="sm"
+              variant="ghost"
+              className="flex-1 justify-center"
+              disabled={runQueueState.disabled}
+              title={runQueueState.title}
+              onClick={() => void handleRunQueue()}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>
+                Queue (<span id="processing-pending">{formatNumber(status?.processingPendingCount)}</span>)
+              </span>
+            </Button>
+          </>
+        ) : (
+          <span id="processing-pending" className="sr-only">
+            {formatNumber(status?.processingPendingCount)}
+          </span>
+        )}
+      </footer>
     </div>
   );
 }

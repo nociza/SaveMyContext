@@ -88,9 +88,9 @@ function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
     <div
       className={cn(
         clusterCard ? "w-[224px]" : "w-[188px]",
-        "rounded-[8px] border bg-white px-3 py-3 text-left transition",
-        data.muted ? "border-zinc-200/80 opacity-45" : "border-zinc-200",
-        selected ? "ring-2 ring-zinc-950/10" : ""
+        "rounded-[8px] border bg-[var(--color-paper-raised)] px-3 py-3 text-left transition",
+        data.muted ? "border-[var(--color-line)]/80 opacity-45" : "border-[var(--color-line)]",
+        selected ? "ring-2 ring-[rgba(15,27,44,0.12)]" : ""
       )}
       style={{
         borderColor: selected ? `${data.accent}55` : undefined
@@ -105,18 +105,18 @@ function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
                 backgroundColor: data.accent
               }}
             />
-            <span className={cn("truncate font-semibold text-zinc-950", clusterCard ? "text-sm" : "text-[13px]")}>{data.label}</span>
+            <span className={cn("truncate font-semibold text-[var(--color-ink)]", clusterCard ? "text-sm" : "text-[13px]")}>{data.label}</span>
           </div>
-          <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{data.meta}</div>
+          <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{data.meta}</div>
         </div>
         {data.collapsed ? (
-          <div className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-500">
+          <div className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
             Collapsed
           </div>
         ) : null}
       </div>
 
-      <div className="mt-2 text-xs leading-5 text-zinc-500">{data.detail}</div>
+      <div className="mt-2 text-xs leading-5 text-[var(--color-ink-soft)]">{data.detail}</div>
     </div>
   );
 }
@@ -453,7 +453,7 @@ export function CategoryGraph({
     return (
       <div
         className={cn(
-          "flex min-h-[420px] h-[min(62vh,700px)] items-center justify-center rounded-[8px] border border-dashed border-zinc-200 bg-white text-sm text-zinc-500",
+          "flex min-h-[420px] h-[min(62vh,700px)] items-center justify-center rounded-[8px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-raised)] text-sm text-[var(--color-ink-soft)]",
           className
         )}
       >
@@ -463,7 +463,7 @@ export function CategoryGraph({
   }
 
   return (
-    <div className={cn("min-h-[420px] h-[min(62vh,700px)] overflow-hidden rounded-[8px] border border-zinc-200 bg-white", className)}>
+    <div className={cn("min-h-[420px] h-[min(62vh,700px)] overflow-hidden rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)]", className)}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

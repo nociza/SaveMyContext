@@ -49,8 +49,8 @@ function gitSummary(todo: BackendTodoListRead | null): {
 
 function taskCardTone(done: boolean): string {
   return done
-    ? "border-zinc-200 bg-zinc-50/80 text-zinc-500"
-    : "border-zinc-200 bg-white text-zinc-900 hover:border-zinc-300 hover:bg-zinc-50";
+    ? "border-[var(--color-line)] bg-[var(--color-paper-sunken)]/80 text-[var(--color-ink-soft)]"
+    : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]";
 }
 
 type TodoWorkspaceProps = {
@@ -89,21 +89,21 @@ export function TodoWorkspace({
           { label: "Update notes", value: String(taskUpdateCount), icon: History },
           { label: "Tracking", value: todo?.git.repository_ready ? (todo.git.branch ?? "Git on") : "Ready on edit", icon: GitBranch }
         ].map((metric) => (
-          <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-            <metric.icon className="h-4 w-4 text-zinc-400" />
-            <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
-            <div className="mt-2 break-words text-2xl font-semibold text-zinc-950">{metric.value}</div>
+          <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+            <metric.icon className="h-4 w-4 text-[var(--color-ink-subtle)]" />
+            <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+            <div className="mt-2 break-words text-2xl font-semibold text-[var(--color-ink)]">{metric.value}</div>
           </div>
         ))}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_320px]">
         <div className="space-y-4">
-          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+          <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Shared checklist</div>
-                <div className="mt-1 text-lg font-semibold text-zinc-950">Update the living to-do list directly</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Shared checklist</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-ink)]">Update the living to-do list directly</div>
               </div>
               <Badge tone={savingSummary ? "info" : git.tone}>{savingSummary ? "Saving" : git.label}</Badge>
             </div>
@@ -120,7 +120,7 @@ export function TodoWorkspace({
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
                 placeholder="Add a task that belongs on the shared checklist"
-                className="h-11 flex-1 rounded-[8px] border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-zinc-300"
+                className="h-11 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
               />
               <Button type="submit" variant="primary">
                 <Plus className="h-4 w-4" />
@@ -129,9 +129,9 @@ export function TodoWorkspace({
             </form>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-2">
-              <section className="rounded-[8px] border border-zinc-200 bg-white p-3">
+              <section className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-zinc-950">Active</div>
+                  <div className="text-sm font-semibold text-[var(--color-ink)]">Active</div>
                   <Badge tone="info">{activeItems.length}</Badge>
                 </div>
                 <ScrollArea className="h-[min(40vh,360px)] pr-4">
@@ -150,14 +150,14 @@ export function TodoWorkspace({
                         <span className="break-words text-sm leading-6">{item.text}</span>
                       </label>
                     ))}
-                    {!activeItems.length ? <p className="text-sm leading-6 text-zinc-500">No active tasks in the shared list.</p> : null}
+                    {!activeItems.length ? <p className="text-sm leading-6 text-[var(--color-ink-soft)]">No active tasks in the shared list.</p> : null}
                   </div>
                 </ScrollArea>
               </section>
 
-              <section className="rounded-[8px] border border-zinc-200 bg-white p-3">
+              <section className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-zinc-950">Completed</div>
+                  <div className="text-sm font-semibold text-[var(--color-ink)]">Completed</div>
                   <Badge tone="neutral">{completedItems.length}</Badge>
                 </div>
                 <ScrollArea className="h-[min(40vh,360px)] pr-4">
@@ -176,7 +176,7 @@ export function TodoWorkspace({
                         <span className="break-words text-sm leading-6 line-through">{item.text}</span>
                       </label>
                     ))}
-                    {!completedItems.length ? <p className="text-sm leading-6 text-zinc-500">Checked-off tasks stay here until you reopen them.</p> : null}
+                    {!completedItems.length ? <p className="text-sm leading-6 text-[var(--color-ink-soft)]">Checked-off tasks stay here until you reopen them.</p> : null}
                   </div>
                 </ScrollArea>
               </section>
@@ -188,46 +188,46 @@ export function TodoWorkspace({
           ) : null}
 
           {loading ? (
-            <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-500">Loading shared checklist…</div>
+            <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading shared checklist…</div>
           ) : null}
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+          <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Versioning</div>
-                <div className="mt-1 text-base font-semibold text-zinc-950">How updates land</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Versioning</div>
+                <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">How updates land</div>
               </div>
               <Badge tone={git.tone}>{git.label}</Badge>
             </div>
-            <p className="mt-4 text-sm leading-6 text-zinc-600">{git.detail}</p>
+            <p className="mt-4 text-sm leading-6 text-[var(--color-ink-soft)]">{git.detail}</p>
 
             <div className="mt-4 grid gap-3">
-              <div className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Branch</div>
-                <div className="mt-2 break-words text-sm font-semibold text-zinc-950">{todo?.git.branch ?? "Initialized on first tracked edit"}</div>
+              <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Branch</div>
+                <div className="mt-2 break-words text-sm font-semibold text-[var(--color-ink)]">{todo?.git.branch ?? "Initialized on first tracked edit"}</div>
               </div>
-              <div className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Working tree</div>
-                <div className="mt-2 text-sm font-semibold text-zinc-950">
+              <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Working tree</div>
+                <div className="mt-2 text-sm font-semibold text-[var(--color-ink)]">
                   {todo?.git.clean == null ? "Waiting for git status" : todo.git.clean ? "Clean" : "Pending changes"}
                 </div>
               </div>
-              <div className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Latest commit</div>
-                <div className="mt-2 break-words text-sm font-semibold text-zinc-950">
+              <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Latest commit</div>
+                <div className="mt-2 break-words text-sm font-semibold text-[var(--color-ink)]">
                   {todo?.git.last_commit_message ?? "No checklist commit yet"}
                 </div>
-                <div className="mt-1 text-xs text-zinc-500">{formatCompactDate(todo?.git.last_commit_at, "Waiting for the first commit")}</div>
+                <div className="mt-1 text-xs text-[var(--color-ink-soft)]">{formatCompactDate(todo?.git.last_commit_at, "Waiting for the first commit")}</div>
               </div>
             </div>
           </div>
 
-          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Flow</div>
-            <div className="mt-1 text-base font-semibold text-zinc-950">What changes when you click</div>
-            <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-600">
+          <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Flow</div>
+            <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">What changes when you click</div>
+            <div className="mt-4 space-y-2 text-sm leading-6 text-[var(--color-ink-soft)]">
               <p>Each checkbox edit rewrites the shared checklist in the vault.</p>
               <p>Saved to-do notes below keep a readable history of why tasks changed.</p>
               <p>Search, provider filters, and note reader stay in sync with the shared list.</p>

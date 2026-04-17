@@ -6,19 +6,25 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[8px] text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(15,138,132,0.35)] focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 select-none",
   {
     variants: {
       variant: {
-        primary: "bg-emerald-600 text-white hover:bg-emerald-700",
-        secondary: "border border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50",
-        subtle: "bg-zinc-100 text-zinc-700 hover:bg-zinc-200/80",
-        ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+        primary:
+          "rounded-[10px] bg-[var(--color-ink)] text-[var(--color-paper)] hover:bg-[#1a2c44] active:translate-y-[0.5px]",
+        accent:
+          "rounded-[10px] bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-strong)] active:translate-y-[0.5px]",
+        secondary:
+          "rounded-[10px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]",
+        subtle:
+          "rounded-[10px] bg-[var(--color-paper-sunken)] text-[var(--color-ink)] hover:bg-[#e6dfcd]",
+        ghost:
+          "rounded-[10px] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)] hover:text-[var(--color-ink)]"
       },
       size: {
-        default: "h-10 px-4",
-        sm: "h-9 px-3 text-xs",
-        lg: "h-11 px-5",
+        default: "h-10 px-4 text-sm",
+        sm: "h-9 px-3 text-[13px]",
+        lg: "h-11 px-5 text-sm",
         icon: "h-10 w-10"
       }
     },

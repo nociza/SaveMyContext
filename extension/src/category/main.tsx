@@ -27,6 +27,7 @@ import {
 } from "../background/backend";
 import {
   categoryDescriptions,
+  categoryGlyphs,
   categoryLabels,
   categoryOrder,
   categoryPalette,
@@ -778,21 +779,36 @@ function App() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
-      <Card className="p-5">
+      <Card className="relative overflow-hidden p-6">
+        <div
+          className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full opacity-50"
+          style={{ background: `radial-gradient(circle, ${categoryPalette[activeDisplayCategory].accent}22, transparent 65%)` }}
+        />
         <CardHeader>
-          <div className="space-y-2">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">SaveMyContext</div>
-            <CardTitle className="break-words text-3xl leading-none">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="display-serif flex h-7 w-7 items-center justify-center rounded-[8px] text-[15px]"
+                style={{
+                  backgroundColor: `${categoryPalette[activeDisplayCategory].accent}1a`,
+                  color: categoryPalette[activeDisplayCategory].accent
+                }}
+              >
+                {isCustomScope ? "⌘" : (categoryGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
+              </span>
+              <span className="eyebrow">{isCustomScope ? "Custom shelf" : "Shelf"}</span>
+            </div>
+            <CardTitle className="display-serif break-words text-[40px] font-semibold leading-[1.04]">
               {isCustomScope ? route.userCategory : categoryLabels[route.category]}
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="max-w-[60ch]">
               {isCustomScope
                 ? "User-defined category for organizing notes and sessions across the workspace."
                 : categoryDescriptions[route.category]}
             </CardDescription>
           </div>
-          <Button variant="secondary" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
-            <ArrowLeft className="h-4 w-4" />
+          <Button variant="ghost" size="sm" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
+            <ArrowLeft className="h-3.5 w-3.5" />
             Overview
           </Button>
         </CardHeader>
@@ -800,32 +816,32 @@ function App() {
         <CardContent className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_1fr]">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {headerMetrics.map((metric) => (
-              <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                <metric.icon className="h-4 w-4 text-zinc-400" />
-                <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{metric.label}</div>
-                <div className="mt-2 break-words text-2xl font-semibold leading-none text-zinc-950">{metric.value}</div>
+              <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                <metric.icon className="h-4 w-4 text-[var(--color-ink-subtle)]" />
+                <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{metric.label}</div>
+                <div className="mt-2 break-words text-2xl font-semibold leading-none text-[var(--color-ink)]">{metric.value}</div>
               </div>
             ))}
           </div>
 
-          <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Current scope</div>
-            <div className="mt-2 text-lg font-semibold text-zinc-950">
+          <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Current scope</div>
+            <div className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
               {graphFocus ? graphFocus.label : route.q ? `Search: ${route.q}` : isCustomScope ? route.userCategory : "Entire category"}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {scopePills.map((pill) => (
-                <div key={pill.key} className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
-                  <span className="text-zinc-400">{pill.label}</span> {pill.value}
+                <div key={pill.key} className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)]">
+                  <span className="text-[var(--color-ink-subtle)]">{pill.label}</span> {pill.value}
                 </div>
               ))}
               {!scopePills.length ? (
-                <div className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600">
+                <div className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)]">
                   {isCustomScope ? "Custom category" : "Full category"}
                 </div>
               ) : null}
             </div>
-            <div className="mt-4 text-sm leading-6 text-zinc-600">
+            <div className="mt-4 text-sm leading-6 text-[var(--color-ink-soft)]">
               {noteListMeta(route, allSessions.length, visibleSessions.length, graphFocus, activeDisplayCategory)}
             </div>
           </div>
@@ -837,35 +853,45 @@ function App() {
           <Card className="p-4">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Collections</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Collections</div>
                 <CardTitle className="mt-1 text-lg">Default and custom categories</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="mt-4 space-y-4">
-              <div className="grid gap-2">
-                {categoryOrder.map((category) => (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => handleCategorySwitch(category)}
-                    className={`rounded-[8px] border px-3 py-3 text-left transition ${
-                      !isCustomScope && route.category === category
-                        ? "border-zinc-950 bg-zinc-950 text-white"
-                        : "border-zinc-200 bg-white hover:bg-zinc-50"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold">{categoryLabels[category]}</span>
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: categoryPalette[category].accent }} />
-                    </div>
-                  </button>
-                ))}
+              <div className="grid gap-1.5">
+                {categoryOrder.map((category) => {
+                  const active = !isCustomScope && route.category === category;
+                  const accent = categoryPalette[category].accent;
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => handleCategorySwitch(category)}
+                      className={`group flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition ${
+                        active
+                          ? "bg-[var(--color-ink)] text-white"
+                          : "hover:bg-[var(--color-paper-sunken)]"
+                      }`}
+                    >
+                      <span
+                        className="flex h-7 w-7 items-center justify-center rounded-[8px] display-serif text-[13px] leading-none"
+                        style={{
+                          backgroundColor: active ? "rgba(255,255,255,0.14)" : `${accent}1a`,
+                          color: active ? "#ffffff" : accent
+                        }}
+                      >
+                        {categoryGlyphs[category]}
+                      </span>
+                      <span className="flex-1 text-[13px] font-semibold">{categoryLabels[category]}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              <div className="space-y-3 border-t border-zinc-200 pt-4">
+              <div className="space-y-3 border-t border-[var(--color-line)] pt-4">
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Custom categories</div>
-                  <div className="mt-1 text-sm text-zinc-500">Use these to organize notes and sessions beyond the default classifier.</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
+                  <div className="mt-1 text-sm text-[var(--color-ink-soft)]">Use these to organize notes and sessions beyond the default classifier.</div>
                 </div>
 
                 <div className="space-y-2">
@@ -875,16 +901,16 @@ function App() {
                       type="button"
                       onClick={() => handleUserCategorySwitch(item.name)}
                       className={`flex w-full items-center justify-between gap-3 rounded-[8px] border px-3 py-3 text-left transition ${
-                        route.userCategory === item.name ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"
+                        route.userCategory === item.name ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                       }`}
                     >
                       <span className="truncate text-sm font-semibold">{item.name}</span>
-                      <span className={route.userCategory === item.name ? "text-xs text-white/70" : "text-xs text-zinc-500"}>
+                      <span className={route.userCategory === item.name ? "text-xs text-white/70" : "text-xs text-[var(--color-ink-soft)]"}>
                         {formatNumber(item.count)}
                       </span>
                     </button>
                   ))}
-                  {!userCategories.length ? <p className="text-sm text-zinc-500">Assign a note to a custom category to make it appear here.</p> : null}
+                  {!userCategories.length ? <p className="text-sm text-[var(--color-ink-soft)]">Assign a note to a custom category to make it appear here.</p> : null}
                 </div>
 
                 <form
@@ -899,7 +925,7 @@ function App() {
                     value={userCategoryDraft}
                     onChange={(event) => setUserCategoryDraft(event.target.value)}
                     placeholder={selectedSession ? "Create and assign to the selected note" : "Select a note to create a custom category"}
-                    className="h-10 w-full rounded-[8px] border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-zinc-300"
+                    className="h-10 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
                   />
                   <Button type="submit" size="sm" variant="secondary" disabled={!selectedSession || !userCategoryDraft.trim()}>
                     Add to selected note
@@ -912,17 +938,17 @@ function App() {
           <Card className="p-4">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Explore</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Explore</div>
                 <CardTitle className="mt-1 text-lg">Query and scope</CardTitle>
               </div>
-              <div className="text-sm text-zinc-500">Everything here reshapes the graph, storylines, and note list.</div>
+              <div className="text-sm text-[var(--color-ink-soft)]">Everything here reshapes the graph, storylines, and note list.</div>
             </CardHeader>
 
             <CardContent className="mt-4 space-y-4">
               <label className="block">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Search</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Search</div>
                 <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-ink-subtle)]" />
                   <input
                     type="search"
                     value={route.q}
@@ -931,14 +957,14 @@ function App() {
                       updateRoute({ q: event.target.value, note: null }, true);
                     }}
                     placeholder="Search notes, entities, or transcript text"
-                    className="h-11 w-full rounded-[8px] border border-zinc-200 bg-white pl-10 pr-3 text-sm outline-none transition focus:border-zinc-300"
+                    className="h-11 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] pl-10 pr-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
                   />
                 </div>
               </label>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Provider</div>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Provider</div>
                   <Select
                     value={route.provider ?? "__all__"}
                     onValueChange={(value) => {
@@ -959,7 +985,7 @@ function App() {
                 </div>
 
                 <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Sort</div>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Sort</div>
                   <Select value={route.sort} onValueChange={(value) => updateRoute({ sort: value as CategorySortMode }, true)}>
                     <SelectTrigger>
                       <SelectValue />
@@ -973,7 +999,7 @@ function App() {
               </div>
 
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Recent activity buckets</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Recent activity buckets</div>
                 <div className="flex flex-wrap gap-2">
                   {activityBuckets.map((bucket) => (
                     <button
@@ -982,14 +1008,14 @@ function App() {
                       onClick={() => handleBucketToggle(bucket.bucket)}
                       className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                         route.bucket === bucket.bucket
-                          ? "border-zinc-950 bg-zinc-950 text-white"
-                          : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                          ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                          : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)]"
                       }`}
                     >
                       {bucket.label} · {formatNumber(bucket.count)}
                     </button>
                   ))}
-                  {!activityBuckets.length ? <p className="text-sm text-zinc-500">No recent activity buckets yet.</p> : null}
+                  {!activityBuckets.length ? <p className="text-sm text-[var(--color-ink-soft)]">No recent activity buckets yet.</p> : null}
                 </div>
               </div>
 
@@ -1009,15 +1035,15 @@ function App() {
           <Card className="p-4">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Snapshot</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Snapshot</div>
                 <CardTitle className="mt-1 text-lg">What this scope contains</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="mt-4 grid grid-cols-2 gap-2">
               {statsCards(stats, todo).map((metric) => (
-                <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
-                  <div className="mt-2 text-2xl font-semibold text-zinc-950">{metric.value}</div>
+                <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+                  <div className="mt-2 text-2xl font-semibold text-[var(--color-ink)]">{metric.value}</div>
                 </div>
               ))}
             </CardContent>
@@ -1026,7 +1052,7 @@ function App() {
           <Card className="p-4">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Signals</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Signals</div>
                 <CardTitle className="mt-1 text-lg">Recurring concepts</CardTitle>
               </div>
             </CardHeader>
@@ -1040,20 +1066,20 @@ function App() {
                       updateRoute({ q: item.label, note: null, view: "atlas" }, true);
                       setGraphFocus(null);
                     }}
-                    className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:bg-white"
+                    className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-3 py-2 text-left transition hover:bg-[var(--color-paper-raised)]"
                   >
-                    <span className="truncate text-sm text-zinc-700">{item.label}</span>
-                    <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
+                    <span className="truncate text-sm text-[var(--color-ink)]">{item.label}</span>
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
                   </button>
                 ))}
-                {!signals.primary.length ? <p className="text-sm text-zinc-500">No recurring signals yet.</p> : null}
+                {!signals.primary.length ? <p className="text-sm text-[var(--color-ink-soft)]">No recurring signals yet.</p> : null}
               </div>
 
               <div className="space-y-2">
                 {signals.secondary.slice(0, 4).map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-2">
-                    <span className="truncate text-sm text-zinc-700">{item.label}</span>
-                    <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
+                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2">
+                    <span className="truncate text-sm text-[var(--color-ink)]">{item.label}</span>
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
                   </div>
                 ))}
               </div>
@@ -1065,7 +1091,7 @@ function App() {
           <Card className="p-5">
             <CardHeader>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Workspace</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Workspace</div>
                 <CardTitle className="mt-1 text-lg">
                   {!isCustomScope && route.category === "todo"
                     ? "Shared list workspace"
@@ -1103,15 +1129,15 @@ function App() {
                     <Tabs.Trigger
                       key={card.value}
                       value={card.value}
-                      className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 text-left outline-none transition data-[state=active]:border-zinc-950 data-[state=active]:bg-white data-[state=active]:shadow-sm"
+                      className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4 text-left outline-none transition data-[state=active]:border-[var(--color-ink)] data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{card.label}</div>
-                          <div className="mt-2 text-xl font-semibold text-zinc-950">{card.metric}</div>
-                          <div className="mt-1 text-sm text-zinc-500">{card.detail}</div>
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{card.label}</div>
+                          <div className="mt-2 text-xl font-semibold text-[var(--color-ink)]">{card.metric}</div>
+                          <div className="mt-1 text-sm text-[var(--color-ink-soft)]">{card.detail}</div>
                         </div>
-                        <div className="rounded-[8px] border border-zinc-200 bg-white p-2">
+                        <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2">
                           <card.icon className="h-4 w-4" style={{ color: card.accent }} />
                         </div>
                       </div>
@@ -1122,7 +1148,7 @@ function App() {
                 <Tabs.Content value="atlas" className="mt-5 outline-none">
                   <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
                     <div className="space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-zinc-50 px-3 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-3 py-3">
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
@@ -1172,8 +1198,8 @@ function App() {
                     </div>
 
                     <div className="space-y-4">
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Scope summary</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Scope summary</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {scopePills.map((pill) => (
                             <Badge key={pill.key} tone="neutral">
@@ -1189,19 +1215,19 @@ function App() {
                             { label: "Clusters", value: formatNumber(graphInsights.clusters.length) },
                             { label: "Collapsed", value: formatNumber(collapsedGroups.length) }
                           ].map((metric) => (
-                            <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
-                              <div className="mt-2 text-lg font-semibold text-zinc-950">{metric.value}</div>
+                            <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+                              <div className="mt-2 text-lg font-semibold text-[var(--color-ink)]">{metric.value}</div>
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Semantic groups</div>
-                            <div className="mt-1 text-base font-semibold text-zinc-950">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Semantic groups</div>
+                            <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">
                               {groupingMode === "provider" ? "Provider clusters" : "Concept clusters"}
                             </div>
                           </div>
@@ -1213,14 +1239,14 @@ function App() {
                             {graphInsights.clusters.map((cluster) => {
                               const collapsed = collapsedGroups.includes(cluster.id);
                               return (
-                                <div key={cluster.id} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                                <div key={cluster.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="flex items-center gap-2">
                                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cluster.accent }} />
-                                        <div className="truncate text-sm font-semibold text-zinc-950">{cluster.label}</div>
+                                        <div className="truncate text-sm font-semibold text-[var(--color-ink)]">{cluster.label}</div>
                                       </div>
-                                      <div className="mt-1 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                                      <div className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
                                         {formatNumber(cluster.nodeCount)} entities · {formatNumber(cluster.noteCount)} notes
                                       </div>
                                     </div>
@@ -1248,7 +1274,7 @@ function App() {
                                 </div>
                               );
                             })}
-                            {!graphInsights.clusters.length ? <p className="text-sm text-zinc-500">No clusters available in this scope yet.</p> : null}
+                            {!graphInsights.clusters.length ? <p className="text-sm text-[var(--color-ink-soft)]">No clusters available in this scope yet.</p> : null}
                           </div>
                         </ScrollArea>
                       </div>
@@ -1264,37 +1290,37 @@ function App() {
                           key={storyline.id}
                           type="button"
                           onClick={() => activateFocus(storyline.label, storyline.sessionIds, "atlas")}
-                          className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4 text-left transition hover:border-zinc-300 hover:bg-white"
+                          className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-raised)]"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">{storyline.clusterLabel}</div>
-                              <div className="mt-1 truncate text-lg font-semibold text-zinc-950">{storyline.label}</div>
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{storyline.clusterLabel}</div>
+                              <div className="mt-1 truncate text-lg font-semibold text-[var(--color-ink)]">{storyline.label}</div>
                             </div>
                             <span className="h-3 w-3 rounded-full" style={{ backgroundColor: storyline.accent }} />
                           </div>
 
-                          <p className="mt-3 text-sm leading-6 text-zinc-600">{storyline.summary}</p>
+                          <p className="mt-3 text-sm leading-6 text-[var(--color-ink-soft)]">{storyline.summary}</p>
                           <div className="mt-4 flex flex-wrap gap-2">
                             <Badge tone="neutral">{formatNumber(storyline.noteCount)} notes</Badge>
                             <Badge tone="neutral">{formatNumber(storyline.degree)} links</Badge>
                           </div>
-                          <div className="mt-4 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                          <div className="mt-4 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
                             Updated {formatCompactDate(storyline.lastUpdated, "No recent change")}
                           </div>
                         </button>
                       ))}
                       {!graphInsights.storylines.length ? (
-                        <div className="rounded-[8px] border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500 md:col-span-2">
+                        <div className="rounded-[8px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-6 text-sm text-[var(--color-ink-soft)] md:col-span-2">
                           No storylines are available in this scope yet.
                         </div>
                       ) : null}
                     </div>
 
                     <div className="space-y-4">
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Activity lane</div>
-                        <div className="mt-1 text-base font-semibold text-zinc-950">Recent note movement</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Activity lane</div>
+                        <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">Recent note movement</div>
                         <div className="mt-4 flex justify-center">
                           <AreaChart width={292} height={220} data={activityBuckets}>
                             <defs>
@@ -1325,8 +1351,8 @@ function App() {
                               onClick={() => handleBucketToggle(bucket.bucket)}
                               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                                 route.bucket === bucket.bucket
-                                  ? "border-zinc-950 bg-zinc-950 text-white"
-                                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                                  ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                                  : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)]"
                               }`}
                             >
                               {bucket.label}
@@ -1335,27 +1361,27 @@ function App() {
                         </div>
                       </div>
 
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Dense nodes</div>
-                        <div className="mt-1 text-base font-semibold text-zinc-950">High-traffic concepts</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Dense nodes</div>
+                        <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">High-traffic concepts</div>
                         <div className="mt-4 space-y-2">
                           {graphInsights.denseNodes.slice(0, 6).map((node) => (
                             <button
                               key={node.id}
                               type="button"
                               onClick={() => activateFocus(node.label, node.sessionIds, "atlas")}
-                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-3 text-left transition hover:bg-zinc-50"
+                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-3 text-left transition hover:bg-[var(--color-paper-sunken)]"
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-zinc-950">{node.label}</div>
-                                <div className="mt-1 text-xs uppercase tracking-[0.08em] text-zinc-500">
+                                <div className="truncate text-sm font-semibold text-[var(--color-ink)]">{node.label}</div>
+                                <div className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
                                   {formatNumber(node.degree)} links · {formatNumber(node.noteCount)} notes
                                 </div>
                               </div>
                               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: node.accent }} />
                             </button>
                           ))}
-                          {!graphInsights.denseNodes.length ? <p className="text-sm text-zinc-500">No dense nodes in this scope yet.</p> : null}
+                          {!graphInsights.denseNodes.length ? <p className="text-sm text-[var(--color-ink-soft)]">No dense nodes in this scope yet.</p> : null}
                         </div>
                       </div>
                     </div>
@@ -1372,19 +1398,19 @@ function App() {
                           { label: "Orphans", value: formatNumber(graphInsights.orphanNodes), detail: "Disconnected nodes in scope" },
                           { label: "Clusters", value: formatNumber(graphInsights.clusters.length), detail: `${groupingMode === "provider" ? "Provider" : "Concept"} groups` }
                         ].map((metric) => (
-                          <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
-                            <div className="mt-2 text-3xl font-semibold text-zinc-950">{metric.value}</div>
-                            <div className="mt-2 text-sm text-zinc-500">{metric.detail}</div>
+                          <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+                            <div className="mt-2 text-3xl font-semibold text-[var(--color-ink)]">{metric.value}</div>
+                            <div className="mt-2 text-sm text-[var(--color-ink-soft)]">{metric.detail}</div>
                           </div>
                         ))}
                       </div>
 
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Graph hygiene</div>
-                            <div className="mt-1 text-base font-semibold text-zinc-950">Lint and maintenance cues</div>
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Graph hygiene</div>
+                            <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">Lint and maintenance cues</div>
                           </div>
                           <Badge tone={graphInsights.warnings.length ? "warning" : "success"}>
                             {graphInsights.warnings.length ? `${graphInsights.warnings.length} signals` : "Healthy"}
@@ -1393,11 +1419,11 @@ function App() {
 
                         <div className="space-y-3">
                           {graphInsights.warnings.map((warning) => (
-                            <div key={warning.id} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                            <div key={warning.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
                               <div className="flex items-start justify-between gap-3">
                                 <div>
-                                  <div className="text-sm font-semibold text-zinc-950">{warning.label}</div>
-                                  <div className="mt-1 text-sm leading-6 text-zinc-600">{warning.detail}</div>
+                                  <div className="text-sm font-semibold text-[var(--color-ink)]">{warning.label}</div>
+                                  <div className="mt-1 text-sm leading-6 text-[var(--color-ink-soft)]">{warning.detail}</div>
                                 </div>
                                 <Badge tone={warning.tone === "warning" ? "warning" : warning.tone === "danger" ? "danger" : "info"}>
                                   {warning.tone}
@@ -1421,9 +1447,9 @@ function App() {
                         </div>
                       </div>
 
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Query surface</div>
-                        <div className="mt-1 text-base font-semibold text-zinc-950">What the retriever can see right now</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Query surface</div>
+                        <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">What the retriever can see right now</div>
                         <div className="mt-4 grid gap-3 sm:grid-cols-2">
                           {[
                             { label: "Visible notes", value: formatNumber(visibleSessions.length) },
@@ -1431,9 +1457,9 @@ function App() {
                             { label: "Nodes per note", value: graphInsights.averageNodesPerSession.toFixed(1) },
                             { label: "Single-source nodes", value: formatNumber(graphInsights.singleSourceNodes) }
                           ].map((metric) => (
-                            <div key={metric.label} className="rounded-[8px] border border-zinc-200 bg-white p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{metric.label}</div>
-                              <div className="mt-2 text-lg font-semibold text-zinc-950">{metric.value}</div>
+                            <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+                              <div className="mt-2 text-lg font-semibold text-[var(--color-ink)]">{metric.value}</div>
                             </div>
                           ))}
                         </div>
@@ -1441,19 +1467,19 @@ function App() {
                     </div>
 
                     <div className="space-y-4">
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Provider mix</div>
-                        <div className="mt-1 text-base font-semibold text-zinc-950">Evidence by source</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Provider mix</div>
+                        <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">Evidence by source</div>
                         <div className="mt-4 space-y-3">
                           {providerPie.map((item) => {
                             const maxCount = Math.max(...providerPie.map((provider) => provider.count), 1);
                             return (
-                              <div key={item.provider} className="rounded-[8px] border border-zinc-200 bg-white p-3">
+                              <div key={item.provider} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
                                 <div className="flex items-center justify-between gap-3">
-                                  <div className="text-sm font-medium text-zinc-700">{item.label}</div>
-                                  <div className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</div>
+                                  <div className="text-sm font-medium text-[var(--color-ink)]">{item.label}</div>
+                                  <div className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</div>
                                 </div>
-                                <div className="mt-2 h-2 rounded-full bg-zinc-100">
+                                <div className="mt-2 h-2 rounded-full bg-[var(--color-paper-sunken)]">
                                   <div
                                     className="h-full rounded-full"
                                     style={{
@@ -1465,13 +1491,13 @@ function App() {
                               </div>
                             );
                           })}
-                          {!providerPie.length ? <p className="text-sm text-zinc-500">No provider evidence in this scope yet.</p> : null}
+                          {!providerPie.length ? <p className="text-sm text-[var(--color-ink-soft)]">No provider evidence in this scope yet.</p> : null}
                         </div>
                       </div>
 
-                      <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-zinc-500">Top signals</div>
-                        <div className="mt-1 text-base font-semibold text-zinc-950">Most repeated labels in scope</div>
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Top signals</div>
+                        <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">Most repeated labels in scope</div>
                         <div className="mt-4 space-y-2">
                           {signals.primary.slice(0, 6).map((item) => (
                             <button
@@ -1481,13 +1507,13 @@ function App() {
                                 setGraphFocus(null);
                                 updateRoute({ q: item.label, view: "atlas", note: null }, true);
                               }}
-                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-zinc-200 bg-white px-3 py-3 text-left transition hover:bg-zinc-50"
+                              className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-3 text-left transition hover:bg-[var(--color-paper-sunken)]"
                             >
-                              <span className="truncate text-sm font-medium text-zinc-700">{item.label}</span>
-                              <span className="text-sm font-semibold text-zinc-950">{formatNumber(item.count)}</span>
+                              <span className="truncate text-sm font-medium text-[var(--color-ink)]">{item.label}</span>
+                              <span className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
                             </button>
                           ))}
-                          {!signals.primary.length ? <p className="text-sm text-zinc-500">No repeated labels yet.</p> : null}
+                          {!signals.primary.length ? <p className="text-sm text-[var(--color-ink-soft)]">No repeated labels yet.</p> : null}
                         </div>
                       </div>
                     </div>
@@ -1502,12 +1528,12 @@ function App() {
             <Card className="p-4">
               <CardHeader>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Results</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Results</div>
                   <CardTitle className="mt-1 text-lg">
                     {!isCustomScope && route.category === "todo" ? "Change log notes" : isCustomScope ? "Notes in custom category" : "Notes in scope"}
                   </CardTitle>
                 </div>
-                <div className="text-sm text-zinc-500">{noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}</div>
+                <div className="text-sm text-[var(--color-ink-soft)]">{noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}</div>
               </CardHeader>
               <CardContent className="mt-4">
                 <ScrollArea className="h-[min(56vh,560px)] pr-4">
@@ -1521,7 +1547,7 @@ function App() {
                           type="button"
                           onClick={() => updateRoute({ note: session.id }, false)}
                           className={`w-full rounded-[8px] border p-3 text-left transition ${
-                            isActive ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white hover:bg-zinc-50"
+                            isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                           }`}
                         >
                           <div className="mb-2 flex items-center justify-between gap-3">
@@ -1533,23 +1559,23 @@ function App() {
                               {(session.user_categories ?? []).slice(0, 3).map((category) => (
                                 <span
                                   key={category}
-                                  className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-zinc-200 px-2 py-0.5 text-[10px] text-zinc-500"}
+                                  className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
                                 >
                                   {category}
                                 </span>
                               ))}
                             </div>
                           ) : null}
-                          <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-zinc-500"}>
+                          <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
                             {formatCompactDate(session.updated_at)}
                           </div>
-                          <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-zinc-600"}>
+                          <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-ink-soft)]"}>
                             {sessionPreviewText(session, match, session.category ?? activeDisplayCategory)}
                           </p>
                         </button>
                       );
                     })}
-                    {!noteListItems.length ? <p className="text-sm text-zinc-500">No notes match this view yet.</p> : null}
+                    {!noteListItems.length ? <p className="text-sm text-[var(--color-ink-soft)]">No notes match this view yet.</p> : null}
                   </div>
                 </ScrollArea>
               </CardContent>
@@ -1558,7 +1584,7 @@ function App() {
             <Card className="p-4">
               <CardHeader>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Reader</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Reader</div>
                   <CardTitle className="mt-1 text-lg">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
                   <CardDescription>
                     {noteQuery.data
@@ -1573,20 +1599,20 @@ function App() {
                   {selectedSession ? (
                     <div className="mt-4 space-y-3">
                       <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">Custom categories</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {(selectedSession.user_categories ?? []).map((category) => (
                             <button
                               key={category}
                               type="button"
                               onClick={() => void handleRemoveUserCategory(category)}
-                              className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600 transition hover:bg-zinc-50"
+                              className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1 text-xs text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-sunken)]"
                             >
                               {category} ×
                             </button>
                           ))}
                           {!(selectedSession.user_categories ?? []).length ? (
-                            <span className="text-sm text-zinc-500">No custom categories assigned yet.</span>
+                            <span className="text-sm text-[var(--color-ink-soft)]">No custom categories assigned yet.</span>
                           ) : null}
                         </div>
                       </div>
@@ -1602,7 +1628,7 @@ function App() {
                           value={userCategoryDraft}
                           onChange={(event) => setUserCategoryDraft(event.target.value)}
                           placeholder="Add this note to a custom category"
-                          className="h-10 flex-1 rounded-[8px] border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-zinc-300"
+                          className="h-10 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
                         />
                         <Button type="submit" size="sm" variant="secondary" disabled={!userCategoryDraft.trim()}>
                           Add category
@@ -1642,10 +1668,10 @@ function App() {
                   <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{userCategoryError}</div>
                 ) : null}
                 {selectedSession && noteQuery.isLoading ? (
-                  <div className="rounded-[8px] border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-500">Loading note content…</div>
+                  <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content…</div>
                 ) : selectedSession && noteQuery.data ? (
                   <Tabs.Root value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
-                    <Tabs.List className="mb-4 inline-flex rounded-[8px] border border-zinc-200 bg-zinc-50 p-1">
+                    <Tabs.List className="mb-4 inline-flex rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
                       {[
                         { value: "overview", label: "Overview" },
                         { value: "transcript", label: "Transcript" },
@@ -1654,7 +1680,7 @@ function App() {
                         <Tabs.Trigger
                           key={tab.value}
                           value={tab.value}
-                          className="rounded-[6px] px-3 py-2 text-sm font-medium text-zinc-500 outline-none transition data-[state=active]:bg-white data-[state=active]:text-zinc-950 data-[state=active]:shadow-sm"
+                          className="rounded-[6px] px-3 py-2 text-sm font-medium text-[var(--color-ink-soft)] outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm"
                         >
                           {tab.label}
                         </Tabs.Trigger>
@@ -1674,7 +1700,7 @@ function App() {
                     </ScrollArea>
                   </Tabs.Root>
                 ) : (
-                  <div className="rounded-[8px] border border-dashed border-zinc-200 bg-zinc-50 p-6 text-sm text-zinc-500">
+                  <div className="rounded-[8px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-6 text-sm text-[var(--color-ink-soft)]">
                     Select a note from the list, atlas, or storyline view to inspect its summary, transcript, and markdown.
                   </div>
                 )}

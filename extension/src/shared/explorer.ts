@@ -17,10 +17,17 @@ export const categoryDescriptions: Record<SessionCategoryName, string> = {
 };
 
 export const categoryPalette: Record<SessionCategoryName, { accent: string; soft: string; ink: string }> = {
-  factual: { accent: "#0f8a84", soft: "#e7f6f4", ink: "#095b58" },
-  ideas: { accent: "#c77724", soft: "#fbf0e4", ink: "#855117" },
-  journal: { accent: "#2477c7", soft: "#e8f1fb", ink: "#154d82" },
-  todo: { accent: "#b04d37", soft: "#f8ebe7", ink: "#793324" }
+  factual: { accent: "#0f8a84", soft: "#e2f1ef", ink: "#076b66" },
+  ideas: { accent: "#d18425", soft: "#faecd4", ink: "#8a561a" },
+  journal: { accent: "#4968ab", soft: "#e3ebf8", ink: "#2f4a85" },
+  todo: { accent: "#c15a40", soft: "#f7e4dd", ink: "#8a3b27" }
+};
+
+export const categoryGlyphs: Record<SessionCategoryName, string> = {
+  factual: "§",
+  ideas: "✦",
+  journal: "¶",
+  todo: "✓"
 };
 
 export const providerLabels: Record<ProviderName, string> = {
@@ -31,8 +38,8 @@ export const providerLabels: Record<ProviderName, string> = {
 
 export const providerColors: Record<ProviderName, string> = {
   chatgpt: "#0f8a84",
-  gemini: "#c77724",
-  grok: "#2477c7"
+  gemini: "#d18425",
+  grok: "#4968ab"
 };
 
 export type CategorySortMode = "recent" | "title";
