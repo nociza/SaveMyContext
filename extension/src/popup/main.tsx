@@ -180,32 +180,50 @@ function PopupApp() {
     await summaryQuery.refetch();
   }
 
+  const summaryErrorMessage =
+    summaryQuery.error instanceof Error ? summaryQuery.error.message : summaryQuery.error ? "Could not load dashboard summary." : "";
+  const statusMessage =
+    status?.providerDriftAlert
+      ? formatProviderDriftAlert(status.providerDriftAlert)
+      : captureStatus || actionError || summaryErrorMessage;
+  const lastSyncLabel = formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "No sync yet");
+
   return (
-    <div className="mx-auto grid h-[560px] w-full max-w-[640px] grid-rows-[auto_auto_auto_1fr_auto_auto] gap-2 overflow-hidden p-3" data-testid="popup-root">
+    <div
+      className="relative mx-auto grid h-[560px] w-full max-w-[640px] grid-rows-[54px_50px_58px_1fr_36px] gap-2 overflow-hidden p-3"
+      data-testid="popup-root"
+    >
       <div className="sr-only">
         <span id="last-session">{status?.lastSessionKey ?? ""}</span>
         <span id="last-error">{lastErrorText}</span>
       </div>
 
-      <header className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold text-zinc-500">SaveMyContext</div>
+      <header className="grid min-h-0 grid-cols-[1fr_292px] items-stretch gap-2">
+        <div className="flex min-w-0 flex-col justify-center">
+          <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500">
+            <span>SaveMyContext</span>
+            <span className="h-1 w-1 rounded-full bg-zinc-300" />
+            <span className="truncate">Last sync · {lastSyncLabel}</span>
+          </div>
           <h1 className="mt-0.5 text-2xl font-semibold leading-none text-zinc-950">Context Workspace</h1>
         </div>
-        <div className="flex items-center gap-2">
-          {summaryQuery.isFetching || sessionsQuery.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin text-zinc-400" /> : null}
-          <Badge tone={connection.tone}>{connection.label}</Badge>
+
+        <div className="panel-surface flex min-w-0 items-center justify-between gap-3 rounded-[8px] px-3 py-2">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold text-zinc-500">Backend</div>
+            <div className="mt-0.5 truncate text-sm font-semibold leading-none text-zinc-950">
+              {settings ? formatBackendLabel(settings) : loading ? "Loading" : "Unavailable"}
+            </div>
+            <div className="mt-1 truncate text-[11px] leading-none text-zinc-500">{status ? formatBackendStatus(status) : error ?? "Checking"}</div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {summaryQuery.isFetching || sessionsQuery.isFetching ? <LoaderCircle className="h-4 w-4 animate-spin text-zinc-400" /> : null}
+            <Badge tone={connection.tone}>{connection.label}</Badge>
+          </div>
         </div>
       </header>
 
-      <div className="panel-surface grid h-[58px] grid-cols-[1.35fr_1fr_1fr] overflow-hidden rounded-[8px]">
-        <div className="border-r border-zinc-200 px-3 py-2">
-          <div className="text-[11px] font-semibold text-zinc-500">Backend</div>
-          <div className="mt-0.5 truncate text-sm font-medium text-zinc-950">
-            {settings ? formatBackendLabel(settings) : loading ? "Loading" : "Unavailable"}
-          </div>
-          <div className="truncate text-xs text-zinc-500">{status ? formatBackendStatus(status) : error ?? "Checking configuration"}</div>
-        </div>
+      <div className="panel-surface grid min-h-0 grid-cols-2 overflow-hidden rounded-[8px]">
         <div className="border-r border-zinc-200 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[11px] font-semibold text-zinc-500">History</div>
@@ -213,7 +231,7 @@ function PopupApp() {
               {history.label}
             </Badge>
           </div>
-          <div id="history-sync" className="mt-1 truncate text-xs text-zinc-700">
+          <div id="history-sync" className="mt-1 truncate text-xs leading-none text-zinc-700">
             {settings && status ? formatHistorySync(settings, status) : "Loading"}
           </div>
         </div>
@@ -224,7 +242,7 @@ function PopupApp() {
               {processing.label}
             </Badge>
           </div>
-          <div id="processing-status" className="mt-1 truncate text-xs text-zinc-700">
+          <div id="processing-status" className="mt-1 truncate text-xs leading-none text-zinc-700">
             {status ? formatProcessing(status) : "Loading"}
           </div>
         </div>
@@ -261,17 +279,17 @@ function PopupApp() {
             key={metric.label}
             type="button"
             onClick={metric.onClick}
-            className="panel-surface grid grid-cols-[auto_1fr] items-center gap-2 rounded-[8px] px-3 py-2 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
+            className="panel-surface flex items-center justify-between gap-2 rounded-[8px] px-3 py-2 text-left transition hover:border-zinc-300 hover:bg-zinc-50"
           >
-            <metric.icon className="h-4 w-4 text-zinc-400" />
-            <div>
+            <div className="flex min-w-0 items-center gap-2">
+              <metric.icon className="h-4 w-4 shrink-0 text-zinc-400" />
               <div className="text-[11px] font-semibold text-zinc-500">{metric.label}</div>
-              <div
-                id={metric.label === "Queued AI" ? "processing-pending" : undefined}
-                className="mt-0.5 text-xl font-semibold leading-none text-zinc-950"
-              >
-                {metric.value}
-              </div>
+            </div>
+            <div
+              id={metric.label === "Queued AI" ? "processing-pending" : undefined}
+              className="w-[46px] shrink-0 text-right text-xl font-semibold leading-none tabular-nums text-zinc-950"
+            >
+              {metric.value}
             </div>
           </button>
         ))}
@@ -330,8 +348,8 @@ function PopupApp() {
                 />
               </PieChart>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-                <div className="text-lg font-semibold leading-none text-zinc-950">{formatNumber(featuredCategoryData.count)}</div>
-                <div className="mt-1 text-[11px] font-medium text-zinc-500">{featuredCategoryData.share.toFixed(0)}%</div>
+                <div className="text-lg font-semibold leading-none tabular-nums text-zinc-950">{formatNumber(featuredCategoryData.count)}</div>
+                <div className="mt-1 text-[11px] font-medium tabular-nums text-zinc-500">{featuredCategoryData.share.toFixed(0)}%</div>
               </div>
             </button>
 
@@ -352,7 +370,7 @@ function PopupApp() {
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
                     {item.label}
                   </span>
-                  <span className="text-sm font-semibold">{formatNumber(item.count)}</span>
+                  <span className="w-8 text-right text-sm font-semibold tabular-nums">{formatNumber(item.count)}</span>
                 </button>
               ))}
             </div>
@@ -430,24 +448,22 @@ function PopupApp() {
         ) : null}
       </div>
 
-      <div className="min-h-[28px]">
-        {status?.providerDriftAlert ? (
-          <div id="provider-drift-card" className="truncate rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-            <span id="provider-drift" className="sr-only">
-              {status.providerDriftAlert.provider}: {status.providerDriftAlert.message}
-            </span>
-            {formatProviderDriftAlert(status.providerDriftAlert)}
-          </div>
-        ) : captureStatus || actionError || summaryQuery.error ? (
-          <div className="truncate rounded-[8px] border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-600">
-            {captureStatus || actionError || (summaryQuery.error instanceof Error ? summaryQuery.error.message : "Could not load dashboard summary.")}
-          </div>
-        ) : (
-          <div className="truncate px-1 py-1.5 text-xs text-zinc-500">
-            Last sync · {formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "No sync yet")}
-          </div>
-        )}
-      </div>
+      {statusMessage ? (
+        <div className="absolute bottom-[56px] left-3 right-3">
+          {status?.providerDriftAlert ? (
+            <div id="provider-drift-card" className="truncate rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 shadow-sm">
+              <span id="provider-drift" className="sr-only">
+                {status.providerDriftAlert.provider}: {status.providerDriftAlert.message}
+              </span>
+              {statusMessage}
+            </div>
+          ) : (
+            <div className="truncate rounded-[8px] border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-600 shadow-sm">
+              {statusMessage}
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
