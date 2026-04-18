@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BackendCategoryGraph, BackendSessionListItem } from "../src/shared/types";
-import { buildCategoryGraphInsights, clusterKeyForNode } from "../src/ui/lib/category-graph-insights";
+import { buildCategoryGraphClusters, buildCategoryGraphInsights, clusterKeyForNode } from "../src/ui/lib/category-graph-insights";
 
 const sessions: BackendSessionListItem[] = [
   {
@@ -103,5 +103,15 @@ describe("category graph insights", () => {
     expect(insights.clusters.map((cluster) => cluster.id)).toEqual(["kind:concept", "kind:entity"]);
     expect(clusterKeyForNode(graph.nodes[1], "kind")).toBe("kind:concept");
     expect(insights.denseNodes[0]?.neighbors).toContain("Attention");
+  });
+
+  it("can cluster by graph community and preserve peripheral nodes", () => {
+    const lookup = buildCategoryGraphClusters(graph, "factual", "community");
+    const insights = buildCategoryGraphInsights(graph, sessions, "factual", "community");
+
+    expect(lookup.clusters.map((cluster) => cluster.id)).toEqual(["community:n2", "community:peripheral"]);
+    expect(lookup.byNodeId.get("n1")?.label).toBe("Transformer + Attention");
+    expect(lookup.byNodeId.get("n3")?.label).toBe("Peripheral facts");
+    expect(insights.storylines[0]?.clusterLabel).toBe("Transformer + Attention");
   });
 });

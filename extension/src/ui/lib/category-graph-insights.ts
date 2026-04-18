@@ -7,7 +7,7 @@ import type {
   SessionCategoryName
 } from "../../shared/types";
 
-export type GraphGroupingMode = "provider" | "kind";
+export type GraphGroupingMode = "community" | "provider" | "kind";
 export type InsightTone = "neutral" | "info" | "warning" | "danger";
 
 export interface CategoryGraphCluster {
@@ -67,6 +67,7 @@ export interface CategoryGraphInsights {
 }
 
 const kindAccents = ["#0f8a84", "#c77724", "#2477c7", "#b04d37", "#2f855a", "#0ea5a4"];
+const communityAccents = ["#0f8a84", "#c77724", "#4968ab", "#b04d37", "#2f855a", "#7c5aa6", "#2477c7", "#8b5e34"];
 
 function hashString(value: string): number {
   let hash = 0;
@@ -101,6 +102,9 @@ function latestSessionTimestamp(sessionIds: string[], sessionTimestampById: Map<
 }
 
 export function clusterKeyForNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
+  if (groupingMode === "community") {
+    return "community:unassigned";
+  }
   if (groupingMode === "provider") {
     return node.provider ? `provider:${node.provider}` : "provider:unassigned";
   }
@@ -108,6 +112,9 @@ export function clusterKeyForNode(node: Pick<BackendExplorerGraphNode, "kind" | 
 }
 
 export function clusterLabelForNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
+  if (groupingMode === "community") {
+    return "Community";
+  }
   if (groupingMode === "provider") {
     return node.provider ? providerLabels[node.provider] : "Unassigned";
   }
@@ -119,6 +126,9 @@ export function clusterAccentForNode(
   category: SessionCategoryName,
   groupingMode: GraphGroupingMode
 ): string {
+  if (groupingMode === "community") {
+    return categoryPalette[category].accent;
+  }
   if (groupingMode === "provider" && node.provider) {
     return providerColors[node.provider];
   }
@@ -127,6 +137,217 @@ export function clusterAccentForNode(
     return categoryPalette[category].accent;
   }
   return kindAccents[hashString(kind) % kindAccents.length] ?? categoryPalette[category].accent;
+}
+
+type MutableCluster = {
+  id: string;
+  label: string;
+  accent: string;
+  mode: GraphGroupingMode;
+  provider?: ProviderName | null;
+  nodeIds: Set<string>;
+  sessionIds: Set<string>;
+  edgeCount: number;
+};
+
+export interface CategoryGraphClusterLookup {
+  clusters: CategoryGraphCluster[];
+  byNodeId: Map<string, CategoryGraphCluster>;
+}
+
+function buildAdjacency(graph: BackendCategoryGraph): Map<string, Map<string, number>> {
+  const adjacency = new Map<string, Map<string, number>>();
+  for (const node of graph.nodes) {
+    adjacency.set(node.id, new Map());
+  }
+
+  for (const edge of graph.edges) {
+    if (!adjacency.has(edge.source) || !adjacency.has(edge.target) || edge.source === edge.target) {
+      continue;
+    }
+    const weight = Math.max(edge.weight, 1);
+    const sourceNeighbors = adjacency.get(edge.source);
+    const targetNeighbors = adjacency.get(edge.target);
+    sourceNeighbors?.set(edge.target, (sourceNeighbors.get(edge.target) ?? 0) + weight);
+    targetNeighbors?.set(edge.source, (targetNeighbors.get(edge.source) ?? 0) + weight);
+  }
+
+  return adjacency;
+}
+
+function detectCommunities(graph: BackendCategoryGraph): Map<string, string> {
+  const adjacency = buildAdjacency(graph);
+  const communities = new Map(graph.nodes.map((node) => [node.id, node.id] as const));
+  const rankedNodes = [...graph.nodes].sort((left, right) => {
+    const leftDegree = adjacency.get(left.id)?.size ?? 0;
+    const rightDegree = adjacency.get(right.id)?.size ?? 0;
+    return rightDegree - leftDegree || right.session_ids.length - left.session_ids.length || left.label.localeCompare(right.label);
+  });
+
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    let changed = false;
+
+    for (const node of rankedNodes) {
+      const neighbors = adjacency.get(node.id);
+      if (!neighbors?.size) {
+        communities.set(node.id, "peripheral");
+        continue;
+      }
+
+      const scores = new Map<string, number>();
+      for (const [neighborId, weight] of neighbors) {
+        const communityId = communities.get(neighborId) ?? neighborId;
+        scores.set(communityId, (scores.get(communityId) ?? 0) + weight);
+      }
+
+      const currentCommunityId = communities.get(node.id) ?? node.id;
+      const currentScore = scores.get(currentCommunityId) ?? 0;
+      const [bestCommunityId, bestScore] =
+        [...scores.entries()].sort(
+          ([leftId, leftScore], [rightId, rightScore]) =>
+            rightScore - leftScore || (leftId === currentCommunityId ? -1 : rightId === currentCommunityId ? 1 : leftId.localeCompare(rightId))
+        )[0] ?? [currentCommunityId, currentScore];
+
+      if (bestCommunityId !== currentCommunityId && bestScore >= currentScore) {
+        communities.set(node.id, bestCommunityId);
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      break;
+    }
+  }
+
+  return communities;
+}
+
+function nodeImportance(node: BackendExplorerGraphNode, adjacency: Map<string, Map<string, number>>): number {
+  const degree = adjacency.get(node.id)?.size ?? 0;
+  return degree * 5 + node.session_ids.length * 4 + Math.log(node.size + 1) * 6;
+}
+
+export function buildCategoryGraphClusters(
+  graph: BackendCategoryGraph,
+  category: SessionCategoryName,
+  groupingMode: GraphGroupingMode
+): CategoryGraphClusterLookup {
+  const adjacency = buildAdjacency(graph);
+  const communityByNodeId = groupingMode === "community" ? detectCommunities(graph) : null;
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
+  const mutableClusters = new Map<string, MutableCluster>();
+
+  const ensureCluster = (node: BackendExplorerGraphNode): MutableCluster => {
+    const communityId = communityByNodeId?.get(node.id);
+    const id =
+      groupingMode === "community"
+        ? `community:${communityId ?? node.id}`
+        : clusterKeyForNode(node, groupingMode);
+    const created =
+      mutableClusters.get(id) ??
+      (() => {
+        const cluster: MutableCluster = {
+          id,
+          label:
+            groupingMode === "community"
+              ? communityId === "peripheral"
+                ? "Peripheral facts"
+                : "Community"
+              : clusterLabelForNode(node, groupingMode),
+          accent:
+            groupingMode === "community"
+              ? communityAccents[mutableClusters.size % communityAccents.length] ?? categoryPalette[category].accent
+              : clusterAccentForNode(node, category, groupingMode),
+          mode: groupingMode,
+          provider: groupingMode === "provider" ? node.provider ?? null : null,
+          nodeIds: new Set<string>(),
+          sessionIds: new Set<string>(),
+          edgeCount: 0
+        };
+        mutableClusters.set(id, cluster);
+        return cluster;
+      })();
+
+    return created;
+  };
+
+  for (const node of graph.nodes) {
+    const cluster = ensureCluster(node);
+    cluster.nodeIds.add(node.id);
+    for (const sessionId of node.session_ids) {
+      cluster.sessionIds.add(sessionId);
+    }
+  }
+
+  for (const edge of graph.edges) {
+    const sourceNode = nodeById.get(edge.source);
+    const targetNode = nodeById.get(edge.target);
+    if (!sourceNode || !targetNode) {
+      continue;
+    }
+
+    const sourceCluster = ensureCluster(sourceNode);
+    const targetCluster = ensureCluster(targetNode);
+    sourceCluster.edgeCount += 1;
+    if (sourceCluster.id !== targetCluster.id) {
+      targetCluster.edgeCount += 1;
+    }
+  }
+
+  const rankedMutableClusters = [...mutableClusters.values()].sort(
+    (left, right) =>
+      right.sessionIds.size - left.sessionIds.size ||
+      right.edgeCount - left.edgeCount ||
+      right.nodeIds.size - left.nodeIds.size ||
+      left.id.localeCompare(right.id)
+  );
+
+  for (const [index, cluster] of rankedMutableClusters.entries()) {
+    if (groupingMode !== "community") {
+      continue;
+    }
+    cluster.accent = communityAccents[index % communityAccents.length] ?? categoryPalette[category].accent;
+    if (cluster.id === "community:peripheral") {
+      cluster.label = "Peripheral facts";
+      continue;
+    }
+
+    const anchorLabels = [...cluster.nodeIds]
+      .map((nodeId) => nodeById.get(nodeId))
+      .filter((node): node is BackendExplorerGraphNode => Boolean(node))
+      .sort((left, right) => nodeImportance(right, adjacency) - nodeImportance(left, adjacency) || left.label.localeCompare(right.label))
+      .slice(0, 2)
+      .map((node) => node.label);
+    cluster.label = anchorLabels.length ? anchorLabels.join(" + ") : `Community ${index + 1}`;
+  }
+
+  const clusters = rankedMutableClusters.map((cluster) => ({
+    id: cluster.id,
+    label: cluster.label,
+    accent: cluster.accent,
+    mode: cluster.mode,
+    provider: cluster.provider,
+    nodeIds: Array.from(cluster.nodeIds),
+    nodeCount: cluster.nodeIds.size,
+    edgeCount: cluster.edgeCount,
+    sessionIds: Array.from(cluster.sessionIds),
+    noteCount: cluster.sessionIds.size
+  }));
+
+  const clusterById = new Map(clusters.map((cluster) => [cluster.id, cluster] as const));
+  const byNodeId = new Map<string, CategoryGraphCluster>();
+  for (const node of graph.nodes) {
+    const clusterId =
+      groupingMode === "community"
+        ? `community:${communityByNodeId?.get(node.id) ?? node.id}`
+        : clusterKeyForNode(node, groupingMode);
+    const cluster = clusterById.get(clusterId);
+    if (cluster) {
+      byNodeId.set(node.id, cluster);
+    }
+  }
+
+  return { clusters, byNodeId };
 }
 
 export function buildCategoryGraphInsights(
@@ -149,43 +370,7 @@ export function buildCategoryGraphInsights(
     }
   }
 
-  type MutableCluster = {
-    id: string;
-    label: string;
-    accent: string;
-    mode: GraphGroupingMode;
-    provider?: ProviderName | null;
-    nodeIds: Set<string>;
-    sessionIds: Set<string>;
-    edgeCount: number;
-  };
-
-  const clusterMap = new Map<string, MutableCluster>();
-
-  for (const node of graph.nodes) {
-    const clusterId = clusterKeyForNode(node, groupingMode);
-    const cluster =
-      clusterMap.get(clusterId) ??
-      (() => {
-        const created: MutableCluster = {
-          id: clusterId,
-          label: clusterLabelForNode(node, groupingMode),
-          accent: clusterAccentForNode(node, category, groupingMode),
-          mode: groupingMode,
-          provider: groupingMode === "provider" ? node.provider ?? null : null,
-          nodeIds: new Set<string>(),
-          sessionIds: new Set<string>(),
-          edgeCount: 0
-        };
-        clusterMap.set(clusterId, created);
-        return created;
-      })();
-
-    cluster.nodeIds.add(node.id);
-    for (const sessionId of node.session_ids) {
-      cluster.sessionIds.add(sessionId);
-    }
-  }
+  const clusterLookup = buildCategoryGraphClusters(graph, category, groupingMode);
 
   for (const edge of graph.edges) {
     const sourceNode = nodeById.get(edge.source);
@@ -202,35 +387,9 @@ export function buildCategoryGraphInsights(
     for (const sessionId of edge.session_ids) {
       graphSessionIds.add(sessionId);
     }
-
-    const sourceClusterId = clusterKeyForNode(sourceNode, groupingMode);
-    const targetClusterId = clusterKeyForNode(targetNode, groupingMode);
-    const sourceCluster = clusterMap.get(sourceClusterId);
-    if (sourceCluster) {
-      sourceCluster.edgeCount += 1;
-    }
-    if (sourceClusterId !== targetClusterId) {
-      const targetCluster = clusterMap.get(targetClusterId);
-      if (targetCluster) {
-        targetCluster.edgeCount += 1;
-      }
-    }
   }
 
-  const clusters = Array.from(clusterMap.values())
-    .map((cluster) => ({
-      id: cluster.id,
-      label: cluster.label,
-      accent: cluster.accent,
-      mode: cluster.mode,
-      provider: cluster.provider,
-      nodeIds: Array.from(cluster.nodeIds),
-      nodeCount: cluster.nodeIds.size,
-      edgeCount: cluster.edgeCount,
-      sessionIds: Array.from(cluster.sessionIds),
-      noteCount: cluster.sessionIds.size
-    }))
-    .sort((left, right) => right.noteCount - left.noteCount || right.edgeCount - left.edgeCount || left.label.localeCompare(right.label));
+  const clusters = clusterLookup.clusters;
 
   const orphanNodes = graph.nodes.filter((node) => (adjacency.get(node.id)?.size ?? 0) === 0);
   const corroboratedNodes = graph.nodes.filter((node) => node.session_ids.length > 1).length;
@@ -247,7 +406,7 @@ export function buildCategoryGraphInsights(
       return {
         id: node.id,
         label: node.label,
-        accent: clusterAccentForNode(node, category, groupingMode),
+        accent: clusterLookup.byNodeId.get(node.id)?.accent ?? clusterAccentForNode(node, category, groupingMode),
         kind: node.kind,
         provider: node.provider ?? null,
         degree: adjacency.get(node.id)?.size ?? 0,
@@ -268,6 +427,7 @@ export function buildCategoryGraphInsights(
   const storylines = graph.nodes
     .map((node) => {
       const clusterId = clusterKeyForNode(node, groupingMode);
+      const cluster = clusterLookup.byNodeId.get(node.id);
       const degree = adjacency.get(node.id)?.size ?? 0;
       const noteCount = node.session_ids.length;
       const score = degree * 4 + noteCount * 3 + Math.log(node.size + 1) * 6;
@@ -285,7 +445,7 @@ export function buildCategoryGraphInsights(
       return {
         id: node.id,
         label: node.label,
-        accent: clusterAccentForNode(node, category, groupingMode),
+        accent: cluster?.accent ?? clusterAccentForNode(node, category, groupingMode),
         kind: node.kind,
         provider: node.provider ?? null,
         degree,
@@ -293,8 +453,8 @@ export function buildCategoryGraphInsights(
         sessionIds: node.session_ids,
         neighbors,
         lastUpdated: node.updated_at ?? latestSessionTimestamp(node.session_ids, sessionTimestampById),
-        clusterId,
-        clusterLabel: storylineMap.get(clusterId) ?? clusterId,
+        clusterId: cluster?.id ?? clusterId,
+        clusterLabel: cluster?.label ?? storylineMap.get(clusterId) ?? clusterId,
         score,
         summary
       };

@@ -61,7 +61,7 @@ import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
-import { CategoryGraph } from "../ui/components/category-graph";
+import { CategoryGraph, type CategoryGraphDensity, type CategoryGraphFocusMode } from "../ui/components/category-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
 import { TodoWorkspace } from "../ui/components/todo-workspace";
@@ -367,8 +367,10 @@ function App() {
   const [route, setRoute] = useState<RouteState>(readRouteState);
   const [graphFocus, setGraphFocus] = useState<GraphFocus | null>(null);
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
-  const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("provider");
+  const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("community");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+  const [graphDensity, setGraphDensity] = useState<CategoryGraphDensity>("curated");
+  const [graphFocusMode, setGraphFocusMode] = useState<CategoryGraphFocusMode>("context");
   const [todoDraft, setTodoDraft] = useState("");
   const [todoActionError, setTodoActionError] = useState<string | null>(null);
   const [todoSavingSummary, setTodoSavingSummary] = useState<string | null>(null);
@@ -1152,6 +1154,13 @@ function App() {
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
+                            variant={groupingMode === "community" ? "primary" : "secondary"}
+                            onClick={() => setGroupingMode("community")}
+                          >
+                            Group by topic
+                          </Button>
+                          <Button
+                            size="sm"
                             variant={groupingMode === "provider" ? "primary" : "secondary"}
                             onClick={() => setGroupingMode("provider")}
                           >
@@ -1162,11 +1171,27 @@ function App() {
                             variant={groupingMode === "kind" ? "primary" : "secondary"}
                             onClick={() => setGroupingMode("kind")}
                           >
-                            Group by concept
+                            Group by type
                           </Button>
                         </div>
 
                         <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant={graphDensity === "curated" ? "primary" : "secondary"}
+                            onClick={() => setGraphDensity((current) => (current === "curated" ? "complete" : "curated"))}
+                          >
+                            {graphDensity === "curated" ? "Clean map" : "All nodes"}
+                          </Button>
+                          {graphFocus ? (
+                            <Button
+                              size="sm"
+                              variant={graphFocusMode === "context" ? "primary" : "secondary"}
+                              onClick={() => setGraphFocusMode((current) => (current === "context" ? "dim" : "context"))}
+                            >
+                              {graphFocusMode === "context" ? "Context only" : "Dim context"}
+                            </Button>
+                          ) : null}
                           <Button
                             size="sm"
                             variant="ghost"
@@ -1191,6 +1216,8 @@ function App() {
                         category={activeDisplayCategory}
                         groupingMode={groupingMode}
                         collapsedGroups={collapsedGroups}
+                        density={graphDensity}
+                        focusMode={graphFocusMode}
                         focusSessionIds={graphFocus?.sessionIds}
                         className="min-h-[420px] h-[min(62vh,700px)]"
                         onFocus={handleFocus}
@@ -1213,6 +1240,7 @@ function App() {
                             { label: "Linked notes", value: formatNumber(graphInsights.graphSessionIds.length) },
                             { label: "Outside graph", value: formatNumber(graphInsights.uncoveredSessions) },
                             { label: "Clusters", value: formatNumber(graphInsights.clusters.length) },
+                            { label: "Map mode", value: graphDensity === "curated" ? "Clean" : "Full" },
                             { label: "Collapsed", value: formatNumber(collapsedGroups.length) }
                           ].map((metric) => (
                             <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
@@ -1228,7 +1256,7 @@ function App() {
                           <div>
                             <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Semantic groups</div>
                             <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">
-                              {groupingMode === "provider" ? "Provider clusters" : "Concept clusters"}
+                              {groupingMode === "community" ? "Topic communities" : groupingMode === "provider" ? "Provider clusters" : "Node type groups"}
                             </div>
                           </div>
                           <Badge tone="neutral">{formatNumber(graphInsights.clusters.length)}</Badge>
@@ -1247,7 +1275,7 @@ function App() {
                                         <div className="truncate text-sm font-semibold text-[var(--color-ink)]">{cluster.label}</div>
                                       </div>
                                       <div className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-                                        {formatNumber(cluster.nodeCount)} entities · {formatNumber(cluster.noteCount)} notes
+                                        {formatNumber(cluster.nodeCount)} nodes · {formatNumber(cluster.noteCount)} notes
                                       </div>
                                     </div>
                                     {collapsed ? <Badge tone="info">Collapsed</Badge> : null}
@@ -1396,7 +1424,11 @@ function App() {
                           { label: "Coverage", value: `${formatPercent(graphInsights.sessionCoverage * 100)}%`, detail: `${formatNumber(graphInsights.graphSessionIds.length)} linked notes` },
                           { label: "Corroborated", value: formatNumber(graphInsights.corroboratedNodes), detail: "Nodes shared across notes" },
                           { label: "Orphans", value: formatNumber(graphInsights.orphanNodes), detail: "Disconnected nodes in scope" },
-                          { label: "Clusters", value: formatNumber(graphInsights.clusters.length), detail: `${groupingMode === "provider" ? "Provider" : "Concept"} groups` }
+                          {
+                            label: "Clusters",
+                            value: formatNumber(graphInsights.clusters.length),
+                            detail: `${groupingMode === "community" ? "Topic" : groupingMode === "provider" ? "Provider" : "Type"} groups`
+                          }
                         ].map((metric) => (
                           <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
                             <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>

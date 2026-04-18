@@ -2,19 +2,20 @@ import { useMemo } from "react";
 
 import {
   Background,
+  BaseEdge,
   Controls,
   EdgeLabelRenderer,
   Handle,
+  MarkerType,
   MiniMap,
+  Panel,
   Position,
   ReactFlow,
+  getBezierPath,
   type Edge,
   type EdgeProps,
   type Node,
-  type NodeProps,
-  MarkerType,
-  BaseEdge,
-  getBezierPath
+  type NodeProps
 } from "@xyflow/react";
 import {
   forceCollide,
@@ -28,14 +29,17 @@ import {
 } from "d3-force";
 
 import { providerLabels } from "../../shared/explorer";
-import type { BackendCategoryGraph, ProviderName, SessionCategoryName } from "../../shared/types";
+import type { BackendCategoryGraph, BackendExplorerGraphNode, ProviderName, SessionCategoryName } from "../../shared/types";
 import {
+  buildCategoryGraphClusters,
   clusterAccentForNode,
-  clusterKeyForNode,
-  clusterLabelForNode,
+  type CategoryGraphCluster,
   type GraphGroupingMode
 } from "../lib/category-graph-insights";
 import { cn } from "../lib/utils";
+
+export type CategoryGraphDensity = "curated" | "complete";
+export type CategoryGraphFocusMode = "context" | "dim";
 
 type GraphNodeData = {
   variant: "entity" | "cluster";
@@ -47,6 +51,9 @@ type GraphNodeData = {
   muted: boolean;
   meta: string;
   detail: string;
+  noteCount: number;
+  degree: number;
+  hiddenCount?: number;
   collapsed?: boolean;
 };
 
@@ -71,6 +78,9 @@ type SimNode = SimulationNodeDatum & {
   muted: boolean;
   meta: string;
   detail: string;
+  noteCount: number;
+  degree: number;
+  hiddenCount?: number;
   collapsed?: boolean;
 };
 
@@ -84,11 +94,28 @@ type SimEdge = SimulationLinkDatum<SimNode> & {
   muted: boolean;
 };
 
+type MutableCluster = {
+  id: string;
+  label: string;
+  accent: string;
+  provider?: ProviderName | null;
+  nodes: BackendExplorerGraphNode[];
+  sessionIds: Set<string>;
+  edgeCount: number;
+};
+
+type FlowSummary = {
+  visibleNodes: number;
+  totalNodes: number;
+  hiddenNodes: number;
+  visibleEdges: number;
+  totalEdges: number;
+  clusterCount: number;
+  contextOnly: boolean;
+};
+
 function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
   const clusterCard = data.variant === "cluster";
-  // React Flow needs Handle components for edges to attach. Render four
-  // invisible handles so bezier edges find natural attachment points from any
-  // direction; otherwise edges between custom nodes silently fail to render.
   const handleStyle = {
     width: 1,
     height: 1,
@@ -102,42 +129,50 @@ function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
   return (
     <div
       className={cn(
-        clusterCard ? "w-[224px]" : "w-[188px]",
-        "relative rounded-[8px] border bg-[var(--color-paper-raised)] px-3 py-3 text-left transition",
-        data.muted ? "border-[var(--color-line)]/80 opacity-45" : "border-[var(--color-line)]",
-        selected ? "ring-2 ring-[rgba(15,27,44,0.12)] shadow-[0_8px_24px_-12px_rgba(15,27,44,0.25)]" : ""
+        clusterCard ? "w-[204px] px-3 py-3" : "w-[156px] px-2.5 py-2",
+        "relative rounded-[8px] border bg-[var(--color-paper-raised)] text-left transition",
+        data.muted ? "border-[var(--color-line)]/70 opacity-35" : "border-[var(--color-line)]",
+        selected ? "ring-2 ring-[rgba(15,27,44,0.14)] shadow-[0_10px_28px_-16px_rgba(15,27,44,0.28)]" : ""
       )}
       style={{
-        borderColor: selected ? `${data.accent}55` : undefined,
+        borderColor: selected ? `${data.accent}66` : undefined,
         borderLeft: `3px solid ${data.accent}`
       }}
+      title={data.label}
     >
       <Handle id="t" type="target" position={Position.Top} style={handleStyle} isConnectable={false} />
       <Handle id="l" type="target" position={Position.Left} style={handleStyle} isConnectable={false} />
       <Handle id="b" type="source" position={Position.Bottom} style={handleStyle} isConnectable={false} />
       <Handle id="r" type="source" position={Position.Right} style={handleStyle} isConnectable={false} />
 
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <span
               className={cn("shrink-0 rounded-full", clusterCard ? "h-3 w-3" : "h-2.5 w-2.5")}
-              style={{
-                backgroundColor: data.accent
-              }}
+              style={{ backgroundColor: data.accent }}
             />
-            <span className={cn("truncate font-semibold text-[var(--color-ink)]", clusterCard ? "text-sm" : "text-[13px]")}>{data.label}</span>
+            <span className={cn("truncate font-semibold text-[var(--color-ink)]", clusterCard ? "text-sm" : "text-[12.5px]")}>
+              {data.label}
+            </span>
           </div>
-          <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{data.meta}</div>
+          <div className={cn("mt-1 truncate font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]", clusterCard ? "text-[10.5px]" : "text-[10px]")}>
+            {data.meta}
+          </div>
         </div>
-        {data.collapsed ? (
-          <div className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-            Collapsed
+        {clusterCard && data.collapsed ? (
+          <div className="shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+            Closed
           </div>
         ) : null}
       </div>
 
-      <div className="mt-2 text-xs leading-5 text-[var(--color-ink-soft)]">{data.detail}</div>
+      <div className={cn("mt-1.5 text-[11px] leading-4 text-[var(--color-ink-soft)]", clusterCard ? "" : "truncate")}>{data.detail}</div>
+      {clusterCard && data.hiddenCount ? (
+        <div className="mt-2 rounded-[8px] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-ink-soft)]">
+          {data.hiddenCount} hidden in clean map
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -161,7 +196,7 @@ function GraphEdgePath({
 
   const muted = Boolean(data?.muted);
   const label = data?.label?.trim();
-  const showLabel = Boolean(label) && (selected || !muted);
+  const showLabel = Boolean(label) && selected;
 
   return (
     <>
@@ -170,9 +205,9 @@ function GraphEdgePath({
         path={edgePath}
         markerEnd={markerEnd}
         style={{
-          stroke: selected ? "#0f1b2c" : "#6b7280",
-          strokeOpacity: muted ? 0.12 : selected ? 0.92 : 0.5,
-          strokeWidth: selected ? 2.6 : 1.4 + Math.min(Math.log((data?.weight ?? 1) + 1), 2.5),
+          stroke: selected ? "#0f1b2c" : "#71717a",
+          strokeOpacity: muted ? 0.1 : selected ? 0.92 : 0.34,
+          strokeWidth: selected ? 2.6 : 1 + Math.min(Math.log((data?.weight ?? 1) + 1), 2.2),
           strokeLinecap: "round"
         }}
       />
@@ -184,10 +219,7 @@ function GraphEdgePath({
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: "all"
             }}
-            className={cn(
-              "rounded-md border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-ink-soft)] shadow-sm",
-              selected ? "border-[var(--color-line-strong)] text-[var(--color-ink)]" : ""
-            )}
+            className="max-w-[220px] truncate rounded-[8px] border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] px-2 py-1 text-[10.5px] font-semibold text-[var(--color-ink)] shadow-sm"
           >
             {label}
           </div>
@@ -206,57 +238,107 @@ const edgeTypes = {
   relationship: GraphEdgePath
 };
 
+function hasActiveSession(sessionIds: string[], activeSessions: Set<string> | null): boolean {
+  return Boolean(activeSessions && sessionIds.some((sessionId) => activeSessions.has(sessionId)));
+}
+
+function nodeScore(node: BackendExplorerGraphNode, degree: number, activeSessions: Set<string> | null): number {
+  const focusBoost = hasActiveSession(node.session_ids, activeSessions) ? 1000 : 0;
+  return focusBoost + degree * 8 + node.session_ids.length * 6 + Math.log(node.size + 1) * 8;
+}
+
+function fallbackClusterFor(
+  node: BackendExplorerGraphNode,
+  category: SessionCategoryName,
+  groupingMode: GraphGroupingMode
+): CategoryGraphCluster {
+  return {
+    id: `fallback:${node.id}`,
+    label: node.label,
+    accent: clusterAccentForNode(node, category, groupingMode),
+    mode: groupingMode,
+    provider: groupingMode === "provider" ? node.provider ?? null : null,
+    nodeIds: [node.id],
+    nodeCount: 1,
+    edgeCount: 0,
+    sessionIds: node.session_ids,
+    noteCount: node.session_ids.length
+  };
+}
+
 function buildFlow(
   graph: BackendCategoryGraph,
   category: SessionCategoryName,
   groupingMode: GraphGroupingMode,
   collapsedGroups: string[],
+  density: CategoryGraphDensity,
+  focusMode: CategoryGraphFocusMode,
   focusSessionIds?: string[]
 ): {
   nodes: Array<Node<GraphNodeData>>;
   edges: Array<Edge<GraphEdgeData>>;
+  summary: FlowSummary;
 } {
   const activeSessions = focusSessionIds?.length ? new Set(focusSessionIds) : null;
+  const contextOnly = Boolean(activeSessions && focusMode === "context");
   const collapsedSet = new Set(collapsedGroups);
+  const clusterLookup = buildCategoryGraphClusters(graph, category, groupingMode);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
+  const degreeByNodeId = new Map<string, number>(graph.nodes.map((node) => [node.id, 0]));
 
-  const clusterMap = new Map<
-    string,
-    {
-      id: string;
-      label: string;
-      accent: string;
-      provider?: ProviderName | null;
-      nodes: typeof graph.nodes;
-      sessionIds: Set<string>;
+  for (const edge of graph.edges) {
+    if (!nodeById.has(edge.source) || !nodeById.has(edge.target) || edge.source === edge.target) {
+      continue;
     }
-  >();
+    degreeByNodeId.set(edge.source, (degreeByNodeId.get(edge.source) ?? 0) + 1);
+    degreeByNodeId.set(edge.target, (degreeByNodeId.get(edge.target) ?? 0) + 1);
+  }
+
+  const scopedEdges = contextOnly
+    ? graph.edges.filter((edge) => hasActiveSession(edge.session_ids, activeSessions))
+    : graph.edges;
+  const scopedNodeIds = new Set<string>();
 
   for (const node of graph.nodes) {
-    const clusterId = clusterKeyForNode(node, groupingMode);
-    const cluster =
-      clusterMap.get(clusterId) ??
+    if (!contextOnly || hasActiveSession(node.session_ids, activeSessions)) {
+      scopedNodeIds.add(node.id);
+    }
+  }
+  for (const edge of scopedEdges) {
+    scopedNodeIds.add(edge.source);
+    scopedNodeIds.add(edge.target);
+  }
+
+  const clusterMap = new Map<string, MutableCluster>();
+  for (const node of graph.nodes) {
+    if (!scopedNodeIds.has(node.id)) {
+      continue;
+    }
+    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, category, groupingMode);
+    const entry =
+      clusterMap.get(cluster.id) ??
       (() => {
-        const created = {
-          id: clusterId,
-          label: clusterLabelForNode(node, groupingMode),
-          accent: clusterAccentForNode(node, category, groupingMode),
-          provider: groupingMode === "provider" ? node.provider ?? null : null,
+        const created: MutableCluster = {
+          id: cluster.id,
+          label: cluster.label,
+          accent: cluster.accent,
+          provider: cluster.provider,
           nodes: [],
-          sessionIds: new Set<string>()
+          sessionIds: new Set<string>(),
+          edgeCount: cluster.edgeCount
         };
-        clusterMap.set(clusterId, created);
+        clusterMap.set(cluster.id, created);
         return created;
       })();
 
-    cluster.nodes.push(node);
+    entry.nodes.push(node);
     for (const sessionId of node.session_ids) {
-      cluster.sessionIds.add(sessionId);
+      entry.sessionIds.add(sessionId);
     }
   }
 
   const clusters = Array.from(clusterMap.values()).sort(
-    (left, right) => right.nodes.length - left.nodes.length || right.sessionIds.size - left.sessionIds.size || left.label.localeCompare(right.label)
+    (left, right) => right.sessionIds.size - left.sessionIds.size || right.edgeCount - left.edgeCount || left.label.localeCompare(right.label)
   );
 
   const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(clusters.length || 1))));
@@ -265,18 +347,27 @@ function buildFlow(
     const column = index % columns;
     const row = Math.floor(index / columns);
     centers.set(cluster.id, {
-      x: 260 + column * 360,
-      y: 260 + row * 280
+      x: 240 + column * 320,
+      y: 240 + row * 250
     });
   });
 
   const simNodes: SimNode[] = [];
   const headerNodes: Array<Node<GraphNodeData>> = [];
+  const visibleEntityIds = new Set<string>();
 
   for (const cluster of clusters) {
-    const center = centers.get(cluster.id) ?? { x: 280, y: 280 };
+    const center = centers.get(cluster.id) ?? { x: 260, y: 240 };
     const clusterSessionIds = Array.from(cluster.sessionIds);
-    const clusterMuted = Boolean(activeSessions && !clusterSessionIds.some((sessionId) => activeSessions.has(sessionId)));
+    const clusterMuted = Boolean(activeSessions && !hasActiveSession(clusterSessionIds, activeSessions));
+    const sortedClusterNodes = [...cluster.nodes].sort((left, right) => {
+      const leftDegree = degreeByNodeId.get(left.id) ?? 0;
+      const rightDegree = degreeByNodeId.get(right.id) ?? 0;
+      return nodeScore(right, rightDegree, activeSessions) - nodeScore(left, leftDegree, activeSessions) || left.label.localeCompare(right.label);
+    });
+    const visibleLimit = density === "curated" ? (contextOnly ? 14 : 8) : sortedClusterNodes.length;
+    const visibleClusterNodes = sortedClusterNodes.slice(0, visibleLimit);
+    const hiddenCount = Math.max(sortedClusterNodes.length - visibleClusterNodes.length, 0);
 
     if (collapsedSet.has(cluster.id)) {
       simNodes.push({
@@ -287,7 +378,7 @@ function buildFlow(
         sessionIds: clusterSessionIds,
         provider: cluster.provider,
         accent: cluster.accent,
-        radius: 92,
+        radius: 86,
         targetX: center.x,
         targetY: center.y,
         x: center.x,
@@ -296,7 +387,10 @@ function buildFlow(
         fy: center.y,
         muted: clusterMuted,
         meta: `${cluster.nodes.length} entities · ${clusterSessionIds.length} notes`,
-        detail: groupingMode === "provider" ? "Collapsed provider cluster" : "Collapsed semantic cluster",
+        detail: groupingMode === "community" ? "Collapsed topic community" : "Collapsed group",
+        noteCount: clusterSessionIds.length,
+        degree: cluster.edgeCount,
+        hiddenCount,
         collapsed: true
       });
       continue;
@@ -314,17 +408,22 @@ function buildFlow(
         sessionIds: clusterSessionIds,
         provider: cluster.provider,
         muted: clusterMuted,
-        meta: `${cluster.nodes.length} entities · ${clusterSessionIds.length} notes`,
-        detail: groupingMode === "provider" ? "Provider scope" : "Semantic scope"
+        meta: `${visibleClusterNodes.length}/${cluster.nodes.length} entities · ${clusterSessionIds.length} notes`,
+        detail: groupingMode === "community" ? "Topic community" : groupingMode === "provider" ? "Provider group" : "Node type group",
+        noteCount: clusterSessionIds.length,
+        degree: cluster.edgeCount,
+        hiddenCount
       },
       position: {
-        x: center.x - 112,
-        y: center.y - 164
+        x: center.x - 102,
+        y: center.y - 142
       }
     });
 
-    for (const node of cluster.nodes) {
-      const muted = Boolean(activeSessions && !node.session_ids.some((sessionId) => activeSessions.has(sessionId)));
+    visibleClusterNodes.forEach((node, index) => {
+      const degree = degreeByNodeId.get(node.id) ?? 0;
+      const muted = Boolean(activeSessions && !hasActiveSession(node.session_ids, activeSessions));
+      visibleEntityIds.add(node.id);
       simNodes.push({
         id: node.id,
         variant: "entity",
@@ -332,26 +431,31 @@ function buildFlow(
         kind: node.kind,
         sessionIds: node.session_ids,
         provider: node.provider,
-        accent: clusterAccentForNode(node, category, groupingMode),
-        radius: 48 + Math.sqrt(Math.max(node.size, 1)) * 5,
+        accent: cluster.accent,
+        radius: 38 + Math.sqrt(Math.max(node.size, 1)) * 3,
         targetX: center.x,
-        targetY: center.y + 18,
-        x: center.x + (simNodes.length % 3) * 18,
-        y: center.y + 24 + (simNodes.length % 4) * 14,
+        targetY: center.y + 16,
+        x: center.x + (index % 3) * 18,
+        y: center.y + 24 + (index % 4) * 13,
         muted,
-        meta: `${node.provider ? providerLabels[node.provider] : node.kind} · ${node.session_ids.length} ${node.session_ids.length === 1 ? "note" : "notes"}`,
-        detail: node.kind
+        meta: `${node.session_ids.length} ${node.session_ids.length === 1 ? "note" : "notes"} · ${degree} links`,
+        detail: node.provider ? providerLabels[node.provider] : node.kind,
+        noteCount: node.session_ids.length,
+        degree
       });
-    }
+    });
   }
 
   const visibleNodeIdFor = (nodeId: string): string | null => {
     const node = nodeById.get(nodeId);
-    if (!node) {
+    if (!node || !scopedNodeIds.has(nodeId)) {
       return null;
     }
-    const clusterId = clusterKeyForNode(node, groupingMode);
-    return collapsedSet.has(clusterId) ? clusterId : node.id;
+    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, category, groupingMode);
+    if (collapsedSet.has(cluster.id)) {
+      return cluster.id;
+    }
+    return visibleEntityIds.has(node.id) ? node.id : null;
   };
 
   const visibleEdges = new Map<
@@ -360,12 +464,12 @@ function buildFlow(
       source: string;
       target: string;
       sessionIds: Set<string>;
+      labels: Set<string>;
       weight: number;
-      label?: string | null;
     }
   >();
 
-  for (const edge of graph.edges) {
+  for (const edge of scopedEdges) {
     const visibleSource = visibleNodeIdFor(edge.source);
     const visibleTarget = visibleNodeIdFor(edge.target);
     if (!visibleSource || !visibleTarget || visibleSource === visibleTarget) {
@@ -380,8 +484,8 @@ function buildFlow(
           source: visibleSource,
           target: visibleTarget,
           sessionIds: new Set<string>(),
-          weight: 0,
-          label: edge.label
+          labels: new Set<string>(),
+          weight: 0
         };
         visibleEdges.set(key, created);
         return created;
@@ -391,8 +495,8 @@ function buildFlow(
     for (const sessionId of edge.session_ids) {
       aggregate.sessionIds.add(sessionId);
     }
-    if (!aggregate.label && edge.label) {
-      aggregate.label = edge.label;
+    if (edge.label?.trim()) {
+      aggregate.labels.add(edge.label.trim());
     }
   }
 
@@ -400,10 +504,10 @@ function buildFlow(
     id,
     source: edge.source,
     target: edge.target,
-    label: edge.label,
+    label: Array.from(edge.labels).slice(0, 3).join(", "),
     sessionIds: Array.from(edge.sessionIds),
     weight: edge.weight,
-    muted: Boolean(activeSessions && !Array.from(edge.sessionIds).some((sessionId) => activeSessions.has(sessionId)))
+    muted: Boolean(activeSessions && !hasActiveSession(Array.from(edge.sessionIds), activeSessions))
   }));
 
   const simulation = forceSimulation(simNodes)
@@ -411,13 +515,13 @@ function buildFlow(
       "link",
       forceLink<SimNode, SimEdge>(simEdges)
         .id((node) => node.id)
-        .distance((edge) => (edge.source === edge.target ? 0 : 168 - Math.min(edge.weight, 10) * 7))
-        .strength((edge) => 0.1 + Math.min(edge.weight, 8) * 0.03)
+        .distance((edge) => (edge.source === edge.target ? 0 : 132 - Math.min(edge.weight, 10) * 5))
+        .strength((edge) => 0.08 + Math.min(edge.weight, 8) * 0.025)
     )
-    .force("charge", forceManyBody<SimNode>().strength((node) => (node.variant === "cluster" ? -160 : -280)))
+    .force("charge", forceManyBody<SimNode>().strength((node) => (node.variant === "cluster" ? -180 : -210)))
     .force("collision", forceCollide<SimNode>().radius((node) => node.radius))
-    .force("forceX", forceX<SimNode>((node) => node.targetX).strength((node) => (node.variant === "cluster" ? 0.65 : 0.18)))
-    .force("forceY", forceY<SimNode>((node) => node.targetY).strength((node) => (node.variant === "cluster" ? 0.65 : 0.2)))
+    .force("forceX", forceX<SimNode>((node) => node.targetX).strength((node) => (node.variant === "cluster" ? 0.72 : 0.2)))
+    .force("forceY", forceY<SimNode>((node) => node.targetY).strength((node) => (node.variant === "cluster" ? 0.72 : 0.22)))
     .stop();
 
   for (let index = 0; index < 260; index += 1) {
@@ -440,11 +544,14 @@ function buildFlow(
         muted: node.muted,
         meta: node.meta,
         detail: node.detail,
+        noteCount: node.noteCount,
+        degree: node.degree,
+        hiddenCount: node.hiddenCount,
         collapsed: node.collapsed
       },
       position: {
-        x: (node.x ?? node.targetX) - (node.variant === "cluster" ? 112 : 94),
-        y: (node.y ?? node.targetY) - (node.variant === "cluster" ? 48 : 42)
+        x: (node.x ?? node.targetX) - (node.variant === "cluster" ? 102 : 78),
+        y: (node.y ?? node.targetY) - (node.variant === "cluster" ? 48 : 30)
       }
     }))
   ];
@@ -456,8 +563,8 @@ function buildFlow(
     type: "relationship",
     markerEnd: {
       type: MarkerType.ArrowClosed,
-      width: 14,
-      height: 14,
+      width: 12,
+      height: 12,
       color: "#a1a1aa"
     },
     data: {
@@ -468,7 +575,19 @@ function buildFlow(
     }
   }));
 
-  return { nodes, edges };
+  return {
+    nodes,
+    edges,
+    summary: {
+      visibleNodes: visibleEntityIds.size,
+      totalNodes: scopedNodeIds.size,
+      hiddenNodes: Math.max(scopedNodeIds.size - visibleEntityIds.size, 0),
+      visibleEdges: edges.length,
+      totalEdges: scopedEdges.length,
+      clusterCount: clusters.length,
+      contextOnly
+    }
+  };
 }
 
 export function CategoryGraph({
@@ -476,6 +595,8 @@ export function CategoryGraph({
   category,
   groupingMode,
   collapsedGroups,
+  density,
+  focusMode,
   focusSessionIds,
   onFocus,
   className
@@ -484,13 +605,15 @@ export function CategoryGraph({
   category: SessionCategoryName;
   groupingMode: GraphGroupingMode;
   collapsedGroups: string[];
+  density: CategoryGraphDensity;
+  focusMode: CategoryGraphFocusMode;
   focusSessionIds?: string[];
   onFocus: (label: string, sessionIds: string[]) => void;
   className?: string;
 }) {
-  const { nodes, edges } = useMemo(
-    () => buildFlow(graph, category, groupingMode, collapsedGroups, focusSessionIds),
-    [category, collapsedGroups, focusSessionIds, graph, groupingMode]
+  const { nodes, edges, summary } = useMemo(
+    () => buildFlow(graph, category, groupingMode, collapsedGroups, density, focusMode, focusSessionIds),
+    [category, collapsedGroups, density, focusMode, focusSessionIds, graph, groupingMode]
   );
 
   if (!graph.nodes.length) {
@@ -514,9 +637,9 @@ export function CategoryGraph({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        fitViewOptions={{ padding: 0.16 }}
-        minZoom={0.42}
-        maxZoom={1.6}
+        fitViewOptions={{ padding: 0.18 }}
+        minZoom={0.38}
+        maxZoom={1.9}
         proOptions={{ hideAttribution: true }}
         onNodeClick={(_, node) => {
           onFocus(node.data.label, node.data.sessionIds);
@@ -525,8 +648,13 @@ export function CategoryGraph({
           onFocus(edge.data?.label ?? "Relationship", edge.data?.sessionIds ?? []);
         }}
       >
-        <Background gap={28} size={1} color="#e4e4e7" />
-        <MiniMap pannable zoomable />
+        <Panel position="top-left" className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)] shadow-sm">
+          {summary.clusterCount} groups · {summary.visibleNodes}/{summary.totalNodes} nodes · {summary.visibleEdges}/{summary.totalEdges} links
+          {summary.hiddenNodes ? ` · ${summary.hiddenNodes} hidden` : ""}
+          {summary.contextOnly ? " · context" : ""}
+        </Panel>
+        <Background gap={30} size={1} color="#e4e4e7" />
+        <MiniMap pannable zoomable nodeColor={(node) => (node.data as GraphNodeData).accent} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
