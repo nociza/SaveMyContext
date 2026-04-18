@@ -252,6 +252,82 @@ export async function fetchPiles(
   return fetchBackendJson<BackendPileRead[]>(settings, "/piles", capabilities);
 }
 
+export interface PileCreatePayload {
+  slug: string;
+  name: string;
+  description?: string;
+  folder_label?: string;
+  attributes: string[];
+  pipeline_config?: Record<string, unknown>;
+  sort_order?: number;
+}
+
+export interface PileUpdatePayload {
+  name?: string;
+  description?: string;
+  folder_label?: string;
+  attributes?: string[];
+  pipeline_config?: Record<string, unknown>;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
+export async function createPile(
+  settings: ExtensionSettings,
+  payload: PileCreatePayload,
+  capabilities?: BackendCapabilities
+): Promise<BackendPileRead> {
+  const response = await fetch(backendApiUrl(settings, "/piles", capabilities), {
+    method: "POST",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Pile create failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return (await response.json()) as BackendPileRead;
+}
+
+export async function updatePile(
+  settings: ExtensionSettings,
+  slug: string,
+  payload: PileUpdatePayload,
+  capabilities?: BackendCapabilities
+): Promise<BackendPileRead> {
+  const response = await fetch(
+    backendApiUrl(settings, `/piles/${encodeURIComponent(slug)}`, capabilities),
+    {
+      method: "PATCH",
+      headers: buildBackendHeaders(settings),
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Pile update failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return (await response.json()) as BackendPileRead;
+}
+
+export async function deletePile(
+  settings: ExtensionSettings,
+  slug: string,
+  capabilities?: BackendCapabilities
+): Promise<void> {
+  const response = await fetch(
+    backendApiUrl(settings, `/piles/${encodeURIComponent(slug)}`, capabilities),
+    {
+      method: "DELETE",
+      headers: buildBackendHeaders(settings)
+    }
+  );
+  if (!response.ok && response.status !== 204) {
+    const details = await response.text();
+    throw new Error(`Pile delete failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+}
+
 export async function fetchDiscardedSessions(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities

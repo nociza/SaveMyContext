@@ -14,6 +14,7 @@ import {
   ArrowRight,
   BookOpen,
   ExternalLink,
+  Layers,
   LoaderCircle,
   RefreshCcw,
   Search,
@@ -285,6 +286,16 @@ function App() {
           <Button variant="ghost" size="sm" onClick={() => void refreshAll()} disabled={isFetching}>
             <RefreshCcw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
             Refresh
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              window.location.href = chrome.runtime.getURL("piles.html");
+            }}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Piles
           </Button>
           <Button variant="secondary" size="sm" onClick={() => void chrome.runtime.openOptionsPage()}>
             <Settings2 className="h-3.5 w-3.5" />

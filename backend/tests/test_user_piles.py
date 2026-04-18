@@ -99,6 +99,78 @@ async def test_assign_session_to_user_pile_runs_attribute_pipeline(tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_classifier_routes_into_user_defined_pile(tmp_path, monkeypatch) -> None:
+    """When user-defined piles exist, the LLM should be able to pick one."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'classify-user-pile.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(apply_schema_migrations)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "openai")
+    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+    from app.services.llm.openai_client import OpenAIClient
+    from app.schemas.processing import PileClassificationResult
+
+    async def fake_generate_json(self, *, system_prompt, user_prompt, schema):
+        if schema is PileClassificationResult:
+            # We expect 'research' to appear in the prompt because the user
+            # created it; route there.
+            assert "research" in user_prompt
+            return PileClassificationResult(pile_slug="research", reason="long-form research note")
+        # Generic pile_outputs invocation: return empty dict so heuristic kicks in.
+        return schema()
+
+    monkeypatch.setattr(OpenAIClient, "generate_json", fake_generate_json, raising=True)
+
+    try:
+        app = _build_app(session_factory)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
+            create = await client.post(
+                "/api/v1/piles",
+                json={
+                    "slug": "research",
+                    "name": "Research",
+                    "description": "Long-form research notes that I want to share later.",
+                    "attributes": ["alternate_phrasings", "share_post"],
+                },
+            )
+            assert create.status_code == 201, create.text
+
+            ingest = await client.post(
+                "/api/v1/ingest/diff",
+                json={
+                    "provider": ProviderName.GEMINI.value,
+                    "external_session_id": "research-route-1",
+                    "sync_mode": "full_snapshot",
+                    "title": "research-route-1",
+                    "source_url": "https://gemini.google.com/app/research-route-1",
+                    "captured_at": datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc).isoformat(),
+                    "messages": [
+                        {
+                            "external_message_id": "m-1",
+                            "role": MessageRole.USER.value,
+                            "content": "Research note: how does FastAPI handle backpressure under uvloop?",
+                        }
+                    ],
+                    "raw_capture": {"source": "test"},
+                },
+            )
+            assert ingest.status_code == 202, ingest.text
+            payload = ingest.json()
+            assert payload["pile_slug"] == "research"
+            assert payload["is_discarded"] is False
+            assert payload["category"] is None
+    finally:
+        get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_auto_discard_categories_route_session_to_discarded_via_classifier(tmp_path, monkeypatch) -> None:
     """When the discarded pile has auto_discard_categories configured and the
     classifier identifies a match, the session should be routed to discarded.

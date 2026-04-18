@@ -7,7 +7,14 @@ from pydantic import BaseModel, Field
 from app.core.config import get_settings
 from app.models import ChatMessage
 from app.models.enums import SessionCategory
-from app.schemas.processing import ClassificationResult, IdeaResult, JournalResult, TodoResult, TripletResult
+from app.schemas.processing import (
+    ClassificationResult,
+    IdeaResult,
+    JournalResult,
+    PileClassificationResult,
+    TodoResult,
+    TripletResult,
+)
 from app.services.heuristics import (
     heuristic_classification,
     heuristic_idea,
@@ -110,6 +117,70 @@ class ProcessingOrchestrator:
             return classification
         except Exception:
             return heuristic_classification(messages)
+
+    async def classify_pile(
+        self,
+        messages: list[ChatMessage],
+        *,
+        candidates: list[tuple[str, str]],
+        auto_discard_categories: list[str] | None = None,
+    ) -> PileClassificationResult | None:
+        """Pick a pile slug from the supplied candidate list.
+
+        `candidates` is an ordered list of (slug, description) tuples representing
+        every active pile the user wants the classifier to consider. Returns
+        `None` when no transcript / no LLM, so callers can fall back to the
+        built-in 4-bucket heuristic. Returns `None` if the model picks a slug
+        not in `candidates` (treated as a hallucination).
+        """
+        if not candidates:
+            return None
+        transcript = render_transcript(messages)
+        if not transcript or not self.client:
+            return None
+
+        candidate_lines = "\n".join(f"- '{slug}': {description.strip()}" for slug, description in candidates)
+        cleaned_discard = [item.strip() for item in (auto_discard_categories or []) if item and item.strip()]
+        discard_addendum = ""
+        if cleaned_discard:
+            joined = "; ".join(f"'{item}'" for item in cleaned_discard)
+            discard_addendum = (
+                f"\nIf the transcript clearly fits an auto-discard category ({joined}), pick the 'discarded' pile."
+            )
+
+        valid_slugs = {slug for slug, _ in candidates}
+
+        try:
+            result = await self.client.generate_json(
+                system_prompt=(
+                    "You route a transcript to one of the user's piles. "
+                    "Return JSON with keys pile_slug and reason. "
+                    "pile_slug MUST exactly equal one of the supplied slugs."
+                ),
+                user_prompt=(
+                    "Pick the single best pile for this transcript from the list below. "
+                    "Prefer a user-defined pile when its description clearly fits over a generic built-in. "
+                    "Use 'todo' only when the user explicitly asks to modify the shared to-do list."
+                    f"{discard_addendum}\n\n"
+                    "Available piles:\n"
+                    f"{candidate_lines}\n\n"
+                    "Transcript:\n"
+                    f"{transcript}"
+                ),
+                schema=PileClassificationResult,
+            )
+            slug = (result.pile_slug or "").strip()
+            if slug not in valid_slugs:
+                return None
+            if slug == "discarded" and not cleaned_discard:
+                # Don't trust a 'discarded' pick when auto-discard isn't configured.
+                return None
+            if slug == "todo" and not is_explicit_todo_request(messages):
+                # Same guardrail as the legacy classifier.
+                return None
+            return PileClassificationResult(pile_slug=slug, reason=result.reason)
+        except Exception:
+            return None
 
     async def journal(self, messages: list[ChatMessage]) -> JournalResult:
         transcript = render_transcript(messages)

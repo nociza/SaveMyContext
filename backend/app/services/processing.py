@@ -4,14 +4,20 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import ChatSession, FactTriplet, SessionCategory
+from app.models import ChatSession, FactTriplet, Pile, PileKind, SessionCategory
 from app.models.base import utcnow
 from app.schemas.processing import TripletResult
 from app.schemas.processing_worker import SessionPipelineResult
 from app.services.orchestrator import ProcessingOrchestrator
 from app.services.pile_service import PileService
-from app.services.piles import CATEGORY_TO_BUILT_IN_SLUG
+from app.services.piles import BUILT_IN_SLUG_TO_CATEGORY, CATEGORY_TO_BUILT_IN_SLUG
 from app.services.todo import TodoListService
+
+
+# Cap how many piles we offer the classifier in a single prompt. Prevents
+# runaway prompt size if a user creates many custom piles. The 4 built-in
+# routable piles are always offered; only the user-defined ones get capped.
+MAX_USER_PILES_IN_CLASSIFIER_PROMPT = 8
 
 
 class SessionProcessor:
@@ -27,6 +33,19 @@ class SessionProcessor:
             return session
 
         auto_discard_categories = await self._auto_discard_categories()
+
+        # If the user has defined custom piles, give the classifier the chance to
+        # route the session to one of them. Otherwise stay on the built-in path
+        # so behavior is identical to the pre-piles era.
+        decision = await self._classify_into_user_pile(
+            session, auto_discard_categories=auto_discard_categories
+        )
+        if decision == "discarded":
+            return await self._load_session(session_id)
+        if isinstance(decision, tuple):
+            user_pile, reason = decision
+            return await self._apply_user_pile(session_id, user_pile, reason=reason)
+
         classification = await self.orchestrator.classify(
             session.messages,
             auto_discard_categories=auto_discard_categories,
@@ -63,6 +82,80 @@ class SessionProcessor:
             )
 
         return await self.apply_pipeline_result(session_id, result)
+
+    async def _classify_into_user_pile(
+        self,
+        session: ChatSession,
+        *,
+        auto_discard_categories: list[str],
+    ) -> tuple[Pile, str] | str | None:
+        """Returns one of:
+
+        - `tuple[Pile, str]`: the classifier picked a user-defined pile.
+        - `"discarded"`: the classifier picked discarded; the call already routed there.
+        - `None`: defer to the legacy built-in classifier.
+        """
+        active_piles = await self.piles.list_piles()
+        user_piles = [pile for pile in active_piles if pile.kind == PileKind.USER_DEFINED][
+            :MAX_USER_PILES_IN_CLASSIFIER_PROMPT
+        ]
+        if not user_piles:
+            return None
+
+        # Build the candidate list. Always include the discarded pile (so the
+        # auto_discard_categories check stays effective) and the four
+        # routable built-ins; cap user-defined entries.
+        candidates: list[tuple[str, str]] = []
+        for pile in active_piles:
+            if pile.kind == PileKind.USER_DEFINED and pile not in user_piles:
+                continue
+            candidates.append((pile.slug, pile.description or pile.name))
+
+        choice = await self.orchestrator.classify_pile(
+            session.messages,
+            candidates=candidates,
+            auto_discard_categories=auto_discard_categories,
+        )
+        if choice is None:
+            return None
+
+        if choice.pile_slug == "discarded":
+            await self.route_to_discard(session.id, reason=choice.reason)
+            return "discarded"
+        if choice.pile_slug in BUILT_IN_SLUG_TO_CATEGORY:
+            # Built-in slug: defer to legacy classifier so the typed pipeline runs.
+            return None
+
+        target = await self.piles.get_by_slug(choice.pile_slug)
+        if target is None or target.kind != PileKind.USER_DEFINED:
+            return None
+        return target, choice.reason
+
+    async def _apply_user_pile(self, session_id: str, target: Pile, *, reason: str) -> ChatSession:
+        session = await self._load_session(session_id)
+        attributes = list(target.attributes or [])
+        config = target.pipeline_config or {}
+        custom_addendum = config.get("custom_prompt_addendum")
+        outputs = await self.orchestrator.pile_outputs(
+            session.messages,
+            attributes=attributes,
+            custom_prompt_addendum=custom_addendum if isinstance(custom_addendum, str) else None,
+        )
+        session.category = None
+        session.pile_id = target.id
+        session.is_discarded = False
+        session.discarded_reason = None
+        session.classification_reason = reason
+        session.journal_entry = None
+        session.todo_summary = None
+        session.idea_summary = None
+        share_post = outputs.get("share_post") if isinstance(outputs, dict) else None
+        session.share_post = share_post if isinstance(share_post, str) else None
+        session.pile_outputs = outputs or None
+        await self._replace_triplets(session, [])
+        session.last_processed_at = utcnow()
+        await self.db.flush()
+        return session
 
     async def mark_pending(self, session_id: str) -> ChatSession:
         session = await self._load_session(session_id)

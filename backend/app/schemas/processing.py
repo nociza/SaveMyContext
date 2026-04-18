@@ -10,6 +10,18 @@ class ClassificationResult(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class PileClassificationResult(BaseModel):
+    """Generalized classification: the model picks a pile by slug.
+
+    `slug` may be any active pile slug (built-in or user-defined). Unknown slugs
+    are treated as a classifier hallucination by the caller and fall back to the
+    legacy `journal/factual/ideas/todo` heuristic.
+    """
+
+    pile_slug: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1)
+
+
 class JournalResult(BaseModel):
     entry: str = Field(min_length=1)
     action_items: list[str] = Field(default_factory=list)

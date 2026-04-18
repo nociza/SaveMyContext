@@ -21,6 +21,7 @@ export default defineConfig({
         dashboard: resolve(rootDir, "dashboard.html"),
         note: resolve(rootDir, "note.html"),
         options: resolve(rootDir, "options.html"),
+        piles: resolve(rootDir, "piles.html"),
         popup: resolve(rootDir, "popup.html")
       },
       output: {

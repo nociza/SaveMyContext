@@ -58,8 +58,14 @@ The response includes the generated `id`, the inferred `folder_label` (PascalCas
 
 Sessions get into a user pile two ways:
 
-1. **Manual move**: `POST /api/v1/piles/{slug}/sessions/{session_id}/assign`. The generic attribute pipeline runs and the markdown is rewritten into the user pile's folder.
-2. **LLM routing into a custom pile** is not yet automatic — the classifier still picks one of the four built-in non-discard piles. This will land in a follow-up.
+1. **Automatic LLM routing**. As soon as one or more user piles exist, the classifier sees them by description (capped at 8 to keep the prompt small) and can pick one. The generic attribute pipeline then fills `pile_outputs` and rewrites the markdown into the user pile's folder.
+2. **Manual move**: `POST /api/v1/piles/{slug}/sessions/{session_id}/assign`. Useful when you want to override the classifier's choice or move an existing note.
+
+When no user piles exist, classification stays on the legacy four-bucket path so the system behaves identically to the pre-piles era.
+
+## Extension UI
+
+`piles.html` (open from the dashboard "Piles" button) lists every pile with edit / delete / "new pile" controls. Built-in piles can be edited in description and prompt addendum but their attribute set and folder are protected. The discarded pile gets a dedicated `auto_discard_categories` field.
 
 ## Discarded pile in detail
 

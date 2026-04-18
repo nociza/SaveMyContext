@@ -3,7 +3,10 @@ import { useMemo } from "react";
 import {
   Background,
   Controls,
+  EdgeLabelRenderer,
+  Handle,
   MiniMap,
+  Position,
   ReactFlow,
   type Edge,
   type EdgeProps,
@@ -83,19 +86,37 @@ type SimEdge = SimulationLinkDatum<SimNode> & {
 
 function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
   const clusterCard = data.variant === "cluster";
+  // React Flow needs Handle components for edges to attach. Render four
+  // invisible handles so bezier edges find natural attachment points from any
+  // direction; otherwise edges between custom nodes silently fail to render.
+  const handleStyle = {
+    width: 1,
+    height: 1,
+    minWidth: 1,
+    minHeight: 1,
+    background: "transparent",
+    border: "none",
+    pointerEvents: "none" as const
+  };
 
   return (
     <div
       className={cn(
         clusterCard ? "w-[224px]" : "w-[188px]",
-        "rounded-[8px] border bg-[var(--color-paper-raised)] px-3 py-3 text-left transition",
+        "relative rounded-[8px] border bg-[var(--color-paper-raised)] px-3 py-3 text-left transition",
         data.muted ? "border-[var(--color-line)]/80 opacity-45" : "border-[var(--color-line)]",
-        selected ? "ring-2 ring-[rgba(15,27,44,0.12)]" : ""
+        selected ? "ring-2 ring-[rgba(15,27,44,0.12)] shadow-[0_8px_24px_-12px_rgba(15,27,44,0.25)]" : ""
       )}
       style={{
-        borderColor: selected ? `${data.accent}55` : undefined
+        borderColor: selected ? `${data.accent}55` : undefined,
+        borderLeft: `3px solid ${data.accent}`
       }}
     >
+      <Handle id="t" type="target" position={Position.Top} style={handleStyle} isConnectable={false} />
+      <Handle id="l" type="target" position={Position.Left} style={handleStyle} isConnectable={false} />
+      <Handle id="b" type="source" position={Position.Bottom} style={handleStyle} isConnectable={false} />
+      <Handle id="r" type="source" position={Position.Right} style={handleStyle} isConnectable={false} />
+
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -131,25 +152,48 @@ function GraphEdgePath({
   data,
   selected
 }: EdgeProps<Edge<GraphEdgeData>>) {
-  const [edgePath] = getBezierPath({
+  const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
     targetX,
     targetY
   });
 
+  const muted = Boolean(data?.muted);
+  const label = data?.label?.trim();
+  const showLabel = Boolean(label) && (selected || !muted);
+
   return (
-    <BaseEdge
-      id={id}
-      path={edgePath}
-      markerEnd={markerEnd}
-      style={{
-        stroke: selected ? "#111827" : "#94a3b8",
-        strokeOpacity: data?.muted ? 0.14 : selected ? 0.85 : 0.34,
-        strokeWidth: selected ? 2.4 : 1.2 + Math.min(Math.log((data?.weight ?? 1) + 1), 2.5),
-        strokeLinecap: "round"
-      }}
-    />
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={{
+          stroke: selected ? "#0f1b2c" : "#6b7280",
+          strokeOpacity: muted ? 0.12 : selected ? 0.92 : 0.5,
+          strokeWidth: selected ? 2.6 : 1.4 + Math.min(Math.log((data?.weight ?? 1) + 1), 2.5),
+          strokeLinecap: "round"
+        }}
+      />
+      {showLabel ? (
+        <EdgeLabelRenderer>
+          <div
+            style={{
+              position: "absolute",
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              pointerEvents: "all"
+            }}
+            className={cn(
+              "rounded-md border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-ink-soft)] shadow-sm",
+              selected ? "border-[var(--color-line-strong)] text-[var(--color-ink)]" : ""
+            )}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
   );
 }
 
