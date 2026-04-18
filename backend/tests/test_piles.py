@@ -89,6 +89,45 @@ async def test_pile_service_lookup_helpers(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_schema_migrations_normalizes_legacy_lowercase_pile_kind(tmp_path) -> None:
+    """A pre-fix build inserted pile.kind as the lowercase enum value
+    ('built_in_ideas'). SQLAlchemy's Enum column expects the uppercase enum
+    name ('BUILT_IN_IDEAS') and raises LookupError on read. The migration must
+    heal those rows in place.
+    """
+    from sqlalchemy import text as sa_text
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'piles-legacy-kind.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        # Simulate the pre-fix state: insert a pile with lowercase kind.
+        await connection.execute(
+            sa_text(
+                """
+                INSERT INTO piles (id, slug, name, description, kind, folder_label,
+                                   attributes, pipeline_config,
+                                   is_active, is_visible_on_dashboard, sort_order,
+                                   created_at, updated_at)
+                VALUES ('legacy-id', 'ideas', 'Ideas', 'Ideas pile', 'built_in_ideas',
+                        'Ideas', '["summary"]', '{}', 1, 1, 30,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+            )
+        )
+
+    async with engine.begin() as connection:
+        await connection.run_sync(apply_schema_migrations)
+
+    async with session_factory() as session:
+        pile = (await session.execute(select(Pile).where(Pile.slug == "ideas"))).scalar_one()
+        assert pile.kind == PileKind.BUILT_IN_IDEAS
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_apply_schema_migrations_backfills_pile_id_from_category(tmp_path) -> None:
     from datetime import datetime, timezone
 

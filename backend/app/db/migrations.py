@@ -53,8 +53,24 @@ def apply_schema_migrations(sync_connection) -> None:
             )
 
     if "piles" in inspector.get_table_names():
+        _normalize_pile_kind_values(sync_connection)
         _seed_built_in_piles(sync_connection)
         _backfill_pile_id_from_category(sync_connection)
+
+
+def _normalize_pile_kind_values(sync_connection) -> None:
+    """Older builds inserted PileKind by `.value` (lowercase like 'built_in_ideas').
+    SQLAlchemy's Enum column expects the enum NAME (uppercase like
+    'BUILT_IN_IDEAS') when no `values_callable` is supplied. Convert any legacy
+    rows in place so they read back without LookupError.
+    """
+    sync_connection.execute(
+        text(
+            "UPDATE piles SET kind = UPPER(kind) "
+            "WHERE kind IN ('built_in_journal', 'built_in_factual', 'built_in_ideas', "
+            "'built_in_todo', 'built_in_discarded', 'user_defined')"
+        )
+    )
 
 
 def _seed_built_in_piles(sync_connection) -> None:
