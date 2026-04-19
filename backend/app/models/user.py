@@ -22,3 +22,8 @@ class User(TimestampMixin, Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    connection_grants = relationship(
+        "ConnectionGrant",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

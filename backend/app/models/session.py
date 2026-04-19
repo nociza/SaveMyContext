@@ -44,6 +44,7 @@ class ChatSession(TimestampMixin, Base):
     is_discarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     discarded_reason: Mapped[str | None] = mapped_column(Text)
     pile_outputs: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    segments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     custom_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     classification_reason: Mapped[str | None] = mapped_column(Text)
     journal_entry: Mapped[str | None] = mapped_column(Text)

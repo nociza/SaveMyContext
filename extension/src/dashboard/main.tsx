@@ -226,7 +226,7 @@ function App() {
     try {
       const response = await sendRuntimeMessage<SourceCaptureResponse>({
         type: "SAVE_CURRENT_PAGE_SOURCE",
-        payload: { saveMode: "ai" }
+        payload: { saveMode: "raw" }
       });
       if (!response.ok) throw new Error(response.error ?? "Could not save.");
       setCaptureState("done");
@@ -344,7 +344,7 @@ function App() {
                 <div>
                   <div className="text-[14px] font-semibold">Save current page</div>
                   <div className="text-[12px] text-white/60">
-                    {captureMessage || "Drop the active tab into your vault"}
+                    {captureMessage || "Save the active tab as a raw note"}
                   </div>
                 </div>
               </div>

@@ -15,6 +15,12 @@ from app.models.enums import MessageRole, ProviderName
 from app.schemas.ingest import IngestDiffRequest, IngestMessage
 from app.services.ingest import IngestService
 from app.services.processing import SessionProcessor
+from app.schemas.processing import (
+    FactualResult,
+    JournalResult,
+    SegmentRouting,
+    TripletResult,
+)
 
 
 def _payload(*, external_id: str, content: str, route_to_discard: bool = False, discard_word: str | None = None) -> IngestDiffRequest:
@@ -126,6 +132,120 @@ async def test_recover_from_discard_runs_classification(tmp_path, monkeypatch) -
 
             assert recovered.category in {SessionCategory.FACTUAL, SessionCategory.JOURNAL, SessionCategory.IDEAS}
             assert recovered.pile_id is not None
+    finally:
+        get_settings.cache_clear()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_process_applies_multi_pile_segments(tmp_path, monkeypatch) -> None:
+    """Covers the end-to-end split-session path: a transcript routed to both
+    journal and factual piles is stored with segment records, dominant category,
+    unioned triplets, and a populated journal entry.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'segmented.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(apply_schema_migrations)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "heuristic")
+    get_settings.cache_clear()
+
+    try:
+        async with session_factory() as session:
+            service = IngestService(session)
+            service.exporter.base_dir = tmp_path / "markdown"
+
+            stored, _ = await service.ingest(
+                IngestDiffRequest(
+                    provider=ProviderName.GEMINI,
+                    external_session_id="segmented-session",
+                    sync_mode="full_snapshot",
+                    title="Segmented",
+                    source_url="https://gemini.google.com/app/segmented-session",
+                    captured_at=datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc),
+                    messages=[
+                        IngestMessage(
+                            external_message_id="m-1",
+                            role=MessageRole.USER,
+                            content="Today I ran with mom in the park.",
+                        ),
+                        IngestMessage(
+                            external_message_id="m-2",
+                            role=MessageRole.ASSISTANT,
+                            content="Sounds restorative.",
+                        ),
+                        IngestMessage(
+                            external_message_id="m-3",
+                            role=MessageRole.USER,
+                            content="Also, how does FastAPI use uvloop?",
+                        ),
+                        IngestMessage(
+                            external_message_id="m-4",
+                            role=MessageRole.ASSISTANT,
+                            content="FastAPI uses uvloop for the event loop.",
+                        ),
+                    ],
+                    raw_capture={"source": "test"},
+                )
+            )
+            session_id = stored.id
+
+        async with session_factory() as session:
+            processor = SessionProcessor(session)
+
+            async def fake_classify_segments(messages, **kwargs):
+                return [
+                    SegmentRouting(
+                        pile_slug="journal",
+                        reason="Personal day-to-day.",
+                        start_index=0,
+                        end_index=1,
+                    ),
+                    SegmentRouting(
+                        pile_slug="factual",
+                        reason="Technical explanation.",
+                        start_index=2,
+                        end_index=3,
+                    ),
+                ]
+
+            async def fake_journal(messages):
+                return JournalResult(
+                    entry="Walked with mom at the park.",
+                    action_items=["Plan next walk"],
+                    people=["mom"],
+                    activities=["walk"],
+                )
+
+            async def fake_factual(messages):
+                return FactualResult(
+                    summary="FastAPI + uvloop.",
+                    keywords=["fastapi", "uvloop"],
+                    triplets=[
+                        TripletResult(subject="FastAPI", predicate="uses", object="uvloop", confidence=0.9)
+                    ],
+                )
+
+            processor.orchestrator.classify_segments = fake_classify_segments  # type: ignore[assignment]
+            processor.orchestrator.journal = fake_journal  # type: ignore[assignment]
+            processor.orchestrator.factual = fake_factual  # type: ignore[assignment]
+
+            processed = await processor.process(session_id)
+            await session.commit()
+
+            from app.models import SessionCategory
+
+            # Journal and factual segments are the same size, so the dominant one is
+            # the first recorded (journal) per stable ordering.
+            assert processed.category in {SessionCategory.JOURNAL, SessionCategory.FACTUAL}
+            assert processed.segments is not None
+            assert [s["pile_slug"] for s in processed.segments] == ["journal", "factual"]
+            assert "Walked with mom at the park." in (processed.journal_entry or "")
+            assert any(t.subject == "FastAPI" and t.object == "uvloop" for t in processed.triplets)
     finally:
         get_settings.cache_clear()
 

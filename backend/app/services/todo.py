@@ -7,13 +7,14 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.models import ChatMessage
 from app.models.enums import MessageRole
-from app.schemas.processing import TodoResult
+from app.schemas.processing import TodoItemDetail, TodoResult
 from app.services.text import compact_lines, normalize_whitespace, take_sentences
 
 
 TODO_TITLE = "To-Do List"
 TODO_FILE_NAME = "To-Do List.md"
 CHECKLIST_RE = re.compile(r"^\s*-\s\[(?P<done>[ xX])\]\s+(?P<text>.+?)\s*$")
+DATE_PREFIX_RE = re.compile(r"^\((?P<date>\d{4}-\d{2}-\d{2})\)\s+(?P<rest>.+)$")
 ADD_PATTERNS = (
     re.compile(r"\badd\s+(?P<item>.+?)\s+to\s+(?:my\s+)?(?:to-?do|todo|task)\s+list\b", re.I),
     re.compile(r"\bput\s+(?P<item>.+?)\s+on\s+(?:my\s+)?(?:to-?do|todo|task)\s+list\b", re.I),
@@ -34,6 +35,11 @@ REOPEN_PATTERNS = (
 class TodoItem:
     text: str
     done: bool = False
+    deadline: str | None = None
+
+    @property
+    def is_persistent(self) -> bool:
+        return self.deadline is None
 
 
 class TodoListService:
@@ -100,7 +106,20 @@ def parse_todo_items(markdown: str) -> list[TodoItem]:
         text = normalize_whitespace(match.group("text"))
         if not text:
             continue
-        items.append(TodoItem(text=text, done=match.group("done").lower() == "x"))
+        deadline: str | None = None
+        date_match = DATE_PREFIX_RE.match(text)
+        if date_match:
+            deadline = date_match.group("date")
+            text = normalize_whitespace(date_match.group("rest"))
+        if not text:
+            continue
+        items.append(
+            TodoItem(
+                text=text,
+                done=match.group("done").lower() == "x",
+                deadline=deadline,
+            )
+        )
     return items
 
 
@@ -108,12 +127,19 @@ def render_todo_markdown(items: list[TodoItem]) -> str:
     normalized_items = sanitize_todo_items(items)
     active = [item for item in normalized_items if not item.done]
     done = [item for item in normalized_items if item.done]
+    # Dated items float to the top of Active so upcoming deadlines stay visible.
+    active.sort(key=lambda item: (item.deadline is None, item.deadline or "", item.text.lower()))
     lines = [f"# {TODO_TITLE}", "", "## Active"]
-    lines.extend(f"- [ ] {item.text}" for item in active)
+    lines.extend(_render_item(item, checkbox=" ") for item in active)
     lines.extend(["", "## Done"])
-    lines.extend(f"- [x] {item.text}" for item in done)
+    lines.extend(_render_item(item, checkbox="x") for item in done)
     lines.append("")
     return "\n".join(lines)
+
+
+def _render_item(item: TodoItem, *, checkbox: str) -> str:
+    prefix = f"({item.deadline}) " if item.deadline else ""
+    return f"- [{checkbox}] {prefix}{item.text}"
 
 
 def sanitize_todo_items(items: list[TodoItem]) -> list[TodoItem]:
@@ -123,7 +149,7 @@ def sanitize_todo_items(items: list[TodoItem]) -> list[TodoItem]:
         key = _normalize_item_key(text)
         if not key:
             continue
-        normalized[key] = TodoItem(text=text, done=item.done)
+        normalized[key] = TodoItem(text=text, done=item.done, deadline=item.deadline)
     return list(normalized.values())
 
 
@@ -142,10 +168,30 @@ def heuristic_todo_result(messages: list[ChatMessage], current_markdown: str) ->
             "Captured a to-do list update request, but the heuristic parser could not safely apply a structured change. "
             f"Review manually: {' '.join(fallback)}"
         ).strip()
-        return TodoResult(summary=summary, updated_markdown=render_todo_markdown(items))
+        return TodoResult(
+            summary=summary,
+            updated_markdown=render_todo_markdown(items),
+            items=_items_to_details(items),
+        )
 
     summary = "; ".join(operations)
-    return TodoResult(summary=summary, updated_markdown=render_todo_markdown(items))
+    return TodoResult(
+        summary=summary,
+        updated_markdown=render_todo_markdown(items),
+        items=_items_to_details(items),
+    )
+
+
+def _items_to_details(items: list[TodoItem]) -> list[TodoItemDetail]:
+    return [
+        TodoItemDetail(
+            text=item.text,
+            deadline=item.deadline,
+            is_persistent=item.is_persistent,
+            completed=item.done,
+        )
+        for item in items
+    ]
 
 
 def _message_texts(messages: list[ChatMessage], role: MessageRole | None = None) -> list[str]:

@@ -29,7 +29,8 @@ Recommended OpenRouter env settings:
 ```bash
 SAVEMYCONTEXT_OPENAI_API_KEY=your_openrouter_key
 SAVEMYCONTEXT_OPENAI_BASE_URL=https://openrouter.ai/api/v1
-SAVEMYCONTEXT_OPENAI_MODEL=openai/gpt-4.1-mini
+SAVEMYCONTEXT_OPENAI_MODEL=google/gemma-4-31b-it:free
+SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS=google/gemma-4-26b-a4b-it:free,google/gemma-3-27b-it:free,google/gemma-3-12b-it:free,google/gemma-3-4b-it:free,google/gemma-3n-e4b-it:free,google/gemma-3n-e2b-it:free,openai/gpt-4.1-mini
 ```
 
 Browser automation is experimental and disabled by default.

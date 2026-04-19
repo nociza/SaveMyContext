@@ -512,7 +512,7 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
       if (message.type !== "SAVE_CURRENT_PAGE_SOURCE") {
         return null;
       }
-      return await saveCurrentPage(message.payload?.saveMode ?? "ai");
+      return await saveCurrentPage(message.payload?.saveMode ?? "raw");
     }
   };
 }

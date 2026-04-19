@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 dev = "app.dev:main"
+smc = "app.cli:main"
 savemycontext = "app.cli:main"
 
 [dependency-groups]

@@ -55,26 +55,54 @@ If you want to change the storage path from the extension, the token also needs 
 Create the initial admin user:
 
 ```bash
-savemycontext init-admin --username admin
+smc init-admin --username admin
 ```
 
 Create an extension token:
 
 ```bash
-savemycontext token create --name chrome-extension --scope ingest --scope read
+smc token create --name chrome-extension --scope ingest --scope read
 ```
 
 List active tokens:
 
 ```bash
-savemycontext token list
+smc token list
 ```
 
 Revoke a token:
 
 ```bash
-savemycontext token revoke TOKEN_ID
+smc token revoke TOKEN_ID
 ```
+
+## Connection bundles
+
+For CLI-managed remote access, SaveMyContext can mint enrollment bundles instead of asking you to copy raw app tokens around.
+
+Available security levels:
+
+- `shared`: one reusable string that can enroll multiple devices
+- `per_device`: one single-use string per device
+- `per_device_code`: one single-use string plus a separate verification code
+
+Examples:
+
+```bash
+smc share
+smc invite --device laptop
+smc invite --security per_device_code --device work-laptop
+```
+
+Which one to choose:
+
+- `shared`: easiest when all the devices are yours and you just want one reusable string
+- `per_device`: better when you want each device to have its own one-time enrollment
+- `per_device_code`: best when you want a one-time string plus an extra approval step
+
+By default, the CLI uses a managed local owner account for issued device tokens. Pass `--username` if you want bundles tied to a specific existing user instead.
+
+Each successful enrollment still becomes a normal scoped app token on the backend. Revoking the grant stops new enrollments; revoking the issued token cuts off that enrolled device.
 
 ## What the extension validates
 
@@ -99,4 +127,5 @@ This keeps misconfigured URLs and weak tokens from silently failing later during
 ## Read next
 
 - [Getting Started](getting-started.md)
+- [Remote Access](remote-access.md)
 - [Troubleshooting](troubleshooting.md)

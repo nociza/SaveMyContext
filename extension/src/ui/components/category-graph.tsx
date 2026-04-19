@@ -1,35 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  Background,
-  BaseEdge,
-  Controls,
-  EdgeLabelRenderer,
-  Handle,
-  MarkerType,
-  MiniMap,
-  Panel,
-  Position,
-  ReactFlow,
-  getBezierPath,
-  type Edge,
-  type EdgeProps,
-  type Node,
-  type NodeProps
-} from "@xyflow/react";
-import {
-  forceCollide,
-  forceLink,
-  forceManyBody,
-  forceSimulation,
-  forceX,
-  forceY,
-  type SimulationLinkDatum,
-  type SimulationNodeDatum
-} from "d3-force";
+import Graph from "graphology";
+import forceAtlas2 from "graphology-layout-forceatlas2";
+import noverlap from "graphology-layout-noverlap";
+import Sigma from "sigma";
 
 import { providerLabels } from "../../shared/explorer";
-import type { BackendCategoryGraph, BackendExplorerGraphNode, ProviderName, SessionCategoryName } from "../../shared/types";
+import type { BackendCategoryGraph, BackendExplorerGraphEdge, BackendExplorerGraphNode, ProviderName, SessionCategoryName } from "../../shared/types";
 import {
   buildCategoryGraphClusters,
   clusterAccentForNode,
@@ -41,56 +18,45 @@ import { cn } from "../lib/utils";
 export type CategoryGraphDensity = "curated" | "complete";
 export type CategoryGraphFocusMode = "context" | "dim";
 
-type GraphNodeData = {
-  variant: "entity" | "cluster";
+export type CategoryGraphSelection =
+  | {
+      kind: "node";
+      id: string;
+      label: string;
+      sessionIds: string[];
+    }
+  | {
+      kind: "edge";
+      id: string;
+      label: string;
+      sessionIds: string[];
+    };
+
+type SigmaNodeAttributes = {
   label: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  baseColor: string;
   kind: string;
-  accent: string;
+  variant: "entity" | "cluster";
   sessionIds: string[];
   provider?: ProviderName | null;
-  muted: boolean;
-  meta: string;
-  detail: string;
   noteCount: number;
   degree: number;
-  hiddenCount?: number;
-  collapsed?: boolean;
-};
-
-type GraphEdgeData = {
-  label?: string | null;
-  sessionIds: string[];
+  communityId?: string | null;
+  communityLabel?: string | null;
   muted: boolean;
-  weight: number;
+  hiddenCount?: number;
 };
 
-type SimNode = SimulationNodeDatum & {
-  id: string;
-  variant: "entity" | "cluster";
+type SigmaEdgeAttributes = {
   label: string;
-  kind: string;
-  sessionIds: string[];
-  provider?: ProviderName | null;
-  accent: string;
-  radius: number;
-  targetX: number;
-  targetY: number;
-  muted: boolean;
-  meta: string;
-  detail: string;
-  noteCount: number;
-  degree: number;
-  hiddenCount?: number;
-  collapsed?: boolean;
-};
-
-type SimEdge = SimulationLinkDatum<SimNode> & {
-  id: string;
-  source: string | SimNode;
-  target: string | SimNode;
-  label?: string | null;
-  sessionIds: string[];
+  size: number;
+  color: string;
   weight: number;
+  sessionIds: string[];
   muted: boolean;
 };
 
@@ -104,138 +70,17 @@ type MutableCluster = {
   edgeCount: number;
 };
 
-type FlowSummary = {
-  visibleNodes: number;
-  totalNodes: number;
-  hiddenNodes: number;
-  visibleEdges: number;
-  totalEdges: number;
-  clusterCount: number;
-  contextOnly: boolean;
-};
-
-function GraphNodeCard({ data, selected }: NodeProps<Node<GraphNodeData>>) {
-  const clusterCard = data.variant === "cluster";
-  const handleStyle = {
-    width: 1,
-    height: 1,
-    minWidth: 1,
-    minHeight: 1,
-    background: "transparent",
-    border: "none",
-    pointerEvents: "none" as const
+type GraphBuildResult = {
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>;
+  summary: {
+    visibleNodes: number;
+    totalNodes: number;
+    hiddenNodes: number;
+    visibleEdges: number;
+    totalEdges: number;
+    clusterCount: number;
+    contextOnly: boolean;
   };
-
-  return (
-    <div
-      className={cn(
-        clusterCard ? "w-[204px] px-3 py-3" : "w-[156px] px-2.5 py-2",
-        "relative rounded-[8px] border bg-[var(--color-paper-raised)] text-left transition",
-        data.muted ? "border-[var(--color-line)]/70 opacity-35" : "border-[var(--color-line)]",
-        selected ? "ring-2 ring-[rgba(15,27,44,0.14)] shadow-[0_10px_28px_-16px_rgba(15,27,44,0.28)]" : ""
-      )}
-      style={{
-        borderColor: selected ? `${data.accent}66` : undefined,
-        borderLeft: `3px solid ${data.accent}`
-      }}
-      title={data.label}
-    >
-      <Handle id="t" type="target" position={Position.Top} style={handleStyle} isConnectable={false} />
-      <Handle id="l" type="target" position={Position.Left} style={handleStyle} isConnectable={false} />
-      <Handle id="b" type="source" position={Position.Bottom} style={handleStyle} isConnectable={false} />
-      <Handle id="r" type="source" position={Position.Right} style={handleStyle} isConnectable={false} />
-
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={cn("shrink-0 rounded-full", clusterCard ? "h-3 w-3" : "h-2.5 w-2.5")}
-              style={{ backgroundColor: data.accent }}
-            />
-            <span className={cn("truncate font-semibold text-[var(--color-ink)]", clusterCard ? "text-sm" : "text-[12.5px]")}>
-              {data.label}
-            </span>
-          </div>
-          <div className={cn("mt-1 truncate font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]", clusterCard ? "text-[10.5px]" : "text-[10px]")}>
-            {data.meta}
-          </div>
-        </div>
-        {clusterCard && data.collapsed ? (
-          <div className="shrink-0 rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-            Closed
-          </div>
-        ) : null}
-      </div>
-
-      <div className={cn("mt-1.5 text-[11px] leading-4 text-[var(--color-ink-soft)]", clusterCard ? "" : "truncate")}>{data.detail}</div>
-      {clusterCard && data.hiddenCount ? (
-        <div className="mt-2 rounded-[8px] bg-[var(--color-paper-sunken)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-ink-soft)]">
-          {data.hiddenCount} hidden in clean map
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function GraphEdgePath({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  markerEnd,
-  data,
-  selected
-}: EdgeProps<Edge<GraphEdgeData>>) {
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY
-  });
-
-  const muted = Boolean(data?.muted);
-  const label = data?.label?.trim();
-  const showLabel = Boolean(label) && selected;
-
-  return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={{
-          stroke: selected ? "#0f1b2c" : "#71717a",
-          strokeOpacity: muted ? 0.1 : selected ? 0.92 : 0.34,
-          strokeWidth: selected ? 2.6 : 1 + Math.min(Math.log((data?.weight ?? 1) + 1), 2.2),
-          strokeLinecap: "round"
-        }}
-      />
-      {showLabel ? (
-        <EdgeLabelRenderer>
-          <div
-            style={{
-              position: "absolute",
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              pointerEvents: "all"
-            }}
-            className="max-w-[220px] truncate rounded-[8px] border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] px-2 py-1 text-[10.5px] font-semibold text-[var(--color-ink)] shadow-sm"
-          >
-            {label}
-          </div>
-        </EdgeLabelRenderer>
-      ) : null}
-    </>
-  );
-}
-
-const nodeTypes = {
-  entity: GraphNodeCard,
-  cluster: GraphNodeCard
-};
-
-const edgeTypes = {
-  relationship: GraphEdgePath
 };
 
 function hasActiveSession(sessionIds: string[], activeSessions: Set<string> | null): boolean {
@@ -244,7 +89,7 @@ function hasActiveSession(sessionIds: string[], activeSessions: Set<string> | nu
 
 function nodeScore(node: BackendExplorerGraphNode, degree: number, activeSessions: Set<string> | null): number {
   const focusBoost = hasActiveSession(node.session_ids, activeSessions) ? 1000 : 0;
-  return focusBoost + degree * 8 + node.session_ids.length * 6 + Math.log(node.size + 1) * 8;
+  return focusBoost + degree * 8 + node.session_ids.length * 6 + Math.log(node.size + 1) * 8 + (node.centrality ?? 0) * 12;
 }
 
 function fallbackClusterFor(
@@ -266,40 +111,70 @@ function fallbackClusterFor(
   };
 }
 
-function buildFlow(
-  graph: BackendCategoryGraph,
+function readableGroupDetail(groupingMode: GraphGroupingMode): string {
+  if (groupingMode === "community") {
+    return "Topic community";
+  }
+  if (groupingMode === "provider") {
+    return "Provider group";
+  }
+  return "Node type group";
+}
+
+function addSafeEdge(
+  graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>,
+  key: string,
+  source: string,
+  target: string,
+  attributes: SigmaEdgeAttributes
+): void {
+  if (!graph.hasNode(source) || !graph.hasNode(target) || source === target) {
+    return;
+  }
+  if (graph.hasEdge(key)) {
+    const current = graph.getEdgeAttributes(key);
+    graph.mergeEdgeAttributes(key, {
+      label: current.label || attributes.label,
+      size: Math.max(current.size, attributes.size),
+      weight: current.weight + attributes.weight,
+      sessionIds: Array.from(new Set([...current.sessionIds, ...attributes.sessionIds])),
+      muted: current.muted && attributes.muted
+    });
+    return;
+  }
+  graph.addDirectedEdgeWithKey(key, source, target, attributes);
+}
+
+function buildSigmaGraph(
+  backendGraph: BackendCategoryGraph,
   category: SessionCategoryName,
   groupingMode: GraphGroupingMode,
   collapsedGroups: string[],
   density: CategoryGraphDensity,
   focusMode: CategoryGraphFocusMode,
   focusSessionIds?: string[]
-): {
-  nodes: Array<Node<GraphNodeData>>;
-  edges: Array<Edge<GraphEdgeData>>;
-  summary: FlowSummary;
-} {
+): GraphBuildResult {
   const activeSessions = focusSessionIds?.length ? new Set(focusSessionIds) : null;
   const contextOnly = Boolean(activeSessions && focusMode === "context");
   const collapsedSet = new Set(collapsedGroups);
-  const clusterLookup = buildCategoryGraphClusters(graph, category, groupingMode);
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
-  const degreeByNodeId = new Map<string, number>(graph.nodes.map((node) => [node.id, 0]));
+  const clusterLookup = buildCategoryGraphClusters(backendGraph, category, groupingMode);
+  const nodeById = new Map(backendGraph.nodes.map((node) => [node.id, node] as const));
+  const degreeByNodeId = new Map<string, number>(backendGraph.nodes.map((node) => [node.id, node.degree ?? 0]));
 
-  for (const edge of graph.edges) {
+  for (const edge of backendGraph.edges) {
     if (!nodeById.has(edge.source) || !nodeById.has(edge.target) || edge.source === edge.target) {
       continue;
     }
-    degreeByNodeId.set(edge.source, (degreeByNodeId.get(edge.source) ?? 0) + 1);
-    degreeByNodeId.set(edge.target, (degreeByNodeId.get(edge.target) ?? 0) + 1);
+    degreeByNodeId.set(edge.source, Math.max(degreeByNodeId.get(edge.source) ?? 0, 1));
+    degreeByNodeId.set(edge.target, Math.max(degreeByNodeId.get(edge.target) ?? 0, 1));
   }
 
   const scopedEdges = contextOnly
-    ? graph.edges.filter((edge) => hasActiveSession(edge.session_ids, activeSessions))
-    : graph.edges;
+    ? backendGraph.edges.filter((edge) => hasActiveSession(edge.session_ids, activeSessions))
+    : backendGraph.edges;
   const scopedNodeIds = new Set<string>();
 
-  for (const node of graph.nodes) {
+  for (const node of backendGraph.nodes) {
     if (!contextOnly || hasActiveSession(node.session_ids, activeSessions)) {
       scopedNodeIds.add(node.id);
     }
@@ -310,7 +185,7 @@ function buildFlow(
   }
 
   const clusterMap = new Map<string, MutableCluster>();
-  for (const node of graph.nodes) {
+  for (const node of backendGraph.nodes) {
     if (!scopedNodeIds.has(node.id)) {
       continue;
     }
@@ -341,23 +216,22 @@ function buildFlow(
     (left, right) => right.sessionIds.size - left.sessionIds.size || right.edgeCount - left.edgeCount || left.label.localeCompare(right.label)
   );
 
+  const graph = new Graph<SigmaNodeAttributes, SigmaEdgeAttributes>({ type: "directed", multi: true });
   const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(clusters.length || 1))));
-  const centers = new Map<string, { x: number; y: number }>();
+  const clusterCenterById = new Map<string, { x: number; y: number }>();
+  const visibleEntityIds = new Set<string>();
+
   clusters.forEach((cluster, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
-    centers.set(cluster.id, {
-      x: 240 + column * 320,
-      y: 240 + row * 250
+    clusterCenterById.set(cluster.id, {
+      x: column * 24,
+      y: row * 20
     });
   });
 
-  const simNodes: SimNode[] = [];
-  const headerNodes: Array<Node<GraphNodeData>> = [];
-  const visibleEntityIds = new Set<string>();
-
   for (const cluster of clusters) {
-    const center = centers.get(cluster.id) ?? { x: 260, y: 240 };
+    const center = clusterCenterById.get(cluster.id) ?? { x: 0, y: 0 };
     const clusterSessionIds = Array.from(cluster.sessionIds);
     const clusterMuted = Boolean(activeSessions && !hasActiveSession(clusterSessionIds, activeSessions));
     const sortedClusterNodes = [...cluster.nodes].sort((left, right) => {
@@ -365,83 +239,54 @@ function buildFlow(
       const rightDegree = degreeByNodeId.get(right.id) ?? 0;
       return nodeScore(right, rightDegree, activeSessions) - nodeScore(left, leftDegree, activeSessions) || left.label.localeCompare(right.label);
     });
-    const visibleLimit = density === "curated" ? (contextOnly ? 14 : 8) : sortedClusterNodes.length;
+    const visibleLimit = density === "curated" ? (contextOnly ? 18 : 10) : sortedClusterNodes.length;
     const visibleClusterNodes = sortedClusterNodes.slice(0, visibleLimit);
     const hiddenCount = Math.max(sortedClusterNodes.length - visibleClusterNodes.length, 0);
 
     if (collapsedSet.has(cluster.id)) {
-      simNodes.push({
-        id: cluster.id,
-        variant: "cluster",
+      graph.addNode(cluster.id, {
         label: cluster.label,
-        kind: groupingMode,
-        sessionIds: clusterSessionIds,
-        provider: cluster.provider,
-        accent: cluster.accent,
-        radius: 86,
-        targetX: center.x,
-        targetY: center.y,
         x: center.x,
         y: center.y,
-        fx: center.x,
-        fy: center.y,
-        muted: clusterMuted,
-        meta: `${cluster.nodes.length} entities · ${clusterSessionIds.length} notes`,
-        detail: groupingMode === "community" ? "Collapsed topic community" : "Collapsed group",
+        size: 11 + Math.sqrt(cluster.nodes.length) * 1.6,
+        color: cluster.accent,
+        baseColor: cluster.accent,
+        kind: groupingMode,
+        variant: "cluster",
+        sessionIds: clusterSessionIds,
+        provider: cluster.provider,
         noteCount: clusterSessionIds.length,
         degree: cluster.edgeCount,
-        hiddenCount,
-        collapsed: true
+        communityId: cluster.id,
+        communityLabel: cluster.label,
+        muted: clusterMuted,
+        hiddenCount
       });
       continue;
     }
 
-    headerNodes.push({
-      id: `cluster:${cluster.id}`,
-      type: "cluster",
-      draggable: false,
-      data: {
-        variant: "cluster",
-        label: cluster.label,
-        kind: groupingMode,
-        accent: cluster.accent,
-        sessionIds: clusterSessionIds,
-        provider: cluster.provider,
-        muted: clusterMuted,
-        meta: `${visibleClusterNodes.length}/${cluster.nodes.length} entities · ${clusterSessionIds.length} notes`,
-        detail: groupingMode === "community" ? "Topic community" : groupingMode === "provider" ? "Provider group" : "Node type group",
-        noteCount: clusterSessionIds.length,
-        degree: cluster.edgeCount,
-        hiddenCount
-      },
-      position: {
-        x: center.x - 102,
-        y: center.y - 142
-      }
-    });
-
     visibleClusterNodes.forEach((node, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(visibleClusterNodes.length, 1);
+      const ring = 3.5 + Math.floor(index / 8) * 2.2;
       const degree = degreeByNodeId.get(node.id) ?? 0;
       const muted = Boolean(activeSessions && !hasActiveSession(node.session_ids, activeSessions));
       visibleEntityIds.add(node.id);
-      simNodes.push({
-        id: node.id,
-        variant: "entity",
+      graph.addNode(node.id, {
         label: node.label,
+        x: center.x + Math.cos(angle) * ring,
+        y: center.y + Math.sin(angle) * ring,
+        size: 4.8 + Math.sqrt(Math.max(node.size, 1)) * 1.3 + Math.min(degree, 10) * 0.18,
+        color: cluster.accent,
+        baseColor: cluster.accent,
         kind: node.kind,
+        variant: "entity",
         sessionIds: node.session_ids,
         provider: node.provider,
-        accent: cluster.accent,
-        radius: 38 + Math.sqrt(Math.max(node.size, 1)) * 3,
-        targetX: center.x,
-        targetY: center.y + 16,
-        x: center.x + (index % 3) * 18,
-        y: center.y + 24 + (index % 4) * 13,
-        muted,
-        meta: `${node.session_ids.length} ${node.session_ids.length === 1 ? "note" : "notes"} · ${degree} links`,
-        detail: node.provider ? providerLabels[node.provider] : node.kind,
         noteCount: node.session_ids.length,
-        degree
+        degree,
+        communityId: node.community_id ?? cluster.id,
+        communityLabel: node.community_label ?? cluster.label,
+        muted
       });
     });
   }
@@ -466,6 +311,7 @@ function buildFlow(
       sessionIds: Set<string>;
       labels: Set<string>;
       weight: number;
+      muted: boolean;
     }
   >();
 
@@ -475,7 +321,6 @@ function buildFlow(
     if (!visibleSource || !visibleTarget || visibleSource === visibleTarget) {
       continue;
     }
-
     const key = `${visibleSource}:${visibleTarget}`;
     const aggregate =
       visibleEdges.get(key) ??
@@ -485,13 +330,15 @@ function buildFlow(
           target: visibleTarget,
           sessionIds: new Set<string>(),
           labels: new Set<string>(),
-          weight: 0
+          weight: 0,
+          muted: true
         };
         visibleEdges.set(key, created);
         return created;
       })();
 
     aggregate.weight += edge.weight;
+    aggregate.muted = aggregate.muted && Boolean(activeSessions && !hasActiveSession(edge.session_ids, activeSessions));
     for (const sessionId of edge.session_ids) {
       aggregate.sessionIds.add(sessionId);
     }
@@ -500,94 +347,67 @@ function buildFlow(
     }
   }
 
-  const simEdges: SimEdge[] = Array.from(visibleEdges.entries()).map(([id, edge]) => ({
-    id,
-    source: edge.source,
-    target: edge.target,
-    label: Array.from(edge.labels).slice(0, 3).join(", "),
-    sessionIds: Array.from(edge.sessionIds),
-    weight: edge.weight,
-    muted: Boolean(activeSessions && !hasActiveSession(Array.from(edge.sessionIds), activeSessions))
-  }));
-
-  const simulation = forceSimulation(simNodes)
-    .force(
-      "link",
-      forceLink<SimNode, SimEdge>(simEdges)
-        .id((node) => node.id)
-        .distance((edge) => (edge.source === edge.target ? 0 : 132 - Math.min(edge.weight, 10) * 5))
-        .strength((edge) => 0.08 + Math.min(edge.weight, 8) * 0.025)
-    )
-    .force("charge", forceManyBody<SimNode>().strength((node) => (node.variant === "cluster" ? -180 : -210)))
-    .force("collision", forceCollide<SimNode>().radius((node) => node.radius))
-    .force("forceX", forceX<SimNode>((node) => node.targetX).strength((node) => (node.variant === "cluster" ? 0.72 : 0.2)))
-    .force("forceY", forceY<SimNode>((node) => node.targetY).strength((node) => (node.variant === "cluster" ? 0.72 : 0.22)))
-    .stop();
-
-  for (let index = 0; index < 260; index += 1) {
-    simulation.tick();
+  for (const [id, edge] of visibleEdges.entries()) {
+    addSafeEdge(graph, id, edge.source, edge.target, {
+      label: Array.from(edge.labels).slice(0, 3).join(", "),
+      size: 0.7 + Math.min(Math.log(edge.weight + 1), 2.6),
+      color: "#9ca3af",
+      weight: edge.weight,
+      sessionIds: Array.from(edge.sessionIds),
+      muted: edge.muted
+    });
   }
 
-  const nodes: Array<Node<GraphNodeData>> = [
-    ...headerNodes,
-    ...simNodes.map((node) => ({
-      id: node.id,
-      type: node.variant === "cluster" ? "cluster" : "entity",
-      draggable: false,
-      data: {
-        variant: node.variant,
-        label: node.label,
-        kind: node.kind,
-        accent: node.accent,
-        sessionIds: node.sessionIds,
-        provider: node.provider,
-        muted: node.muted,
-        meta: node.meta,
-        detail: node.detail,
-        noteCount: node.noteCount,
-        degree: node.degree,
-        hiddenCount: node.hiddenCount,
-        collapsed: node.collapsed
-      },
-      position: {
-        x: (node.x ?? node.targetX) - (node.variant === "cluster" ? 102 : 78),
-        y: (node.y ?? node.targetY) - (node.variant === "cluster" ? 48 : 30)
-      }
-    }))
-  ];
-
-  const edges: Array<Edge<GraphEdgeData>> = simEdges.map((edge) => ({
-    id: edge.id,
-    source: typeof edge.source === "string" ? edge.source : edge.source.id,
-    target: typeof edge.target === "string" ? edge.target : edge.target.id,
-    type: "relationship",
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      width: 12,
-      height: 12,
-      color: "#a1a1aa"
-    },
-    data: {
-      label: edge.label,
-      sessionIds: edge.sessionIds,
-      muted: edge.muted,
-      weight: edge.weight
+  if (graph.order > 1) {
+    try {
+      forceAtlas2.assign(graph, {
+        iterations: graph.order > 80 ? 80 : 120,
+        settings: {
+          ...forceAtlas2.inferSettings(graph),
+          gravity: 0.9,
+          scalingRatio: groupingMode === "community" ? 7 : 5,
+          edgeWeightInfluence: 0.45,
+          barnesHutOptimize: graph.order > 80
+        },
+        getEdgeWeight: "weight"
+      });
+      noverlap.assign(graph, {
+        maxIterations: 80,
+        settings: {
+          margin: 3,
+          ratio: 1.2,
+          expansion: 1.08
+        }
+      });
+    } catch {
+      // Keep deterministic seeded positions if layout cannot run for an unusual graph.
     }
-  }));
+  }
 
   return {
-    nodes,
-    edges,
+    graph,
     summary: {
-      visibleNodes: visibleEntityIds.size,
+      visibleNodes: visibleEntityIds.size || graph.order,
       totalNodes: scopedNodeIds.size,
-      hiddenNodes: Math.max(scopedNodeIds.size - visibleEntityIds.size, 0),
-      visibleEdges: edges.length,
+      hiddenNodes: Math.max(scopedNodeIds.size - (visibleEntityIds.size || graph.order), 0),
+      visibleEdges: graph.size,
       totalEdges: scopedEdges.length,
       clusterCount: clusters.length,
       contextOnly
     }
   };
+}
+
+function selectedNeighborSet(graph: Graph<SigmaNodeAttributes, SigmaEdgeAttributes>, selectedNode: string | null, hoveredNode: string | null): Set<string> | null {
+  const activeNode = hoveredNode ?? selectedNode;
+  if (!activeNode || !graph.hasNode(activeNode)) {
+    return null;
+  }
+  const neighbors = new Set<string>([activeNode]);
+  for (const neighbor of graph.neighbors(activeNode)) {
+    neighbors.add(String(neighbor));
+  }
+  return neighbors;
 }
 
 export function CategoryGraph({
@@ -599,6 +419,7 @@ export function CategoryGraph({
   focusMode,
   focusSessionIds,
   onFocus,
+  onInspect,
   className
 }: {
   graph: BackendCategoryGraph;
@@ -609,12 +430,120 @@ export function CategoryGraph({
   focusMode: CategoryGraphFocusMode;
   focusSessionIds?: string[];
   onFocus: (label: string, sessionIds: string[]) => void;
+  onInspect?: (selection: CategoryGraphSelection | null) => void;
   className?: string;
 }) {
-  const { nodes, edges, summary } = useMemo(
-    () => buildFlow(graph, category, groupingMode, collapsedGroups, density, focusMode, focusSessionIds),
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<Sigma<SigmaNodeAttributes, SigmaEdgeAttributes> | null>(null);
+  const selectedNodeRef = useRef<string | null>(null);
+  const hoveredNodeRef = useRef<string | null>(null);
+  const onFocusRef = useRef(onFocus);
+  const onInspectRef = useRef(onInspect);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+
+  const build = useMemo(
+    () => buildSigmaGraph(graph, category, groupingMode, collapsedGroups, density, focusMode, focusSessionIds),
     [category, collapsedGroups, density, focusMode, focusSessionIds, graph, groupingMode]
   );
+
+  useEffect(() => {
+    selectedNodeRef.current = selectedNode;
+    hoveredNodeRef.current = hoveredNode;
+    rendererRef.current?.refresh({ schedule: true });
+  }, [hoveredNode, selectedNode]);
+
+  useEffect(() => {
+    onFocusRef.current = onFocus;
+    onInspectRef.current = onInspect;
+  }, [onFocus, onInspect]);
+
+  useEffect(() => {
+    selectedNodeRef.current = null;
+    hoveredNodeRef.current = null;
+    setSelectedNode(null);
+    setHoveredNode(null);
+  }, [build.graph]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !build.graph.order) {
+      return;
+    }
+
+    const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(build.graph, container, {
+      allowInvalidContainer: true,
+      autoCenter: true,
+      autoRescale: true,
+      enableEdgeEvents: true,
+      hideEdgesOnMove: true,
+      hideLabelsOnMove: false,
+      labelDensity: 0.1,
+      labelGridCellSize: 90,
+      labelRenderedSizeThreshold: density === "curated" ? 7 : 9,
+      renderEdgeLabels: false,
+      zIndex: true,
+      nodeReducer: (node, data) => {
+        const neighbors = selectedNeighborSet(build.graph, selectedNodeRef.current, hoveredNodeRef.current);
+        const isActive = node === selectedNodeRef.current || node === hoveredNodeRef.current;
+        const inNeighborhood = !neighbors || neighbors.has(node);
+        return {
+          ...data,
+          color: data.muted || !inNeighborhood ? "#c7cbd1" : data.baseColor,
+          label: inNeighborhood || data.variant === "cluster" || data.degree >= 3 ? data.label : "",
+          size: isActive ? data.size * 1.45 : data.size,
+          zIndex: isActive ? 2 : data.variant === "cluster" ? 1 : 0
+        };
+      },
+      edgeReducer: (edge, data) => {
+        const neighbors = selectedNeighborSet(build.graph, selectedNodeRef.current, hoveredNodeRef.current);
+        const extremities = build.graph.extremities(edge);
+        const inNeighborhood = !neighbors || (neighbors.has(String(extremities[0])) && neighbors.has(String(extremities[1])));
+        return {
+          ...data,
+          color: data.muted || !inNeighborhood ? "#d4d8dd" : "#7b8492",
+          size: inNeighborhood ? data.size : Math.max(data.size * 0.45, 0.4),
+          zIndex: inNeighborhood ? 1 : 0
+        };
+      }
+    });
+
+    renderer.on("enterNode", ({ node }) => {
+      hoveredNodeRef.current = node;
+      setHoveredNode(node);
+    });
+    renderer.on("leaveNode", () => {
+      hoveredNodeRef.current = null;
+      setHoveredNode(null);
+    });
+    renderer.on("clickNode", ({ node }) => {
+      const attributes = build.graph.getNodeAttributes(node);
+      selectedNodeRef.current = node;
+      setSelectedNode(node);
+      onFocusRef.current(attributes.label, attributes.sessionIds);
+      onInspectRef.current?.({ kind: "node", id: node, label: attributes.label, sessionIds: attributes.sessionIds });
+      renderer.refresh({ schedule: true });
+    });
+    renderer.on("clickEdge", ({ edge }) => {
+      const attributes = build.graph.getEdgeAttributes(edge);
+      onFocusRef.current(attributes.label || "Relationship", attributes.sessionIds);
+      onInspectRef.current?.({ kind: "edge", id: edge, label: attributes.label || "Relationship", sessionIds: attributes.sessionIds });
+    });
+    renderer.on("clickStage", () => {
+      selectedNodeRef.current = null;
+      setSelectedNode(null);
+      onInspectRef.current?.(null);
+      renderer.refresh({ schedule: true });
+    });
+
+    rendererRef.current = renderer;
+    return () => {
+      renderer.kill();
+      if (rendererRef.current === renderer) {
+        rendererRef.current = null;
+      }
+    };
+  }, [build.graph, density]);
 
   if (!graph.nodes.length) {
     return (
@@ -630,33 +559,20 @@ export function CategoryGraph({
   }
 
   return (
-    <div className={cn("min-h-[420px] h-[min(62vh,700px)] overflow-hidden rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)]", className)}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.18 }}
-        minZoom={0.38}
-        maxZoom={1.9}
-        proOptions={{ hideAttribution: true }}
-        onNodeClick={(_, node) => {
-          onFocus(node.data.label, node.data.sessionIds);
-        }}
-        onEdgeClick={(_, edge) => {
-          onFocus(edge.data?.label ?? "Relationship", edge.data?.sessionIds ?? []);
-        }}
-      >
-        <Panel position="top-left" className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)] shadow-sm">
-          {summary.clusterCount} groups · {summary.visibleNodes}/{summary.totalNodes} nodes · {summary.visibleEdges}/{summary.totalEdges} links
-          {summary.hiddenNodes ? ` · ${summary.hiddenNodes} hidden` : ""}
-          {summary.contextOnly ? " · context" : ""}
-        </Panel>
-        <Background gap={30} size={1} color="#e4e4e7" />
-        <MiniMap pannable zoomable nodeColor={(node) => (node.data as GraphNodeData).accent} />
-        <Controls showInteractive={false} />
-      </ReactFlow>
+    <div className={cn("relative min-h-[420px] h-[min(62vh,700px)] overflow-hidden rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)]", className)}>
+      <div className="absolute left-3 top-3 z-10 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)] shadow-sm">
+        {build.summary.clusterCount} groups · {build.summary.visibleNodes}/{build.summary.totalNodes} nodes · {build.summary.visibleEdges}/{build.summary.totalEdges} links
+        {build.summary.hiddenNodes ? ` · ${build.summary.hiddenNodes} hidden` : ""}
+        {build.summary.contextOnly ? " · context" : ""}
+      </div>
+      <div className="absolute right-3 top-3 z-10 max-w-[260px] rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2 text-xs leading-5 text-[var(--color-ink-soft)] shadow-sm">
+        {selectedNode && build.graph.hasNode(selectedNode)
+          ? `${build.graph.getNodeAttribute(selectedNode, "label")} · ${build.graph.getNodeAttribute(selectedNode, "noteCount")} notes · ${build.graph.getNodeAttribute(selectedNode, "degree")} links`
+          : hoveredNode && build.graph.hasNode(hoveredNode)
+            ? `${build.graph.getNodeAttribute(hoveredNode, "label")} · ${build.graph.getNodeAttribute(hoveredNode, "noteCount")} notes`
+            : `${readableGroupDetail(groupingMode)} map. Click a node or link for evidence.`}
+      </div>
+      <div ref={containerRef} className="h-full w-full" />
     </div>
   );
 }

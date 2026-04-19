@@ -4,22 +4,21 @@ title: SaveMyContext Docs
 
 # SaveMyContext
 
-SaveMyContext turns AI conversations and saved web pages into a local knowledge base. It captures chats from ChatGPT, Gemini, and Grok, syncs them to a self-hosted backend, writes an Obsidian-friendly Markdown vault, builds a lightweight knowledge graph, and gives you search and dashboard views inside the extension.
+SaveMyContext turns AI conversations and saved web pages into a local knowledge base. It captures chats from ChatGPT, Gemini, and Grok, syncs them to a backend you control, writes an Obsidian-friendly Markdown vault, and gives you search and dashboard views inside the extension.
 
-## What SaveMyContext gives you
+## Common scenarios
 
-- Automatic history sync from supported AI chat providers
-- Manual page and text-selection capture from regular web pages
-- Category-based notes for `journal`, `factual`, `ideas`, and `todo`
-- Search across notes, entities, saved sources, and the shared to-do list
-- A graph view, category workspaces, and a note reader inside the extension
-- Local Markdown files with matching source documents and optional git history
+- **Tesla + Grok:** talk through ideas or decisions while driving and have that conversation waiting in your vault later.
+- **ChatGPT research:** archive long research threads automatically so they stay searchable after the browser tab is gone.
+- **Gemini journaling:** use Gemini for reflection, daily notes, or task planning and have those chats filed into a journal or shared to-do list.
 
-## How it is organized
+## What you get
 
-1. The backend stores data, runs processing, and writes the vault.
-2. The Chrome extension captures conversations and gives you save, search, and dashboard tools.
-3. The vault stores readable notes, raw source files, graph files, and dashboards on disk.
+- automatic history sync from supported AI chat providers
+- saved pages and text selections alongside your chats
+- searchable notes, dashboards, and graph views
+- a local Markdown vault with readable notes and source material
+- one-host remote access with a single pasteable connection string
 
 ## Start here
 
@@ -28,17 +27,17 @@ SaveMyContext turns AI conversations and saved web pages into a local knowledge 
 - [Dashboard and Search](dashboard-and-search.md)
 - [Vault and Storage](vault-and-storage.md)
 - [Security and Access](security-and-access.md)
+- [Remote Access](remote-access.md)
 - [Troubleshooting](troubleshooting.md)
 - [Contributing](contributing.md)
 
-## Typical workflow
+## Typical flow
 
-1. Start the backend.
-2. Load the extension and connect it to the backend.
-3. Visit ChatGPT, Gemini, or Grok while signed in.
-4. Let history sync run, or save a page or selection manually.
-5. Open the popup or dashboard to search, inspect notes, and browse the graph.
-6. Open the vault in Obsidian if you want direct file access.
+1. Run `smc install` or `smc install --remote`.
+2. Load the extension and connect it.
+3. Use ChatGPT, Gemini, or Grok normally.
+4. Let SaveMyContext sync in the background.
+5. Search the result in the extension or open the vault in Obsidian.
 
 ## Important behavior
 

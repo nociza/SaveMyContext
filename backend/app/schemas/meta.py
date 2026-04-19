@@ -24,8 +24,8 @@ class CapabilityFeatureSet(BaseModel):
 
 
 class CapabilityStorage(BaseModel):
-    markdown_root: str
-    vault_root: str
+    markdown_root: str | None = None
+    vault_root: str | None = None
     public_url: str | None = None
 
 

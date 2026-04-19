@@ -4,6 +4,8 @@ export type CaptureMode = "incremental" | "full_snapshot";
 export type IndexingMode = "all" | "trigger_word";
 export type SourceCaptureKind = "selection" | "page";
 export type SourceSaveMode = "raw" | "ai";
+export type ConnectionSecurityLevel = "shared" | "per_device" | "per_device_code";
+export type SecondFactorMode = "none" | "one_time_code";
 
 export interface CapturedBody {
   text?: string;
@@ -121,10 +123,27 @@ export interface BackendCapabilities {
     openai_compatible_api: boolean;
   };
   storage: {
-    markdown_root: string;
-    vault_root: string;
+    markdown_root?: string | null;
+    vault_root?: string | null;
     public_url?: string | null;
   };
+}
+
+export interface ParsedConnectionBundle {
+  version: number;
+  baseUrl: string;
+  grantId: string;
+  secret: string;
+  securityLevel: ConnectionSecurityLevel;
+}
+
+export interface ConnectionRedeemResponse {
+  token: string;
+  token_id: string;
+  token_name: string;
+  scopes: string[];
+  security_level: ConnectionSecurityLevel;
+  second_factor_mode: SecondFactorMode;
 }
 
 export interface SyncStatus {
@@ -341,6 +360,12 @@ export interface BackendExplorerGraphNode {
   category?: SessionCategoryName | null;
   updated_at?: string | null;
   note_path?: string | null;
+  degree?: number;
+  centrality?: number;
+  community_id?: string | null;
+  community_label?: string | null;
+  evidence_count?: number;
+  evidence?: BackendExplorerGraphEvidence[];
 }
 
 export interface BackendExplorerGraphEdge {
@@ -350,6 +375,21 @@ export interface BackendExplorerGraphEdge {
   label?: string | null;
   weight: number;
   session_ids: string[];
+  predicate_count?: number;
+  evidence_count?: number;
+  evidence?: BackendExplorerGraphEvidence[];
+}
+
+export interface BackendExplorerGraphEvidence {
+  session_id: string;
+  title?: string | null;
+  provider?: ProviderName | null;
+  updated_at?: string | null;
+  note_path?: string | null;
+  triplet_id?: string | null;
+  predicate?: string | null;
+  confidence?: number | null;
+  snippet?: string | null;
 }
 
 export interface BackendCategoryGraph {
@@ -361,6 +401,26 @@ export interface BackendCategoryGraph {
   edge_count: number;
   nodes: BackendExplorerGraphNode[];
   edges: BackendExplorerGraphEdge[];
+}
+
+export interface BackendExplorerGraphPath {
+  node_ids: string[];
+  edge_ids: string[];
+  nodes: BackendExplorerGraphNode[];
+  edges: BackendExplorerGraphEdge[];
+  hop_count: number;
+  score: number;
+  evidence_session_ids: string[];
+}
+
+export interface BackendCategoryGraphPath {
+  category: SessionCategoryName;
+  scope_kind: "default" | "custom";
+  scope_label: string;
+  dominant_category: SessionCategoryName;
+  source: string;
+  target: string;
+  paths: BackendExplorerGraphPath[];
 }
 
 export interface BackendTodoItem {
@@ -613,6 +673,10 @@ export interface SaveSettingsResponse {
   error?: string;
 }
 
+export interface SaveConnectionBundleResponse extends SaveSettingsResponse {
+  redeemed?: ConnectionRedeemResponse;
+}
+
 export interface SaveKnowledgePathResponse {
   ok: boolean;
   storage?: BackendStorageSettings;
@@ -657,6 +721,14 @@ export type RuntimeMessage =
   | { type: "RUN_PROVIDER_PROMPT"; payload: RunProviderPromptPayload }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<ExtensionSettings> }
+  | {
+      type: "SAVE_CONNECTION_BUNDLE";
+      payload: {
+        connectionString: string;
+        verificationCode?: string;
+        settings: Partial<ExtensionSettings>;
+      };
+    }
   | { type: "SAVE_KNOWLEDGE_PATH"; payload: { markdownRoot: string } }
   | { type: "SAVE_SOURCE_CAPTURE"; payload: SourceCapturePayload }
   | { type: "SAVE_CURRENT_PAGE_SOURCE"; payload?: { saveMode?: SourceSaveMode } }

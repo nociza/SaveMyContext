@@ -14,6 +14,7 @@ from app.models.base import utcnow
 
 password_hasher = PasswordHash.recommended()
 PLAIN_TEXT_TOKEN_PREFIX = "savemycontext_pat_"
+SYSTEM_SERVICE_OWNER_USERNAME = "__savemycontext_service_owner__"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,15 @@ async def ensure_admin_user(
     result = await db.execute(select(User).order_by(User.created_at.asc()))
     existing_users = result.scalars().all()
     if existing_users and not force:
+        if len(existing_users) == 1 and existing_users[0].username == SYSTEM_SERVICE_OWNER_USERNAME:
+            user = existing_users[0]
+            user.username = username.strip()
+            user.password_hash = hash_password(password)
+            user.is_admin = True
+            user.is_active = True
+            await db.commit()
+            await db.refresh(user)
+            return user
         raise RuntimeError("An admin user already exists. Re-run with --force if you need to replace it.")
 
     if existing_users and force:
@@ -65,6 +75,33 @@ async def ensure_admin_user(
     await db.flush()
     await db.commit()
     await db.refresh(user)
+    return user
+
+
+async def ensure_service_owner_user(db: AsyncSession) -> User:
+    admin_result = await db.execute(
+        select(User).where(
+            User.is_active.is_(True),
+            User.is_admin.is_(True),
+        ).order_by(User.created_at.asc())
+    )
+    admin_user = admin_result.scalars().first()
+    if admin_user is not None:
+        return admin_user
+
+    active_result = await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at.asc()))
+    active_user = active_result.scalars().first()
+    if active_user is not None:
+        return active_user
+
+    user = User(
+        username=SYSTEM_SERVICE_OWNER_USERNAME,
+        password_hash=hash_password(secrets.token_urlsafe(32)),
+        is_admin=True,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
     return user
 
 

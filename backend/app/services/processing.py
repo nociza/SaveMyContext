@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import ChatSession, FactTriplet, Pile, PileKind, SessionCategory
 from app.models.base import utcnow
-from app.schemas.processing import TripletResult
+from app.schemas.processing import SegmentRouting, TripletResult
 from app.schemas.processing_worker import SessionPipelineResult
 from app.services.orchestrator import ProcessingOrchestrator
 from app.services.pile_service import PileService
@@ -45,6 +45,16 @@ class SessionProcessor:
         if isinstance(decision, tuple):
             user_pile, reason = decision
             return await self._apply_user_pile(session_id, user_pile, reason=reason)
+
+        # New: try segmented classification first. When the transcript cleanly
+        # splits across multiple piles, apply each pipeline to its own slice.
+        segments = await self.orchestrator.classify_segments(
+            session.messages,
+            auto_discard_categories=auto_discard_categories,
+        )
+        distinct_piles = {seg.pile_slug for seg in segments}
+        if segments and len(distinct_piles) > 1:
+            return await self._apply_segmented(session_id, segments)
 
         classification = await self.orchestrator.classify(
             session.messages,
@@ -157,6 +167,133 @@ class SessionProcessor:
         await self.db.flush()
         return session
 
+    async def _apply_segmented(
+        self,
+        session_id: str,
+        segments: list[SegmentRouting],
+    ) -> ChatSession:
+        """Run each segment through its pile's pipeline and fold the results onto
+        the session. The session's primary category/pile becomes the dominant
+        segment (largest by message count); per-segment outputs live on
+        `ChatSession.segments` for the markdown renderer and dashboards.
+        """
+        session = await self._load_session(session_id)
+        messages = list(session.messages)
+
+        segment_records: list[dict[str, object]] = []
+        journal_entries: list[str] = []
+        journal_actions: list[str] = []
+        idea_outputs: list[dict[str, object]] = []
+        share_posts: list[str] = []
+        triplets: list[TripletResult] = []
+        todo_summary_parts: list[str] = []
+        todo_markdown: str | None = None
+        factual_summaries: list[str] = []
+
+        todo_service = TodoListService(base_dir=self.base_dir)
+        current_todo = todo_service.read_markdown()
+
+        for segment in segments:
+            slice_messages = messages[segment.start_index : segment.end_index + 1]
+            if not slice_messages:
+                continue
+            outputs: dict[str, object] = {}
+
+            if segment.pile_slug == "journal":
+                journal = await self.orchestrator.journal(slice_messages)
+                outputs["journal"] = journal.model_dump(exclude_none=True)
+                journal_entries.append(journal.entry)
+                journal_actions.extend(journal.action_items)
+            elif segment.pile_slug == "factual":
+                factual = await self.orchestrator.factual(slice_messages)
+                outputs["factual"] = factual.model_dump(exclude_none=True)
+                triplets.extend(factual.triplets)
+                if factual.summary:
+                    factual_summaries.append(factual.summary)
+            elif segment.pile_slug == "ideas":
+                idea = await self.orchestrator.ideas(slice_messages)
+                outputs["idea"] = idea.model_dump(exclude={"share_post"})
+                idea_outputs.append(idea.model_dump(exclude={"share_post"}))
+                share_posts.append(idea.share_post)
+            elif segment.pile_slug == "todo":
+                todo = await self.orchestrator.todo(slice_messages, current_todo)
+                outputs["todo"] = todo.model_dump(exclude_none=True)
+                todo_markdown = todo.updated_markdown
+                current_todo = todo.updated_markdown
+                todo_summary_parts.append(todo.summary)
+            else:
+                continue
+
+            segment_records.append(
+                {
+                    "pile_slug": segment.pile_slug,
+                    "reason": segment.reason,
+                    "start_index": segment.start_index,
+                    "end_index": segment.end_index,
+                    "outputs": outputs,
+                }
+            )
+
+        if not segment_records:
+            return session
+
+        # Pick the dominant segment as the session's primary pile/category.
+        dominant = max(
+            segment_records,
+            key=lambda record: int(record["end_index"]) - int(record["start_index"]) + 1,
+        )
+        dominant_slug = str(dominant["pile_slug"])
+        dominant_category = BUILT_IN_SLUG_TO_CATEGORY.get(dominant_slug)
+
+        session.category = dominant_category
+        session.pile_id = await self._resolve_pile_id_for_category(dominant_category)
+        session.is_discarded = False
+        session.discarded_reason = None
+        session.classification_reason = str(dominant.get("reason") or "Segmented classification.")
+
+        session.journal_entry = None
+        session.todo_summary = None
+        session.idea_summary = None
+        session.share_post = None
+
+        if journal_entries:
+            body = "\n\n".join(entry.strip() for entry in journal_entries if entry.strip())
+            if journal_actions:
+                deduped_actions: list[str] = []
+                seen: set[str] = set()
+                for item in journal_actions:
+                    key = item.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    deduped_actions.append(item)
+                body = body + "\n\nAction Items:\n" + "\n".join(f"- {item}" for item in deduped_actions)
+            session.journal_entry = body or None
+
+        if idea_outputs:
+            # Keep the dominant idea's structure as the primary summary; stash the
+            # rest under pile_outputs via the segments list (already recorded).
+            primary_idea = next(
+                (record["outputs"]["idea"] for record in segment_records if record["pile_slug"] == "ideas"),
+                None,
+            )
+            session.idea_summary = primary_idea if isinstance(primary_idea, dict) else None
+
+        if share_posts:
+            session.share_post = share_posts[0]
+
+        if todo_markdown is not None:
+            todo_service.write_markdown(todo_markdown)
+            session.todo_summary = "; ".join(part for part in todo_summary_parts if part) or None
+
+        session.pile_outputs = {"factual_summaries": factual_summaries} if factual_summaries else None
+        session.segments = segment_records
+
+        await self._replace_triplets(session, triplets)
+        session.last_processed_at = utcnow()
+        await self.db.flush()
+        return session
+
     async def mark_pending(self, session_id: str) -> ChatSession:
         session = await self._load_session(session_id)
         session.category = None
@@ -164,6 +301,7 @@ class SessionProcessor:
         session.is_discarded = False
         session.discarded_reason = None
         session.pile_outputs = None
+        session.segments = None
         session.classification_reason = None
         session.journal_entry = None
         session.todo_summary = None
@@ -180,6 +318,7 @@ class SessionProcessor:
         session.pile_id = await self._resolve_pile_id_for_category(result.category)
         session.is_discarded = result.category == SessionCategory.DISCARDED
         session.classification_reason = result.classification_reason
+        session.segments = None
         session.journal_entry = None
         session.todo_summary = None
         session.idea_summary = None
@@ -222,6 +361,7 @@ class SessionProcessor:
         session.idea_summary = None
         session.share_post = None
         session.pile_outputs = None
+        session.segments = None
         session.last_processed_at = utcnow()
         await self._replace_triplets(session, [])
         await self.db.flush()

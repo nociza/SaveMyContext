@@ -161,3 +161,97 @@ def test_heuristic_todo_update_rewrites_shared_file() -> None:
     assert "buy milk" in result.summary.lower()
     assert "- [ ] buy milk" in result.updated_markdown
     assert "- [x] File taxes" in result.updated_markdown
+
+
+def test_todo_items_parse_date_prefix_and_render_round_trip() -> None:
+    from app.services.todo import parse_todo_items, render_todo_markdown
+
+    markdown = (
+        "# To-Do List\n\n"
+        "## Active\n"
+        "- [ ] (2026-05-01) Ship release\n"
+        "- [ ] Buy milk\n\n"
+        "## Done\n"
+        "- [x] File taxes\n"
+    )
+    items = parse_todo_items(markdown)
+    by_text = {item.text: item for item in items}
+    assert by_text["Ship release"].deadline == "2026-05-01"
+    assert by_text["Ship release"].is_persistent is False
+    assert by_text["Buy milk"].deadline is None
+    assert by_text["Buy milk"].is_persistent is True
+
+    rendered = render_todo_markdown(items)
+    # Dated item floats above the persistent one inside Active.
+    assert rendered.index("- [ ] (2026-05-01) Ship release") < rendered.index("- [ ] Buy milk")
+    assert "- [x] File taxes" in rendered
+
+
+@pytest.mark.asyncio
+async def test_classify_segments_splits_mixed_session_across_piles() -> None:
+    from app.schemas.processing import SegmentedClassificationResult, SegmentRouting
+
+    messages = [
+        StubMessage(MessageRole.USER, "Today I had a great walk with mom and we talked about the garden."),
+        StubMessage(MessageRole.ASSISTANT, "Sounds grounding."),
+        StubMessage(MessageRole.USER, "Also, can you explain how FastAPI uses uvloop under the hood?"),
+        StubMessage(MessageRole.ASSISTANT, "FastAPI delegates the event loop to uvloop."),
+    ]
+
+    class StubClient:
+        async def generate_json(self, **kwargs) -> SegmentedClassificationResult:
+            return SegmentedClassificationResult(
+                segments=[
+                    SegmentRouting(
+                        pile_slug="journal",
+                        reason="Personal day-to-day talk about the user's walk.",
+                        start_index=0,
+                        end_index=1,
+                    ),
+                    SegmentRouting(
+                        pile_slug="factual",
+                        reason="Technical explanation of FastAPI internals.",
+                        start_index=2,
+                        end_index=3,
+                    ),
+                ]
+            )
+
+    orchestrator = ProcessingOrchestrator()
+    orchestrator.client = StubClient()  # type: ignore[assignment]
+
+    segments = await orchestrator.classify_segments(messages)  # type: ignore[arg-type]
+    assert [seg.pile_slug for seg in segments] == ["journal", "factual"]
+    assert segments[0].start_index == 0 and segments[0].end_index == 1
+    assert segments[1].start_index == 2 and segments[1].end_index == 3
+
+
+@pytest.mark.asyncio
+async def test_classify_segments_fills_trailing_gap_and_drops_bogus_todo() -> None:
+    from app.schemas.processing import SegmentedClassificationResult, SegmentRouting
+
+    messages = [
+        StubMessage(MessageRole.USER, "I felt tired today and need to breathe."),
+        StubMessage(MessageRole.ASSISTANT, "Rest helps."),
+        StubMessage(MessageRole.USER, "Also add milk to something."),
+        StubMessage(MessageRole.ASSISTANT, "ok."),
+    ]
+
+    class StubClient:
+        async def generate_json(self, **kwargs) -> SegmentedClassificationResult:
+            return SegmentedClassificationResult(
+                segments=[
+                    SegmentRouting(pile_slug="journal", reason="reflection", start_index=0, end_index=1),
+                    # LLM mislabeled; not an explicit shared-list edit — should be dropped.
+                    SegmentRouting(pile_slug="todo", reason="looks like a todo", start_index=2, end_index=2),
+                ]
+            )
+
+    orchestrator = ProcessingOrchestrator()
+    orchestrator.client = StubClient()  # type: ignore[assignment]
+
+    segments = await orchestrator.classify_segments(messages)  # type: ignore[arg-type]
+    # Bogus todo is dropped; the surviving journal segment is extended to cover the trailing messages.
+    assert len(segments) == 1
+    assert segments[0].pile_slug == "journal"
+    assert segments[0].end_index == 3

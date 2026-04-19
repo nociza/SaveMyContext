@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import APIToken, User
 from app.models.base import Base
-from app.services.auth import create_api_token, ensure_admin_user, revoke_api_token, verify_password
+from app.services.auth import (
+    SYSTEM_SERVICE_OWNER_USERNAME,
+    create_api_token,
+    ensure_admin_user,
+    ensure_service_owner_user,
+    revoke_api_token,
+    verify_password,
+)
 
 
 @pytest.mark.asyncio
@@ -46,5 +53,32 @@ async def test_admin_bootstrap_and_token_lifecycle(tmp_path) -> None:
     async with session_factory() as session:
         stored_user = await session.scalar(select(User).where(User.username == "admin"))
         assert stored_user is not None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_init_admin_reuses_the_managed_service_owner_when_present(tmp_path) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-auth-service-owner.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async with session_factory() as session:
+        owner = await ensure_service_owner_user(session)
+        owner_id = owner.id
+        assert owner.username == SYSTEM_SERVICE_OWNER_USERNAME
+        await session.commit()
+
+    async with session_factory() as session:
+        upgraded = await ensure_admin_user(
+            session,
+            username="admin",
+            password="correct horse battery staple",
+        )
+        assert upgraded.id == owner_id
+        assert upgraded.username == "admin"
+        assert verify_password("correct horse battery staple", upgraded.password_hash) is True
 
     await engine.dispose()

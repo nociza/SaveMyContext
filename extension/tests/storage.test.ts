@@ -177,4 +177,29 @@ describe("storage", () => {
       }
     });
   });
+
+  it("creates and caches an installation id in local storage", async () => {
+    const sync = createStorageArea();
+    const local = createStorageArea();
+    vi.stubGlobal("chrome", {
+      storage: {
+        sync,
+        local
+      }
+    });
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => "install-123")
+    });
+
+    const { getInstallationId } = await import("../src/shared/storage");
+    const first = await getInstallationId();
+    const second = await getInstallationId();
+
+    expect(first).toBe("install-123");
+    expect(second).toBe("install-123");
+    expect(local.set).toHaveBeenCalledTimes(1);
+    expect(local.set).toHaveBeenCalledWith({
+      "savemycontext.installation-id": "install-123"
+    });
+  });
 });

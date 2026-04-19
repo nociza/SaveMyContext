@@ -13,6 +13,12 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.cli_exposure import (
+    TAILSCALE_PROVIDER,
+    disable_tailscale_funnel,
+    enable_tailscale_funnel,
+    tailscale_funnel_status,
+)
 from app.cli_config import (
     CLIConfig,
     apply_runtime_environment,
@@ -40,9 +46,16 @@ from app.cli_service import (
 from app.models import APIToken, ProviderName
 from app.models.base import Base
 from app.services.auth import create_api_token, ensure_admin_user, revoke_api_token
+from app.services.connection_grants import (
+    create_connection_grant,
+    list_connection_grants,
+    parse_expiry_hours,
+    revoke_connection_grant,
+)
 
 
 PACKAGE_NAME = "savemycontext"
+CLI_NAME = "smc"
 CLI_CONFIG_PATH_ENV = "SAVEMYCONTEXT_CLI_CONFIG_PATH"
 
 
@@ -107,12 +120,65 @@ def print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2))
 
 
+def copy_namespace(args: argparse.Namespace, **updates: object) -> argparse.Namespace:
+    payload = vars(args).copy()
+    payload.update(updates)
+    return argparse.Namespace(**payload)
+
+
+def effective_connection_base_url(config: CLIConfig) -> str:
+    return (config.public_url or f"http://127.0.0.1:{config.port}").rstrip("/")
+
+
+def resolve_connection_scopes(args: argparse.Namespace) -> list[str]:
+    return sorted(set(args.scope or ["ingest", "read"]))
+
+
+def connection_bundle_payload(
+    created,
+    *,
+    public_url: str,
+) -> dict[str, object]:
+    return {
+        "grant_id": created.grant.id,
+        "name": created.grant.name,
+        "security_level": created.grant.security_level,
+        "second_factor_mode": created.grant.second_factor_mode,
+        "device_label": created.grant.device_label,
+        "scopes": created.grant.scopes,
+        "public_url": public_url,
+        "connection_string": created.connection_string,
+        "verification_code": created.verification_code,
+        "max_redemptions": created.grant.max_redemptions,
+        "expires_at": created.grant.expires_at.isoformat() if created.grant.expires_at else None,
+    }
+
+
+def print_connection_bundle(payload: dict[str, object]) -> None:
+    print("Connection bundle created.")
+    print_kv("Grant ID", payload["grant_id"])
+    print_kv("Name", payload["name"])
+    print_kv("Security", payload["security_level"])
+    print_kv("URL", payload["public_url"])
+    print_kv("Scopes", ", ".join(payload["scopes"]))
+    if payload.get("device_label"):
+        print_kv("Device Label", payload["device_label"])
+    if payload.get("expires_at"):
+        print_kv("Expires", payload["expires_at"])
+    print()
+    print(payload["connection_string"])
+    if payload.get("verification_code"):
+        print()
+        print_kv("Verification Code", payload["verification_code"])
+
+
 def collect_env_updates(args: argparse.Namespace) -> dict[str, str]:
     updates: dict[str, str] = {}
     optional_values = {
         "SAVEMYCONTEXT_OPENAI_API_KEY": getattr(args, "openai_api_key", None),
         "SAVEMYCONTEXT_OPENAI_BASE_URL": getattr(args, "openai_base_url", None),
         "SAVEMYCONTEXT_OPENAI_MODEL": getattr(args, "openai_model", None),
+        "SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS": getattr(args, "openai_model_fallbacks", None),
         "SAVEMYCONTEXT_OPENAI_APP_NAME": getattr(args, "openai_app_name", None),
         "SAVEMYCONTEXT_OPENAI_SITE_URL": getattr(args, "openai_site_url", None),
         "SAVEMYCONTEXT_GOOGLE_API_KEY": getattr(args, "google_api_key", None),
@@ -165,13 +231,13 @@ def print_runtime_summary(config: CLIConfig, paths: CLIPaths) -> None:
 def print_config_next_steps(*, include_service: bool) -> None:
     print()
     print("Next:")
-    print("- Edit or update API settings with `savemycontext config set ...` or by editing the env file.")
+    print("- Edit or update API settings with `smc config set ...` or by editing the env file.")
     if include_service:
-        print("- Check the service with `savemycontext service status`.")
-        print("- Follow logs with `savemycontext service logs -f`.")
+        print("- Check the service with `smc status`.")
+        print("- Follow logs with `smc logs -f`.")
     else:
-        print("- Start the backend in the foreground with `savemycontext run`.")
-        print("- Or install the background service with `savemycontext service install --start`.")
+        print("- Start the backend in the foreground with `smc run`.")
+        print("- Or install the background service with `smc install`.")
 
 
 def format_health(status_ok: bool, status_code: int | None, error: str | None) -> str:
@@ -248,6 +314,36 @@ def command_service_install(args: argparse.Namespace) -> int:
         print()
         print(linger_warning)
     print_config_next_steps(include_service=True)
+
+    if args.expose:
+        if not args.start:
+            raise RuntimeError("Remote setup needs the backend running. Re-run with `smc install --remote` or add `--start`.")
+        expose_args = argparse.Namespace(
+            config=getattr(args, "config", None),
+            host=None,
+            port=None,
+            data_dir=None,
+            markdown_dir=None,
+            llm_backend=None,
+            browser_llm_model=None,
+            browser_llm_state_path=None,
+            public_url=None,
+            browser_profile_dir=None,
+            browser_headless=None,
+            browser_channel=None,
+            browser_executable_path=None,
+            browser_timeout_seconds=None,
+            provider=args.expose_provider,
+            username=None,
+            name=args.expose_name,
+            security=args.expose,
+            device_label=args.expose_device_label,
+            expires_in_hours=args.expose_expires_in_hours,
+            scope=None,
+            json=False,
+        )
+        print()
+        command_expose_enable(expose_args)
     return 0
 
 
@@ -277,6 +373,7 @@ def command_service_status(args: argparse.Namespace) -> int:
     print_kv("Config", paths.config_path)
     print_kv("Env", paths.env_path)
     print_kv("Service File", paths.service_definition_path)
+    print_kv("Public URL", config.public_url or "not configured")
     print_kv("Data", config.data_dir)
     print_kv("Markdown", config.markdown_dir)
     print_kv("Database", config.database_path)
@@ -375,11 +472,11 @@ def command_doctor(args: argparse.Namespace) -> int:
         print()
         print("Suggested next steps:")
         if not paths.config_path.exists() or not paths.env_path.exists():
-            print("- Run `savemycontext config init` to create the config, env file, and local data directories.")
+            print("- Run `smc config init` to create the config, env file, and local data directories.")
         if current_service_manager() in {"systemd", "launchd"}:
-            print("- Run `savemycontext service install --start` to install the background service.")
+            print("- Run `smc install` to install the background service.")
         else:
-            print("- Run `savemycontext run` if you want to start the backend in the foreground on this machine.")
+            print("- Run `smc run` if you want to start the backend in the foreground on this machine.")
         return 1
 
     print()
@@ -438,6 +535,7 @@ def command_config_show(args: argparse.Namespace) -> int:
             "browser_llm_state_path": str(config.browser_llm_state_path),
             "openai_base_url": env_values.get("SAVEMYCONTEXT_OPENAI_BASE_URL"),
             "openai_model": env_values.get("SAVEMYCONTEXT_OPENAI_MODEL"),
+            "openai_model_fallbacks": env_values.get("SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS"),
             "openai_api_key_configured": bool(env_values.get("SAVEMYCONTEXT_OPENAI_API_KEY")),
             "google_api_key_configured": bool(env_values.get("SAVEMYCONTEXT_GOOGLE_API_KEY")),
         },
@@ -648,6 +746,240 @@ def command_token_revoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_connection_bundle_from_config(
+    *,
+    args: argparse.Namespace,
+    config: CLIConfig,
+    paths: CLIPaths,
+) -> dict[str, object]:
+    scopes = resolve_connection_scopes(args)
+    expires_at = parse_expiry_hours(getattr(args, "expires_in_hours", None))
+    base_url = effective_connection_base_url(config)
+
+    async def run() -> dict[str, object]:
+        engine, session_factory = await open_cli_session(config, paths)
+        try:
+            async with session_factory() as session:
+                created = await create_connection_grant(
+                    session,
+                    username=args.username,
+                    name=args.name,
+                    base_url=base_url,
+                    scopes=scopes,
+                    security_level=args.security,
+                    device_label=getattr(args, "device_label", None),
+                    expires_at=expires_at,
+                )
+                return connection_bundle_payload(created, public_url=base_url)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+def command_expose_enable(args: argparse.Namespace) -> int:
+    paths, config = load_effective_config(args)
+    if args.provider != TAILSCALE_PROVIDER:
+        raise RuntimeError(f"Unsupported exposure provider: {args.provider}")
+
+    public_url = enable_tailscale_funnel(config)
+    config = merge_cli_config(config, public_url=public_url)
+    persist_cli_runtime(config, paths)
+
+    payload = _create_connection_bundle_from_config(args=args, config=config, paths=paths)
+    if args.json:
+        print_json(
+            {
+                "provider": args.provider,
+                "public_url": public_url,
+                "bundle": payload,
+            }
+        )
+    else:
+        print("Remote exposure enabled.")
+        print_kv("Provider", args.provider)
+        print_kv("URL", public_url)
+        print()
+        print_connection_bundle(payload)
+    return 0
+
+
+def command_expose_status(args: argparse.Namespace) -> int:
+    paths = resolve_cli_paths(getattr(args, "config", None))
+    config = load_cli_config(paths.config_path, paths=paths)
+
+    if args.provider != TAILSCALE_PROVIDER:
+        raise RuntimeError(f"Unsupported exposure provider: {args.provider}")
+
+    status_payload = tailscale_funnel_status()
+    payload = {
+        "provider": status_payload.provider,
+        "public_url": config.public_url or status_payload.public_url,
+        "active": bool(status_payload.public_url),
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print_kv("Provider", payload["provider"])
+        print_kv("Active", "yes" if payload["active"] else "no")
+        print_kv("URL", payload["public_url"] or "not configured")
+    return 0 if payload["active"] else 1
+
+
+def command_expose_disable(args: argparse.Namespace) -> int:
+    paths, config = load_effective_config(args)
+    if args.provider != TAILSCALE_PROVIDER:
+        raise RuntimeError(f"Unsupported exposure provider: {args.provider}")
+
+    disable_tailscale_funnel()
+    config = merge_cli_config(config, public_url=None)
+    persist_cli_runtime(config, paths)
+
+    payload = {
+        "provider": args.provider,
+        "public_url": None,
+        "active": False,
+    }
+    if args.json:
+        print_json(payload)
+    else:
+        print("Remote exposure disabled.")
+        print_kv("Provider", args.provider)
+    return 0
+
+
+def command_expose_bundle_create(args: argparse.Namespace) -> int:
+    paths, config = load_effective_config(args)
+    payload = _create_connection_bundle_from_config(args=args, config=config, paths=paths)
+    if args.json:
+        print_json(payload)
+    else:
+        print_connection_bundle(payload)
+    return 0
+
+
+def command_expose_bundle_list(args: argparse.Namespace) -> int:
+    paths, config = load_effective_config(args)
+
+    async def run() -> list[dict[str, object]]:
+        engine, session_factory = await open_cli_session(config, paths)
+        try:
+            async with session_factory() as session:
+                rows = await list_connection_grants(session)
+                return [
+                    {
+                        "id": grant.id,
+                        "name": grant.name,
+                        "security_level": grant.security_level,
+                        "second_factor_mode": grant.second_factor_mode,
+                        "device_label": grant.device_label,
+                        "scopes": grant.scopes,
+                        "is_active": grant.is_active,
+                        "redemption_count": grant.redemption_count,
+                        "max_redemptions": grant.max_redemptions,
+                        "expires_at": grant.expires_at.isoformat() if grant.expires_at else None,
+                        "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
+                    }
+                    for grant in rows
+                ]
+        finally:
+            await engine.dispose()
+
+    payload = asyncio.run(run())
+    if args.json:
+        print_json(payload)
+        return 0
+    if not payload:
+        print("No connection bundles found.")
+        return 0
+    for item in payload:
+        print(
+            f"{item['id']}  {item['name']}  security={item['security_level']}  "
+            f"uses={item['redemption_count']}/{item['max_redemptions'] or 'many'}  active={item['is_active']}"
+        )
+    return 0
+
+
+def command_expose_bundle_revoke(args: argparse.Namespace) -> int:
+    paths, config = load_effective_config(args)
+
+    async def run() -> dict[str, object]:
+        engine, session_factory = await open_cli_session(config, paths)
+        try:
+            async with session_factory() as session:
+                grant = await revoke_connection_grant(session, grant_id=args.grant_id)
+                return {
+                    "id": grant.id,
+                    "name": grant.name,
+                    "is_active": grant.is_active,
+                    "revoked_at": grant.revoked_at.isoformat() if grant.revoked_at else None,
+                }
+        finally:
+            await engine.dispose()
+
+    payload = asyncio.run(run())
+    if args.json:
+        print_json(payload)
+    else:
+        print(f"Revoked connection bundle {payload['id']}.")
+    return 0
+
+
+def command_install(args: argparse.Namespace) -> int:
+    return command_service_install(
+        copy_namespace(
+            args,
+            start=not args.no_start,
+            expose=args.remote,
+            expose_provider=args.provider,
+            expose_name=args.name,
+            expose_device_label=args.device,
+            expose_expires_in_hours=args.expires_in_hours,
+        )
+    )
+
+
+def command_status(args: argparse.Namespace) -> int:
+    return command_service_status(args)
+
+
+def command_logs(args: argparse.Namespace) -> int:
+    return command_service_logs(args)
+
+
+def command_share(args: argparse.Namespace) -> int:
+    return command_expose_enable(
+        copy_namespace(
+            args,
+            provider=args.provider,
+            name=args.name,
+            device_label=args.device,
+        )
+    )
+
+
+def command_unshare(args: argparse.Namespace) -> int:
+    return command_expose_disable(copy_namespace(args, provider=args.provider))
+
+
+def command_connections(args: argparse.Namespace) -> int:
+    return command_expose_bundle_list(args)
+
+
+def command_invite(args: argparse.Namespace) -> int:
+    return command_expose_bundle_create(
+        copy_namespace(
+            args,
+            name=args.name,
+            device_label=args.device,
+        )
+    )
+
+
+def command_revoke_connection(args: argparse.Namespace) -> int:
+    return command_expose_bundle_revoke(copy_namespace(args, grant_id=args.connection_id))
+
+
 def add_runtime_override_args(parser: argparse.ArgumentParser, *, include_public_url: bool) -> None:
     parser.add_argument("--host", help="Bind host for the backend server.")
     parser.add_argument("--port", type=int, help="Bind port for the backend server.")
@@ -672,6 +1004,10 @@ def add_env_override_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--openai-api-key", help="OpenAI-compatible API key used for processing and classification.")
     parser.add_argument("--openai-base-url", help="Base URL for the OpenAI-compatible API provider.")
     parser.add_argument("--openai-model", help="Model name used for processing and summarization.")
+    parser.add_argument(
+        "--openai-model-fallbacks",
+        help="Comma-separated fallback models used when the primary OpenAI-compatible model is unavailable.",
+    )
     parser.add_argument("--openai-app-name", help="Optional app name sent to OpenAI-compatible providers.")
     parser.add_argument("--openai-site-url", help="Optional site URL sent to OpenAI-compatible providers.")
     parser.add_argument("--google-api-key", help="Google API key used for Gemini-based processing.")
@@ -692,10 +1028,104 @@ def add_env_override_args(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(git_versioning_enabled=None)
 
 
+def add_connection_bundle_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_security: str,
+    default_name: str,
+) -> None:
+    parser.add_argument(
+        "--username",
+        help="Optional user that owns the issued device tokens. Defaults to the managed local owner.",
+    )
+    parser.add_argument("--name", default=default_name, help="Human-readable bundle name.")
+    parser.add_argument(
+        "--security",
+        choices=["shared", "per_device", "per_device_code"],
+        default=default_security,
+        help="Bundle security level.",
+    )
+    parser.add_argument("--device-label", help="Optional device label. Best used with per-device bundles.")
+    parser.add_argument("--expires-in-hours", type=float, help="Optional bundle lifetime in hours.")
+    parser.add_argument("--scope", action="append", help="Token scope issued after redemption. Repeat for multiple scopes.")
+    parser.add_argument("--json", action="store_true", help="Print the resulting payload as JSON.")
+
+
+def add_simple_connection_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_security: str,
+    default_name: str,
+) -> None:
+    parser.add_argument("--username", help="Optional user that owns the issued device tokens.")
+    parser.add_argument("--name", default=default_name, help="Human-readable bundle name.")
+    parser.add_argument(
+        "--security",
+        choices=["shared", "per_device", "per_device_code"],
+        default=default_security,
+        help="Security level for the emitted connection string.",
+    )
+    parser.add_argument("--device", help="Optional device label.")
+    parser.add_argument("--expires-in-hours", type=float, help="Optional bundle lifetime in hours.")
+    parser.add_argument("--scope", action="append", help="Token scope issued after redemption. Repeat for multiple scopes.")
+    parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    parser.add_argument("--json", action="store_true", help="Print the resulting payload as JSON.")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = HelpParser(prog="savemycontext", description="SaveMyContext backend service manager")
+    parser = HelpParser(prog=CLI_NAME, description="SaveMyContext backend service manager")
     parser.add_argument("--config", type=Path, help="Path to the SaveMyContext config.toml file.")
     subparsers = parser.add_subparsers(dest="command", required=True, parser_class=HelpParser)
+
+    install_short_parser = subparsers.add_parser("install", help="Install and start the background service.")
+    add_runtime_override_args(install_short_parser, include_public_url=True)
+    add_env_override_args(install_short_parser)
+    install_short_parser.add_argument(
+        "--remote",
+        nargs="?",
+        const="shared",
+        choices=["shared", "per_device", "per_device_code"],
+        help="Also enable remote access and print a connection string. Defaults to shared when set without a value.",
+    )
+    install_short_parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    install_short_parser.add_argument("--name", default="Remote Extensions", help="Name for the initial remote bundle.")
+    install_short_parser.add_argument("--device", help="Optional device label for the initial remote bundle.")
+    install_short_parser.add_argument("--expires-in-hours", type=float, help="Optional lifetime for the initial remote bundle.")
+    install_short_parser.add_argument("--no-start", action="store_true", help="Install without starting the service.")
+    install_short_parser.add_argument("--enable", action="store_true", help="Enable the service to start with your user session.")
+    install_short_parser.add_argument("--force", action="store_true", help="Rewrite generated env defaults and replace a managed service file.")
+    install_short_parser.set_defaults(func=command_install)
+
+    status_short_parser = subparsers.add_parser("status", help="Show background service status.")
+    status_short_parser.set_defaults(func=command_status)
+
+    logs_short_parser = subparsers.add_parser("logs", help="Show background service logs.")
+    logs_short_parser.add_argument("-f", "--follow", action="store_true", help="Stream logs until interrupted.")
+    logs_short_parser.add_argument("-n", "--lines", type=int, default=100, help="Number of recent lines to show before exiting.")
+    logs_short_parser.add_argument("--since", help="Show logs newer than a journalctl-compatible time expression.")
+    logs_short_parser.set_defaults(func=command_logs)
+
+    share_parser = subparsers.add_parser("share", help="Enable remote access and print a connection string.")
+    add_simple_connection_args(share_parser, default_security="shared", default_name="Remote Extensions")
+    share_parser.set_defaults(func=command_share)
+
+    unshare_parser = subparsers.add_parser("unshare", help="Disable remote access.")
+    unshare_parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    unshare_parser.add_argument("--json", action="store_true", help="Print the resulting payload as JSON.")
+    unshare_parser.set_defaults(func=command_unshare)
+
+    invite_parser = subparsers.add_parser("invite", help="Create an extra device connection string.")
+    add_simple_connection_args(invite_parser, default_security="per_device", default_name="Extension Device")
+    invite_parser.set_defaults(func=command_invite)
+
+    connections_parser = subparsers.add_parser("connections", help="List connection strings that have been issued.")
+    connections_parser.add_argument("--json", action="store_true", help="Print the bundles as JSON.")
+    connections_parser.set_defaults(func=command_connections)
+
+    revoke_connection_parser = subparsers.add_parser("revoke", help="Revoke an issued connection string.")
+    revoke_connection_parser.add_argument("connection_id", help="Connection bundle grant id.")
+    revoke_connection_parser.add_argument("--json", action="store_true", help="Print the revoked bundle as JSON.")
+    revoke_connection_parser.set_defaults(func=command_revoke_connection)
 
     run_parser = subparsers.add_parser("run", help="Run the SaveMyContext backend in the foreground.")
     add_runtime_override_args(run_parser, include_public_url=False)
@@ -709,6 +1139,15 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--enable", action="store_true", help="Enable the service to start with your user session.")
     add_runtime_override_args(install_parser, include_public_url=True)
     add_env_override_args(install_parser)
+    install_parser.add_argument(
+        "--expose",
+        choices=["shared", "per_device", "per_device_code"],
+        help="Enable managed remote exposure after installation and print a connection bundle.",
+    )
+    install_parser.add_argument("--expose-provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    install_parser.add_argument("--expose-name", default="Remote Extensions", help="Name for the initial exposure bundle.")
+    install_parser.add_argument("--expose-device-label", help="Optional device label for the initial exposure bundle.")
+    install_parser.add_argument("--expose-expires-in-hours", type=float, help="Optional lifetime for the initial exposure bundle.")
     install_parser.add_argument("--force", action="store_true", help="Rewrite generated env defaults and replace a managed service file.")
     install_parser.set_defaults(func=command_service_install)
 
@@ -782,6 +1221,40 @@ def build_parser() -> argparse.ArgumentParser:
     config_show_parser.set_defaults(func=command_config_show)
     config_path_parser = config_subparsers.add_parser("path", help="Show important config and data paths.")
     config_path_parser.set_defaults(func=command_config_path)
+
+    expose_parser = subparsers.add_parser("expose", help="Manage remote backend exposure and connection bundles.")
+    expose_subparsers = expose_parser.add_subparsers(dest="expose_command", required=True, parser_class=HelpParser)
+
+    expose_enable_parser = expose_subparsers.add_parser("enable", help="Enable managed remote exposure and print a connection bundle.")
+    expose_enable_parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    add_connection_bundle_args(expose_enable_parser, default_security="shared", default_name="Remote Extensions")
+    expose_enable_parser.set_defaults(func=command_expose_enable)
+
+    expose_status_parser = expose_subparsers.add_parser("status", help="Show managed remote exposure status.")
+    expose_status_parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    expose_status_parser.add_argument("--json", action="store_true", help="Print the status payload as JSON.")
+    expose_status_parser.set_defaults(func=command_expose_status)
+
+    expose_disable_parser = expose_subparsers.add_parser("disable", help="Disable managed remote exposure.")
+    expose_disable_parser.add_argument("--provider", default=TAILSCALE_PROVIDER, choices=[TAILSCALE_PROVIDER], help="Exposure provider.")
+    expose_disable_parser.add_argument("--json", action="store_true", help="Print the status payload as JSON.")
+    expose_disable_parser.set_defaults(func=command_expose_disable)
+
+    expose_bundle_parser = expose_subparsers.add_parser("bundle", help="Manage enrollment bundles.")
+    expose_bundle_subparsers = expose_bundle_parser.add_subparsers(dest="expose_bundle_command", required=True, parser_class=HelpParser)
+
+    expose_bundle_create_parser = expose_bundle_subparsers.add_parser("create", help="Create an enrollment bundle.")
+    add_connection_bundle_args(expose_bundle_create_parser, default_security="per_device", default_name="Extension Device")
+    expose_bundle_create_parser.set_defaults(func=command_expose_bundle_create)
+
+    expose_bundle_list_parser = expose_bundle_subparsers.add_parser("list", help="List enrollment bundles.")
+    expose_bundle_list_parser.add_argument("--json", action="store_true", help="Print the bundles as JSON.")
+    expose_bundle_list_parser.set_defaults(func=command_expose_bundle_list)
+
+    expose_bundle_revoke_parser = expose_bundle_subparsers.add_parser("revoke", help="Revoke an enrollment bundle.")
+    expose_bundle_revoke_parser.add_argument("grant_id", help="Connection bundle grant id.")
+    expose_bundle_revoke_parser.add_argument("--json", action="store_true", help="Print the revoked bundle as JSON.")
+    expose_bundle_revoke_parser.set_defaults(func=command_expose_bundle_revoke)
 
     version_parser = subparsers.add_parser("version", help="Show the installed SaveMyContext version.")
     version_parser.set_defaults(func=lambda _args: print(package_version()) or 0)

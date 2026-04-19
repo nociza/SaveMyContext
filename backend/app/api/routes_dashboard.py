@@ -11,7 +11,7 @@ from app.core.version import get_app_version
 from app.models import APIToken, ChatMessage, ChatSession, FactTriplet, ProviderName, SessionCategory, SyncEvent
 from app.models.base import utcnow
 from app.schemas.dashboard import CategoryCount, CustomCategoryCount, DashboardSummary
-from app.schemas.explorer import CategoryGraph, CategoryStats
+from app.schemas.explorer import CategoryGraph, CategoryGraphPath, CategoryStats
 from app.schemas.graph import GraphEdge, GraphNode
 from app.schemas.search import SearchResponse
 from app.schemas.system import StorageSettingsResponse, StorageSettingsUpdate, SystemStatus
@@ -122,6 +122,25 @@ async def category_graph(
     return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
 
 
+@router.get("/categories/{category}/graph/path", response_model=CategoryGraphPath)
+async def category_graph_path(
+    category: SessionCategory,
+    source: str = Query(min_length=1),
+    target: str = Query(min_length=1),
+    provider: ProviderName | None = Query(default=None),
+    session_id: list[str] | None = Query(default=None),
+    _: AuthContext = Depends(require_scope("read")),
+    db: AsyncSession = Depends(get_db_session),
+) -> CategoryGraphPath:
+    return await ExplorerService(db).category_graph_path(
+        category,
+        source=source,
+        target=target,
+        session_ids=session_id,
+        provider=provider,
+    )
+
+
 @router.get("/custom-categories/{name}/stats", response_model=CategoryStats)
 async def custom_category_stats(
     name: str,
@@ -142,6 +161,25 @@ async def custom_category_graph(
     db: AsyncSession = Depends(get_db_session),
 ) -> CategoryGraph:
     return await ExplorerService(db).custom_category_graph(name, session_ids=session_id, provider=provider)
+
+
+@router.get("/custom-categories/{name}/graph/path", response_model=CategoryGraphPath)
+async def custom_category_graph_path(
+    name: str,
+    source: str = Query(min_length=1),
+    target: str = Query(min_length=1),
+    provider: ProviderName | None = Query(default=None),
+    session_id: list[str] | None = Query(default=None),
+    _: AuthContext = Depends(require_scope("read")),
+    db: AsyncSession = Depends(get_db_session),
+) -> CategoryGraphPath:
+    return await ExplorerService(db).custom_category_graph_path(
+        name,
+        source=source,
+        target=target,
+        session_ids=session_id,
+        provider=provider,
+    )
 
 
 @router.get("/graph/nodes", response_model=list[GraphNode])

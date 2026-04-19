@@ -11,6 +11,7 @@ from app.cli import build_parser, main
 from app.cli_config import default_cli_config, load_cli_config, load_env_file
 from app.cli_paths import CLIPaths, default_cli_paths
 from app.cli_service import fetch_health, get_service_status, service_control
+from app.core.config import DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_MODEL_FALLBACKS
 
 
 def reset_runtime_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +62,7 @@ def test_config_init_bootstraps_local_runtime(tmp_path: Path, monkeypatch: pytes
     assert config.llm_backend == "openai"
     assert env_values["SAVEMYCONTEXT_OPENAI_API_KEY"] == "sk-test"
     assert env_values["SAVEMYCONTEXT_OPENAI_MODEL"] == "openai/gpt-4.1-mini"
-    assert "savemycontext service install --start" in output
+    assert "smc install" in output
 
 
 def test_config_set_updates_storage_and_env_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,6 +93,18 @@ def test_config_set_updates_storage_and_env_settings(tmp_path: Path, monkeypatch
     assert env_values["SAVEMYCONTEXT_GIT_VERSIONING_ENABLED"] == "false"
 
 
+def test_config_init_writes_free_first_openrouter_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_runtime_env(monkeypatch)
+    paths = configure_xdg(monkeypatch, tmp_path)
+
+    assert main(["config", "init"]) == 0
+
+    env_values = load_env_file(paths.env_path)
+
+    assert env_values["SAVEMYCONTEXT_OPENAI_MODEL"] == DEFAULT_OPENROUTER_MODEL
+    assert env_values["SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS"] == ",".join(DEFAULT_OPENROUTER_MODEL_FALLBACKS)
+
+
 def test_config_help_lists_init_and_set_commands(capsys: pytest.CaptureFixture[str]) -> None:
     parser = build_parser()
 
@@ -101,6 +114,47 @@ def test_config_help_lists_init_and_set_commands(capsys: pytest.CaptureFixture[s
     output = capsys.readouterr().out
     assert "init" in output
     assert "set" in output
+
+
+def test_parser_uses_smc_as_the_program_name() -> None:
+    parser = build_parser()
+
+    assert parser.prog == "smc"
+
+
+def test_install_shortcut_maps_to_service_install_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_command_service_install(args) -> int:
+        captured.update(vars(args))
+        return 0
+
+    monkeypatch.setattr("app.cli.command_service_install", fake_command_service_install)
+    parser = build_parser()
+    args = parser.parse_args(["install", "--remote", "per_device_code", "--device", "work-laptop", "--no-start"])
+
+    assert args.func(args) == 0
+    assert captured["start"] is False
+    assert captured["expose"] == "per_device_code"
+    assert captured["expose_device_label"] == "work-laptop"
+    assert captured["expose_provider"] == "tailscale-funnel"
+
+
+def test_share_shortcut_maps_to_remote_enable_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_command_expose_enable(args) -> int:
+        captured.update(vars(args))
+        return 0
+
+    monkeypatch.setattr("app.cli.command_expose_enable", fake_command_expose_enable)
+    parser = build_parser()
+    args = parser.parse_args(["share", "--security", "shared", "--device", "ipad"])
+
+    assert args.func(args) == 0
+    assert captured["security"] == "shared"
+    assert captured["device_label"] == "ipad"
+    assert captured["provider"] == "tailscale-funnel"
 
 
 def test_fetch_health_rejects_unexpected_payload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

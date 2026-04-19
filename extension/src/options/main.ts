@@ -5,6 +5,7 @@ import type {
   ProviderDriftAlert,
   ProviderName,
   RuntimeMessage,
+  SaveConnectionBundleResponse,
   SaveKnowledgePathResponse,
   SaveSettingsResponse,
   SyncStatus
@@ -17,6 +18,8 @@ import {
 } from "../shared/provider-refresh";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
+const connectionStringInput = document.querySelector<HTMLInputElement>("#connection-string");
+const verificationCodeInput = document.querySelector<HTMLInputElement>("#verification-code");
 const backendUrlInput = document.querySelector<HTMLInputElement>("#backend-url");
 const backendTokenInput = document.querySelector<HTMLInputElement>("#backend-token");
 const knowledgePathInput = document.querySelector<HTMLInputElement>("#knowledge-path");
@@ -286,12 +289,9 @@ async function load(): Promise<void> {
 
 form?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!backendUrlInput) {
-    return;
-  }
 
   const nextSettings: Partial<ExtensionSettings> = {
-    backendUrl: backendUrlInput.value.trim(),
+    backendUrl: backendUrlInput?.value.trim() ?? "",
     backendToken: backendTokenInput?.value.trim() ?? "",
     autoSyncHistory: autoSyncHistoryInput?.checked ?? true,
     scheduledProviderRefreshEnabled: scheduledProviderRefreshEnabledInput?.checked ?? false,
@@ -314,10 +314,27 @@ form?.addEventListener("submit", async (event) => {
   nextSettings.triggerWords =
     nextSettings.indexingMode === "trigger_word" && triggerWords.length === 0 ? ["lorem"] : triggerWords;
 
-  const response = await sendMessage<SaveSettingsResponse>({
-    type: "SAVE_SETTINGS",
-    payload: nextSettings
-  });
+  const connectionString = connectionStringInput?.value.trim() ?? "";
+  if (!connectionString && !nextSettings.backendUrl) {
+    if (saveStatus) {
+      saveStatus.textContent = "Enter a connection string or a backend URL.";
+    }
+    return;
+  }
+
+  const response = connectionString
+    ? await sendMessage<SaveConnectionBundleResponse>({
+        type: "SAVE_CONNECTION_BUNDLE",
+        payload: {
+          connectionString,
+          verificationCode: verificationCodeInput?.value.trim() ?? "",
+          settings: nextSettings
+        }
+      })
+    : await sendMessage<SaveSettingsResponse>({
+        type: "SAVE_SETTINGS",
+        payload: nextSettings
+      });
   if (!response.ok) {
     if (saveStatus) {
       saveStatus.textContent = response.error ?? "Could not validate the backend.";
@@ -329,10 +346,24 @@ form?.addEventListener("submit", async (event) => {
   }
 
   formDirty = false;
+  if (connectionStringInput) {
+    connectionStringInput.value = "";
+  }
+  if (verificationCodeInput) {
+    verificationCodeInput.value = "";
+  }
   if (saveStatus) {
     saveStatus.textContent = "Settings saved.";
   }
   await load();
+});
+
+connectionStringInput?.addEventListener("input", () => {
+  formDirty = true;
+});
+
+verificationCodeInput?.addEventListener("input", () => {
+  formDirty = true;
 });
 
 backendUrlInput?.addEventListener("input", () => {

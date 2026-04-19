@@ -12,7 +12,34 @@ ROOT_DIR = BACKEND_DIR.parent
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-5-mini"
 DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_OPENROUTER_MODEL = "openai/gpt-4.1-mini"
+DEFAULT_OPENROUTER_MODEL = "google/gemma-4-31b-it:free"
+DEFAULT_OPENROUTER_MODEL_FALLBACKS = (
+    "google/gemma-4-26b-a4b-it:free",
+    "google/gemma-3-27b-it:free",
+    "google/gemma-3-12b-it:free",
+    "google/gemma-3-4b-it:free",
+    "google/gemma-3n-e4b-it:free",
+    "google/gemma-3n-e2b-it:free",
+    "openai/gpt-4.1-mini",
+)
+
+
+def parse_model_list(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    return [item.strip() for item in raw_value.replace("\n", ",").split(",") if item.strip()]
+
+
+def unique_nonempty_models(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    models: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        models.append(normalized)
+    return models
 
 
 def env_alias(name: str, *extra_names: str) -> AliasChoices:
@@ -76,6 +103,15 @@ class Settings(BaseSettings):
             "SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL",
             "OPENAI_MODEL",
             "OPENROUTER_MODEL",
+        ),
+    )
+    openai_model_fallbacks: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS",
+            "SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL_FALLBACKS",
+            "OPENAI_MODEL_FALLBACKS",
+            "OPENROUTER_MODEL_FALLBACKS",
         ),
     )
     openai_site_url: str | None = Field(
@@ -148,6 +184,13 @@ class Settings(BaseSettings):
         if self.openrouter_key_detected and self.openai_model == DEFAULT_OPENAI_MODEL:
             return DEFAULT_OPENROUTER_MODEL
         return self.openai_model
+
+    @property
+    def resolved_openai_model_candidates(self) -> list[str]:
+        configured_fallbacks = parse_model_list(self.openai_model_fallbacks)
+        if self.openrouter_key_detected and self.openai_model == DEFAULT_OPENAI_MODEL and not configured_fallbacks:
+            return [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
+        return unique_nonempty_models([self.resolved_openai_model, *configured_fallbacks])
 
     @property
     def resolved_vault_root(self) -> Path:

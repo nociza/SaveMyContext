@@ -14,8 +14,10 @@ import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, Search, Spar
 
 import {
   fetchCategoryGraph,
+  fetchCategoryGraphPath,
   fetchCategoryStats,
   fetchCustomCategoryGraph,
+  fetchCustomCategoryGraphPath,
   fetchCustomCategoryStats,
   fetchExplorerSearch,
   fetchSessionNote,
@@ -26,7 +28,6 @@ import {
   updateTodoList
 } from "../background/backend";
 import {
-  categoryDescriptions,
   categoryGlyphs,
   categoryLabels,
   categoryOrder,
@@ -46,12 +47,15 @@ import {
 } from "../shared/explorer";
 import type {
   BackendCategoryGraph,
+  BackendCategoryGraphPath,
   BackendCategoryStats,
+  BackendExplorerGraphEvidence,
+  BackendExplorerGraphNode,
+  BackendExplorerGraphPath,
   BackendSearchResponse,
   BackendSessionListItem,
   BackendSessionNoteRead,
   BackendTodoItem,
-  BackendTodoListRead,
   BackendUserCategorySummary,
   ExtensionSettings,
   ProviderName,
@@ -61,7 +65,7 @@ import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
-import { CategoryGraph, type CategoryGraphDensity, type CategoryGraphFocusMode } from "../ui/components/category-graph";
+import { CategoryGraph, type CategoryGraphDensity, type CategoryGraphFocusMode, type CategoryGraphSelection } from "../ui/components/category-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
 import { TodoWorkspace } from "../ui/components/todo-workspace";
@@ -209,52 +213,6 @@ function searchMatchMap(search: BackendSearchResponse | undefined): Map<string, 
   return matches;
 }
 
-function statsCards(stats: BackendCategoryStats, todo: BackendTodoListRead | null): Array<{ label: string; value: string }> {
-  if (stats.scope_kind === "custom") {
-    return [
-      { label: "Notes", value: formatNumber(stats.total_sessions) },
-      { label: "Messages", value: formatNumber(stats.total_messages) },
-      { label: "Facts", value: formatNumber(stats.total_triplets) },
-      { label: "Base groups", value: formatNumber(stats.system_category_counts.length) }
-    ];
-  }
-
-  if (stats.category === "factual") {
-    return [
-      { label: "Notes", value: formatNumber(stats.total_sessions) },
-      { label: "Facts", value: formatNumber(stats.total_triplets) },
-      { label: "Entities", value: formatNumber(stats.top_entities.reduce((count, item) => count + item.count, 0)) },
-      { label: "Predicates", value: formatNumber(stats.top_predicates.reduce((count, item) => count + item.count, 0)) }
-    ];
-  }
-
-  if (stats.category === "ideas") {
-    return [
-      { label: "Notes", value: formatNumber(stats.total_sessions) },
-      { label: "Messages", value: formatNumber(stats.total_messages) },
-      { label: "Idea summaries", value: formatNumber(stats.notes_with_idea_summary) },
-      { label: "Share posts", value: formatNumber(stats.notes_with_share_post) }
-    ];
-  }
-
-  if (stats.category === "journal") {
-    return [
-      { label: "Notes", value: formatNumber(stats.total_sessions) },
-      { label: "Messages", value: formatNumber(stats.total_messages) },
-      { label: "Entries", value: formatNumber(stats.notes_with_journal_entry) },
-      { label: "Share posts", value: formatNumber(stats.notes_with_share_post) }
-    ];
-  }
-
-  return [
-    { label: "Notes", value: formatNumber(stats.total_sessions) },
-    { label: "Shared tasks", value: formatNumber(todo?.total_count) },
-    { label: "Active", value: formatNumber(todo?.active_count) },
-    { label: "Completed", value: formatNumber(todo?.completed_count) },
-    { label: "Task updates", value: formatNumber(stats.notes_with_todo_summary) },
-  ];
-}
-
 function signalGroups(stats: BackendCategoryStats): {
   primary: Array<{ label: string; count: number }>;
   secondary: Array<{ label: string; count: number }>;
@@ -362,15 +320,203 @@ function noteListMeta(
   return `${formatNumber(total)} ${collectionLabel} in view${providerText}${bucketText}${userCategoryText}`;
 }
 
+function graphNodeOptionScore(node: BackendExplorerGraphNode): number {
+  return (node.degree ?? 0) * 8 + node.session_ids.length * 5 + (node.centrality ?? 0) * 10 + Math.log(node.size + 1) * 3;
+}
+
+function evidenceKey(evidence: BackendExplorerGraphEvidence): string {
+  return [evidence.triplet_id, evidence.session_id, evidence.predicate, evidence.snippet].filter(Boolean).join(":");
+}
+
+function evidenceForSelection(graph: BackendCategoryGraph, selection: CategoryGraphSelection | null): BackendExplorerGraphEvidence[] {
+  if (!selection) {
+    return [];
+  }
+
+  const sessionSet = new Set(selection.sessionIds);
+  const evidence =
+    selection.kind === "node"
+      ? (graph.nodes.find((node) => node.id === selection.id)?.evidence ?? [])
+      : graph.edges
+          .filter((edge) => edge.session_ids.some((sessionId) => sessionSet.has(sessionId)))
+          .filter((edge) => !selection.label || selection.label === "Relationship" || selection.label.includes(edge.label ?? ""))
+          .flatMap((edge) => edge.evidence ?? []);
+
+  const seen = new Set<string>();
+  const unique: BackendExplorerGraphEvidence[] = [];
+  for (const item of evidence) {
+    const key = evidenceKey(item);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function GraphEvidencePanel({
+  graph,
+  selection,
+  onClear
+}: {
+  graph: BackendCategoryGraph;
+  selection: CategoryGraphSelection | null;
+  onClear: () => void;
+}) {
+  const selectedNode = selection?.kind === "node" ? graph.nodes.find((node) => node.id === selection.id) ?? null : null;
+  const evidence = evidenceForSelection(graph, selection);
+
+  return (
+    <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Evidence</div>
+          <div className="mt-0.5 truncate text-sm font-semibold text-[var(--color-ink)]">
+            {selection ? selection.label : "Select a node or link"}
+          </div>
+        </div>
+        {selection ? (
+          <Button size="sm" variant="ghost" onClick={onClear}>
+            Clear
+          </Button>
+        ) : null}
+      </div>
+
+      {selectedNode ? (
+        <div className="mb-2 grid grid-cols-3 gap-1.5">
+          {[
+            { label: "Links", value: formatNumber(selectedNode.degree ?? 0) },
+            { label: "Notes", value: formatNumber(selectedNode.session_ids.length) },
+            { label: "Score", value: `${Math.round((selectedNode.centrality ?? 0) * 100)}%` }
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 py-1.5">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-ink)]">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="space-y-1.5">
+        {evidence.slice(0, 3).map((item, index) => (
+          <div key={`${evidenceKey(item)}:${index}`} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-[var(--color-ink)]">{item.title || "Untitled note"}</div>
+                <div className="mt-0.5 text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+                  {item.provider ? providerLabels[item.provider] : "source"} · {formatCompactDate(item.updated_at, "No date")}
+                </div>
+              </div>
+              {typeof item.confidence === "number" ? <Badge tone="info">{Math.round(item.confidence * 100)}%</Badge> : null}
+            </div>
+            {item.snippet ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-ink-soft)]">{item.snippet}</p> : null}
+          </div>
+        ))}
+        {!selection ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Click a node or link for source notes and extracted facts.</p> : null}
+        {selection && !evidence.length ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">No snippets are available for this selection yet.</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function GraphPathPanel({
+  nodes,
+  sourceId,
+  targetId,
+  path,
+  loading,
+  error,
+  onSourceChange,
+  onTargetChange,
+  onFocusPath
+}: {
+  nodes: BackendExplorerGraphNode[];
+  sourceId: string | null;
+  targetId: string | null;
+  path: BackendCategoryGraphPath | null;
+  loading: boolean;
+  error: Error | null;
+  onSourceChange: (nodeId: string) => void;
+  onTargetChange: (nodeId: string) => void;
+  onFocusPath: (path: BackendExplorerGraphPath) => void;
+}) {
+  const canSearch = nodes.length >= 2 && sourceId && targetId && sourceId !== targetId;
+
+  return (
+    <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Path finder</div>
+      <div className="mt-0.5 text-sm font-semibold text-[var(--color-ink)]">Connect two concepts</div>
+
+      <div className="mt-3 grid gap-2">
+        <Select value={sourceId ?? ""} onValueChange={onSourceChange} disabled={!nodes.length}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue placeholder="Source" />
+          </SelectTrigger>
+          <SelectContent>
+            {nodes.map((node) => (
+              <SelectItem key={node.id} value={node.id} className="py-1.5 text-xs">
+                {node.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={targetId ?? ""} onValueChange={onTargetChange} disabled={!nodes.length}>
+          <SelectTrigger className="h-9 text-xs">
+            <SelectValue placeholder="Target" />
+          </SelectTrigger>
+          <SelectContent>
+            {nodes.map((node) => (
+              <SelectItem key={node.id} value={node.id} className="py-1.5 text-xs">
+                {node.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        {nodes.length < 2 ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">At least two visible concepts are needed.</p> : null}
+        {loading ? <p className="text-xs text-[var(--color-ink-soft)]">Finding paths...</p> : null}
+        {error && canSearch ? <p className="text-xs text-[#963c24]">{error.message}</p> : null}
+        {path?.paths.slice(0, 3).map((item, index) => (
+          <button
+            key={`${item.node_ids.join(":")}:${index}`}
+            type="button"
+            onClick={() => onFocusPath(item)}
+            className="w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2 text-left transition hover:bg-[var(--color-paper-sunken)]"
+          >
+            <div className="line-clamp-2 text-xs font-semibold leading-5 text-[var(--color-ink)]">
+              {item.nodes.map((node) => node.label).join(" -> ")}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+              {formatNumber(item.hop_count)} hops · strength {item.score.toFixed(1)} · {formatNumber(item.evidence_session_ids.length)} notes
+            </div>
+          </button>
+        ))}
+        {path && !path.paths.length && canSearch ? (
+          <p className="text-xs leading-5 text-[var(--color-ink-soft)]">No visible path connects those concepts.</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const { settings, status, loading, error } = useExtensionBootstrap();
   const [route, setRoute] = useState<RouteState>(readRouteState);
   const [graphFocus, setGraphFocus] = useState<GraphFocus | null>(null);
+  const [graphInspect, setGraphInspect] = useState<CategoryGraphSelection | null>(null);
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
   const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("community");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
   const [graphDensity, setGraphDensity] = useState<CategoryGraphDensity>("curated");
   const [graphFocusMode, setGraphFocusMode] = useState<CategoryGraphFocusMode>("context");
+  const [graphProviderFilter, setGraphProviderFilter] = useState<ReadonlySet<ProviderName>>(() => new Set());
+  const [graphKindFilter, setGraphKindFilter] = useState<ReadonlySet<string>>(() => new Set());
+  const [pathSourceId, setPathSourceId] = useState<string | null>(null);
+  const [pathTargetId, setPathTargetId] = useState<string | null>(null);
   const [todoDraft, setTodoDraft] = useState("");
   const [todoActionError, setTodoActionError] = useState<string | null>(null);
   const [todoSavingSummary, setTodoSavingSummary] = useState<string | null>(null);
@@ -383,6 +529,7 @@ function App() {
     const handlePopState = (): void => {
       setRoute(readRouteState());
       setGraphFocus(null);
+      setGraphInspect(null);
     };
 
     window.addEventListener("popstate", handlePopState);
@@ -595,10 +742,92 @@ function App() {
     count: item.count,
     color: providerColors[item.provider]
   }));
+  const availableGraphProviders = useMemo(() => {
+    const providers = new Set<ProviderName>();
+    for (const node of graph.nodes) {
+      if (node.provider) {
+        providers.add(node.provider);
+      }
+    }
+    return Array.from(providers).sort();
+  }, [graph.nodes]);
+  const availableGraphKinds = useMemo(() => {
+    const kinds = new Set<string>();
+    for (const node of graph.nodes) {
+      if (node.kind) {
+        kinds.add(node.kind);
+      }
+    }
+    return Array.from(kinds).sort();
+  }, [graph.nodes]);
+  const filteredGraph = useMemo(() => {
+    if (graphProviderFilter.size === 0 && graphKindFilter.size === 0) {
+      return graph;
+    }
+    const nodes = graph.nodes.filter((node) => {
+      const providerOk = graphProviderFilter.size === 0 || (node.provider ? graphProviderFilter.has(node.provider) : false);
+      const kindOk = graphKindFilter.size === 0 || graphKindFilter.has(node.kind);
+      return providerOk && kindOk;
+    });
+    const visibleIds = new Set(nodes.map((node) => node.id));
+    const edges = graph.edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target));
+    return { ...graph, nodes, edges, node_count: nodes.length, edge_count: edges.length };
+  }, [graph, graphProviderFilter, graphKindFilter]);
   const graphInsights = useMemo(
-    () => buildCategoryGraphInsights(graph, visibleSessions, activeDisplayCategory, groupingMode),
-    [activeDisplayCategory, graph, groupingMode, visibleSessions]
+    () => buildCategoryGraphInsights(filteredGraph, visibleSessions, activeDisplayCategory, groupingMode),
+    [activeDisplayCategory, filteredGraph, groupingMode, visibleSessions]
   );
+  const graphNodeOptions = useMemo(
+    () =>
+      [...filteredGraph.nodes]
+        .filter((node) => node.session_ids.length > 0)
+        .sort((left, right) => graphNodeOptionScore(right) - graphNodeOptionScore(left) || left.label.localeCompare(right.label))
+        .slice(0, 120),
+    [filteredGraph.nodes]
+  );
+  const pathFilterOptions = route.provider || scopedSessionIds
+    ? {
+        provider: route.provider ?? undefined,
+        sessionIds: scopedSessionIds
+      }
+    : undefined;
+  const pathQuery = useQuery({
+    queryKey: [
+      "category-graph-path",
+      settings?.backendUrl,
+      settings?.backendToken,
+      route.category,
+      route.provider,
+      route.userCategory,
+      scopedSessionIds?.join("|") ?? "*",
+      pathSourceId,
+      pathTargetId
+    ],
+    queryFn: () =>
+      isCustomScope
+        ? fetchCustomCategoryGraphPath(
+            settings as ExtensionSettings,
+            route.userCategory as string,
+            pathSourceId as string,
+            pathTargetId as string,
+            pathFilterOptions
+          )
+        : fetchCategoryGraphPath(
+            settings as ExtensionSettings,
+            route.category,
+            pathSourceId as string,
+            pathTargetId as string,
+            pathFilterOptions
+          ),
+    enabled: Boolean(
+      settings &&
+        !status?.backendValidationError &&
+        pathSourceId &&
+        pathTargetId &&
+        pathSourceId !== pathTargetId &&
+        (!scopedSessionIds || scopedSessionIds.length > 0)
+    )
+  });
   const scopePills = [
     { key: "category", label: isCustomScope ? "Default base" : "Category", value: categoryLabels[activeDisplayCategory] },
     route.userCategory ? { key: "user-category", label: "Custom", value: route.userCategory } : null,
@@ -616,19 +845,52 @@ function App() {
     });
   }, [graphInsights.clusters]);
 
+  useEffect(() => {
+    setGraphInspect(null);
+  }, [graph]);
+
+  useEffect(() => {
+    if (!graphNodeOptions.length) {
+      if (pathSourceId) {
+        setPathSourceId(null);
+      }
+      if (pathTargetId) {
+        setPathTargetId(null);
+      }
+      return;
+    }
+
+    const allowedIds = new Set(graphNodeOptions.map((node) => node.id));
+    const nextSourceId = pathSourceId && allowedIds.has(pathSourceId) ? pathSourceId : graphNodeOptions[0]?.id ?? null;
+    const nextTargetId =
+      pathTargetId && allowedIds.has(pathTargetId) && pathTargetId !== nextSourceId
+        ? pathTargetId
+        : graphNodeOptions.find((node) => node.id !== nextSourceId)?.id ?? null;
+
+    if (nextSourceId !== pathSourceId) {
+      setPathSourceId(nextSourceId);
+    }
+    if (nextTargetId !== pathTargetId) {
+      setPathTargetId(nextTargetId);
+    }
+  }, [graphNodeOptions, pathSourceId, pathTargetId]);
+
   function handleCategorySwitch(category: SessionCategoryName): void {
     setGraphFocus(null);
+    setGraphInspect(null);
     setCollapsedGroups([]);
     updateRoute({ category, note: null, bucket: null, view: "atlas", userCategory: null }, true);
   }
 
   function handleUserCategorySwitch(name: string): void {
     setGraphFocus(null);
+    setGraphInspect(null);
     setCollapsedGroups([]);
     updateRoute({ userCategory: name, note: null, bucket: null, view: "atlas" }, true);
   }
 
   function activateFocus(label: string, sessionIds: string[], nextView?: CategoryWorkspaceView): void {
+    setGraphInspect(null);
     setGraphFocus({ label, sessionIds });
     const nextId = visibleSessions.find((item) => sessionIds.includes(item.id))?.id ?? sessionIds[0] ?? null;
     updateRoute({ note: nextId, view: nextView ?? route.view }, false);
@@ -640,13 +902,27 @@ function App() {
 
   function handleBucketToggle(bucket: string): void {
     setGraphFocus(null);
+    setGraphInspect(null);
     updateRoute({ bucket: route.bucket === bucket ? null : bucket, note: null }, true);
   }
 
   function clearScope(): void {
     setGraphFocus(null);
+    setGraphInspect(null);
     setCollapsedGroups([]);
     updateRoute({ q: "", provider: null, sort: "recent", bucket: null, note: null, view: "atlas", userCategory: null }, true);
+  }
+
+  function handlePathFocus(path: BackendExplorerGraphPath): void {
+    const labels = path.nodes.map((node) => node.label).filter(Boolean);
+    const sessionIds = Array.from(
+      new Set([
+        ...path.evidence_session_ids,
+        ...path.nodes.flatMap((node) => node.session_ids),
+        ...path.edges.flatMap((edge) => edge.session_ids)
+      ])
+    );
+    activateFocus(`Path: ${labels.join(" -> ")}`, sessionIds, "atlas");
   }
 
   const workspaceCards = [
@@ -655,8 +931,8 @@ function App() {
       label: "Atlas",
       accent: categoryPalette[activeDisplayCategory].accent,
       icon: BrainCircuit,
-      metric: `${formatNumber(graph.node_count)} nodes`,
-      detail: `${formatNumber(graph.edge_count)} relationships`
+      metric: `${formatNumber(filteredGraph.node_count)} nodes`,
+      detail: `${formatNumber(filteredGraph.edge_count)} links`
     },
     {
       value: "story" as const,
@@ -780,87 +1056,59 @@ function App() {
         ];
 
   return (
-    <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6">
-      <Card className="relative overflow-hidden p-6">
+    <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
+      <Card className="relative overflow-hidden px-5 py-3">
         <div
-          className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full opacity-50"
+          className="pointer-events-none absolute -right-20 -top-24 h-40 w-40 rounded-full opacity-40"
           style={{ background: `radial-gradient(circle, ${categoryPalette[activeDisplayCategory].accent}22, transparent 65%)` }}
         />
-        <CardHeader>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span
-                className="display-serif flex h-7 w-7 items-center justify-center rounded-[8px] text-[15px]"
-                style={{
-                  backgroundColor: `${categoryPalette[activeDisplayCategory].accent}1a`,
-                  color: categoryPalette[activeDisplayCategory].accent
-                }}
-              >
-                {isCustomScope ? "⌘" : (categoryGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
-              </span>
-              <span className="eyebrow">{isCustomScope ? "Custom shelf" : "Shelf"}</span>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex items-center gap-3">
+            <span
+              className="display-serif flex h-9 w-9 items-center justify-center rounded-[8px] text-[17px]"
+              style={{
+                backgroundColor: `${categoryPalette[activeDisplayCategory].accent}1a`,
+                color: categoryPalette[activeDisplayCategory].accent
+              }}
+            >
+              {isCustomScope ? "⌘" : (categoryGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
+            </span>
+            <div className="min-w-0">
+              <div className="eyebrow text-[10px]">{isCustomScope ? "Custom shelf" : "Shelf"}</div>
+              <CardTitle className="display-serif truncate text-[22px] font-semibold leading-tight">
+                {isCustomScope ? route.userCategory : categoryLabels[route.category]}
+              </CardTitle>
             </div>
-            <CardTitle className="display-serif break-words text-[40px] font-semibold leading-[1.04]">
-              {isCustomScope ? route.userCategory : categoryLabels[route.category]}
-            </CardTitle>
-            <CardDescription className="max-w-[60ch]">
-              {isCustomScope
-                ? "User-defined category for organizing notes and sessions across the workspace."
-                : categoryDescriptions[route.category]}
-            </CardDescription>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Overview
-          </Button>
-        </CardHeader>
 
-        <CardContent className="mt-5 grid gap-3 lg:grid-cols-[1.3fr_1fr]">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             {headerMetrics.map((metric) => (
-              <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
-                <metric.icon className="h-4 w-4 text-[var(--color-ink-subtle)]" />
-                <div className="mt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{metric.label}</div>
-                <div className="mt-2 break-words text-2xl font-semibold leading-none text-[var(--color-ink)]">{metric.value}</div>
+              <div key={metric.label} className="flex items-center gap-2">
+                <metric.icon className="h-3.5 w-3.5 text-[var(--color-ink-subtle)]" />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{metric.label}</span>
+                <span className="text-sm font-semibold text-[var(--color-ink)]">{metric.value}</span>
               </div>
             ))}
           </div>
 
-          <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Current scope</div>
-            <div className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
-              {graphFocus ? graphFocus.label : route.q ? `Search: ${route.q}` : isCustomScope ? route.userCategory : "Entire category"}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {scopePills.map((pill) => (
-                <div key={pill.key} className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)]">
-                  <span className="text-[var(--color-ink-subtle)]">{pill.label}</span> {pill.value}
-                </div>
-              ))}
-              {!scopePills.length ? (
-                <div className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)]">
-                  {isCustomScope ? "Custom category" : "Full category"}
-                </div>
-              ) : null}
-            </div>
-            <div className="mt-4 text-sm leading-6 text-[var(--color-ink-soft)]">
-              {noteListMeta(route, allSessions.length, visibleSessions.length, graphFocus, activeDisplayCategory)}
-            </div>
-          </div>
-        </CardContent>
+          <Button variant="ghost" size="sm" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Overview
+          </Button>
+        </div>
       </Card>
 
-      <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <div className="space-y-4">
-          <Card className="p-4">
-            <CardHeader>
+      <div className="grid min-h-0 gap-4 xl:h-[calc(100vh-7.5rem)] xl:grid-cols-[236px_minmax(0,1fr)]">
+        <div className="space-y-3 xl:max-h-full xl:overflow-y-auto xl:pr-1">
+          <Card className="p-3">
+            <CardHeader className="gap-2">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Collections</div>
-                <CardTitle className="mt-1 text-lg">Default and custom categories</CardTitle>
+                <CardTitle className="mt-0.5 text-base">Categories</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="mt-4 space-y-4">
-              <div className="grid gap-1.5">
+            <CardContent className="mt-3 space-y-3">
+              <div className="grid gap-1">
                 {categoryOrder.map((category) => {
                   const active = !isCustomScope && route.category === category;
                   const accent = categoryPalette[category].accent;
@@ -869,14 +1117,14 @@ function App() {
                       key={category}
                       type="button"
                       onClick={() => handleCategorySwitch(category)}
-                      className={`group flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-left transition ${
+                      className={`group flex items-center gap-2 rounded-[8px] px-2 py-2 text-left transition ${
                         active
                           ? "bg-[var(--color-ink)] text-white"
                           : "hover:bg-[var(--color-paper-sunken)]"
                       }`}
                     >
                       <span
-                        className="flex h-7 w-7 items-center justify-center rounded-[8px] display-serif text-[13px] leading-none"
+                        className="display-serif flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] text-[12px] leading-none"
                         style={{
                           backgroundColor: active ? "rgba(255,255,255,0.14)" : `${accent}1a`,
                           color: active ? "#ffffff" : accent
@@ -884,39 +1132,38 @@ function App() {
                       >
                         {categoryGlyphs[category]}
                       </span>
-                      <span className="flex-1 text-[13px] font-semibold">{categoryLabels[category]}</span>
+                      <span className="min-w-0 flex-1 truncate text-xs font-semibold">{categoryLabels[category]}</span>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="space-y-3 border-t border-[var(--color-line)] pt-4">
+              <div className="space-y-2 border-t border-[var(--color-line)] pt-3">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
-                  <div className="mt-1 text-sm text-[var(--color-ink-soft)]">Use these to organize notes and sessions beyond the default classifier.</div>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {userCategories.map((item) => (
                     <button
                       key={item.name}
                       type="button"
                       onClick={() => handleUserCategorySwitch(item.name)}
-                      className={`flex w-full items-center justify-between gap-3 rounded-[8px] border px-3 py-3 text-left transition ${
+                      className={`flex w-full items-center justify-between gap-2 rounded-[8px] border px-2 py-2 text-left transition ${
                         route.userCategory === item.name ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                       }`}
                     >
-                      <span className="truncate text-sm font-semibold">{item.name}</span>
+                      <span className="truncate text-xs font-semibold">{item.name}</span>
                       <span className={route.userCategory === item.name ? "text-xs text-white/70" : "text-xs text-[var(--color-ink-soft)]"}>
                         {formatNumber(item.count)}
                       </span>
                     </button>
                   ))}
-                  {!userCategories.length ? <p className="text-sm text-[var(--color-ink-soft)]">Assign a note to a custom category to make it appear here.</p> : null}
+                  {!userCategories.length ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Assign a note to create one.</p> : null}
                 </div>
 
                 <form
-                  className="space-y-2"
+                  className="space-y-1.5"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void handleAddUserCategory(userCategoryDraft);
@@ -926,29 +1173,28 @@ function App() {
                     type="text"
                     value={userCategoryDraft}
                     onChange={(event) => setUserCategoryDraft(event.target.value)}
-                    placeholder={selectedSession ? "Create and assign to the selected note" : "Select a note to create a custom category"}
-                    className="h-10 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
+                    placeholder={selectedSession ? "New category" : "Select a note first"}
+                    className="h-9 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2.5 text-xs outline-none transition focus:border-[var(--color-line-strong)]"
                   />
-                  <Button type="submit" size="sm" variant="secondary" disabled={!selectedSession || !userCategoryDraft.trim()}>
-                    Add to selected note
+                  <Button type="submit" size="sm" variant="secondary" className="h-8 px-2.5 text-xs" disabled={!selectedSession || !userCategoryDraft.trim()}>
+                    Add category
                   </Button>
                 </form>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="p-4">
-            <CardHeader>
+          <Card className="p-3">
+            <CardHeader className="gap-2">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Explore</div>
-                <CardTitle className="mt-1 text-lg">Query and scope</CardTitle>
+                <CardTitle className="mt-0.5 text-base">Scope</CardTitle>
               </div>
-              <div className="text-sm text-[var(--color-ink-soft)]">Everything here reshapes the graph, storylines, and note list.</div>
             </CardHeader>
 
-            <CardContent className="mt-4 space-y-4">
+            <CardContent className="mt-3 space-y-3">
               <label className="block">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Search</div>
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Search</div>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-ink-subtle)]" />
                   <input
@@ -956,59 +1202,61 @@ function App() {
                     value={route.q}
                     onChange={(event) => {
                       setGraphFocus(null);
+                      setGraphInspect(null);
                       updateRoute({ q: event.target.value, note: null }, true);
                     }}
                     placeholder="Search notes, entities, or transcript text"
-                    className="h-11 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] pl-10 pr-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
+                    className="h-9 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] pl-9 pr-2.5 text-xs outline-none transition focus:border-[var(--color-line-strong)]"
                   />
                 </div>
               </label>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
                 <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Provider</div>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Provider</div>
                   <Select
                     value={route.provider ?? "__all__"}
                     onValueChange={(value) => {
                       setGraphFocus(null);
+                      setGraphInspect(null);
                       updateRoute({ provider: value === "__all__" ? null : (value as ProviderName), note: null }, true);
                     }}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-9 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__all__">All providers</SelectItem>
-                      <SelectItem value="chatgpt">ChatGPT</SelectItem>
-                      <SelectItem value="gemini">Gemini</SelectItem>
-                      <SelectItem value="grok">Grok</SelectItem>
+                      <SelectItem value="__all__" className="py-1.5 text-xs">All providers</SelectItem>
+                      <SelectItem value="chatgpt" className="py-1.5 text-xs">ChatGPT</SelectItem>
+                      <SelectItem value="gemini" className="py-1.5 text-xs">Gemini</SelectItem>
+                      <SelectItem value="grok" className="py-1.5 text-xs">Grok</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Sort</div>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Sort</div>
                   <Select value={route.sort} onValueChange={(value) => updateRoute({ sort: value as CategorySortMode }, true)}>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-9 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="recent">Most recent</SelectItem>
-                      <SelectItem value="title">Title</SelectItem>
+                      <SelectItem value="recent" className="py-1.5 text-xs">Most recent</SelectItem>
+                      <SelectItem value="title" className="py-1.5 text-xs">Title</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Recent activity buckets</div>
-                <div className="flex flex-wrap gap-2">
-                  {activityBuckets.map((bucket) => (
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Recent activity</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {activityBuckets.slice(-6).map((bucket) => (
                     <button
                       key={bucket.bucket}
                       type="button"
                       onClick={() => handleBucketToggle(bucket.bucket)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                         route.bucket === bucket.bucket
                           ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
                           : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)]"
@@ -1017,16 +1265,24 @@ function App() {
                       {bucket.label} · {formatNumber(bucket.count)}
                     </button>
                   ))}
-                  {!activityBuckets.length ? <p className="text-sm text-[var(--color-ink-soft)]">No recent activity buckets yet.</p> : null}
+                  {!activityBuckets.length ? <p className="text-xs text-[var(--color-ink-soft)]">No recent activity yet.</p> : null}
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="secondary" onClick={clearScope}>
+                <Button size="sm" variant="secondary" className="h-8 px-2.5 text-xs" onClick={clearScope}>
                   Clear scope
                 </Button>
                 {graphFocus ? (
-                  <Button size="sm" variant="ghost" onClick={() => setGraphFocus(null)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setGraphFocus(null);
+                      setGraphInspect(null);
+                    }}
+                    className="h-8 px-2.5 text-xs"
+                  >
                     Clear focus
                   </Button>
                 ) : null}
@@ -1034,54 +1290,38 @@ function App() {
             </CardContent>
           </Card>
 
-          <Card className="p-4">
-            <CardHeader>
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Snapshot</div>
-                <CardTitle className="mt-1 text-lg">What this scope contains</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent className="mt-4 grid grid-cols-2 gap-2">
-              {statsCards(stats, todo).map((metric) => (
-                <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
-                  <div className="mt-2 text-2xl font-semibold text-[var(--color-ink)]">{metric.value}</div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="p-4">
-            <CardHeader>
+          <Card className="p-3">
+            <CardHeader className="gap-2">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Signals</div>
-                <CardTitle className="mt-1 text-lg">Recurring concepts</CardTitle>
+                <CardTitle className="mt-0.5 text-base">Concepts</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="mt-4 space-y-3">
-              <div className="space-y-2">
-                {signals.primary.slice(0, 5).map((item) => (
+            <CardContent className="mt-3 space-y-2">
+              <div className="space-y-1.5">
+                {signals.primary.slice(0, 4).map((item) => (
                   <button
                     key={item.label}
                     type="button"
                     onClick={() => {
                       updateRoute({ q: item.label, note: null, view: "atlas" }, true);
                       setGraphFocus(null);
+                      setGraphInspect(null);
                     }}
-                    className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-3 py-2 text-left transition hover:bg-[var(--color-paper-raised)]"
+                    className="flex w-full items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1.5 text-left transition hover:bg-[var(--color-paper-raised)]"
                   >
-                    <span className="truncate text-sm text-[var(--color-ink)]">{item.label}</span>
-                    <span className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
+                    <span className="truncate text-xs text-[var(--color-ink)]">{item.label}</span>
+                    <span className="text-xs font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
                   </button>
                 ))}
-                {!signals.primary.length ? <p className="text-sm text-[var(--color-ink-soft)]">No recurring signals yet.</p> : null}
+                {!signals.primary.length ? <p className="text-xs text-[var(--color-ink-soft)]">No recurring signals yet.</p> : null}
               </div>
 
-              <div className="space-y-2">
-                {signals.secondary.slice(0, 4).map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2">
-                    <span className="truncate text-sm text-[var(--color-ink)]">{item.label}</span>
-                    <span className="text-sm font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
+              <div className="space-y-1.5">
+                {signals.secondary.slice(0, 3).map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 py-1.5">
+                    <span className="truncate text-xs text-[var(--color-ink)]">{item.label}</span>
+                    <span className="text-xs font-semibold text-[var(--color-ink)]">{formatNumber(item.count)}</span>
                   </div>
                 ))}
               </div>
@@ -1089,29 +1329,29 @@ function App() {
           </Card>
         </div>
 
-        <div className="space-y-4">
-          <Card className="p-5">
-            <CardHeader>
-              <div>
+        <div className="min-h-0 xl:h-full">
+          <Card className="flex min-h-0 flex-col overflow-hidden p-3 sm:p-4 xl:h-full">
+            <CardHeader className="items-center gap-3">
+              <div className="min-w-0">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Workspace</div>
-                <CardTitle className="mt-1 text-lg">
+                <CardTitle className="mt-0.5 text-base">
                   {!isCustomScope && route.category === "todo"
                     ? "Shared list workspace"
                     : activeDisplayCategory === "factual"
                       ? "Knowledge graph workspace"
                       : "Context workspace"}
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="mt-0.5 line-clamp-2 text-xs leading-5">
                   {!isCustomScope && route.category === "todo"
                     ? "Check tasks off, review git-backed list history, and keep note evidence close to the shared checklist."
                     : isCustomScope
                       ? "This view follows one user-defined category while preserving the underlying note and graph structure."
-                      : "Atlas for structure, storylines for guided exploration, and graph ops for maintenance and retrieval quality."}
+                      : "Start with the atlas. Storylines and graph ops are supporting views."}
                 </CardDescription>
               </div>
             </CardHeader>
 
-            <CardContent className="mt-5">
+            <CardContent className="mt-3 flex min-h-0 flex-1 flex-col">
               {!isCustomScope && route.category === "todo" ? (
                 <TodoWorkspace
                   todo={todo}
@@ -1125,71 +1365,79 @@ function App() {
                   onToggleTask={(item, done) => void handleTodoToggle(item, done)}
                 />
               ) : (
-                <Tabs.Root value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
-                <Tabs.List className="grid gap-3 lg:grid-cols-3">
-                  {workspaceCards.map((card) => (
-                    <Tabs.Trigger
-                      key={card.value}
-                      value={card.value}
-                      className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4 text-left outline-none transition data-[state=active]:border-[var(--color-ink)] data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{card.label}</div>
-                          <div className="mt-2 text-xl font-semibold text-[var(--color-ink)]">{card.metric}</div>
-                          <div className="mt-1 text-sm text-[var(--color-ink-soft)]">{card.detail}</div>
-                        </div>
-                        <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2">
-                          <card.icon className="h-4 w-4" style={{ color: card.accent }} />
-                        </div>
-                      </div>
-                    </Tabs.Trigger>
-                  ))}
-                </Tabs.List>
+                <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Tabs.List className="inline-grid w-full grid-cols-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1 sm:w-auto">
+                    {workspaceCards.map((card) => (
+                      <Tabs.Trigger
+                        key={card.value}
+                        value={card.value}
+                        className="min-w-0 rounded-[6px] px-2 py-2 text-left outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm sm:px-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <card.icon className="h-3.5 w-3.5 shrink-0" style={{ color: card.accent }} />
+                          <span className="truncate text-xs font-semibold text-[var(--color-ink)]">{card.label}</span>
+                          <span className="hidden truncate text-[11px] text-[var(--color-ink-soft)] md:inline">{card.metric}</span>
+                        </span>
+                      </Tabs.Trigger>
+                    ))}
+                  </Tabs.List>
 
-                <Tabs.Content value="atlas" className="mt-5 outline-none">
-                  <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-3 py-3">
-                        <div className="flex flex-wrap gap-2">
+                  <div className="hidden text-[11px] text-[var(--color-ink-soft)] lg:block">
+                    Click the graph first; the side rail explains the selected node.
+                  </div>
+                </div>
+
+                <Tabs.Content value="atlas" className="mt-3 min-h-0 flex-1 outline-none">
+                  <div className="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+                    <div className="flex min-h-0 flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Map</span>
                           <Button
                             size="sm"
                             variant={groupingMode === "community" ? "primary" : "secondary"}
                             onClick={() => setGroupingMode("community")}
+                            className="h-8 px-2.5 text-xs"
                           >
-                            Group by topic
+                            Topic
                           </Button>
                           <Button
                             size="sm"
                             variant={groupingMode === "provider" ? "primary" : "secondary"}
                             onClick={() => setGroupingMode("provider")}
+                            className="h-8 px-2.5 text-xs"
                           >
-                            Group by provider
+                            Provider
                           </Button>
                           <Button
                             size="sm"
                             variant={groupingMode === "kind" ? "primary" : "secondary"}
                             onClick={() => setGroupingMode("kind")}
+                            className="h-8 px-2.5 text-xs"
                           >
-                            Group by type
+                            Type
                           </Button>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">View</span>
                           <Button
                             size="sm"
                             variant={graphDensity === "curated" ? "primary" : "secondary"}
                             onClick={() => setGraphDensity((current) => (current === "curated" ? "complete" : "curated"))}
+                            className="h-8 px-2.5 text-xs"
                           >
-                            {graphDensity === "curated" ? "Clean map" : "All nodes"}
+                            {graphDensity === "curated" ? "Clean" : "Full"}
                           </Button>
                           {graphFocus ? (
                             <Button
                               size="sm"
                               variant={graphFocusMode === "context" ? "primary" : "secondary"}
                               onClick={() => setGraphFocusMode((current) => (current === "context" ? "dim" : "context"))}
+                              className="h-8 px-2.5 text-xs"
                             >
-                              {graphFocusMode === "context" ? "Context only" : "Dim context"}
+                              {graphFocusMode === "context" ? "Context" : "Dim"}
                             </Button>
                           ) : null}
                           <Button
@@ -1197,97 +1445,207 @@ function App() {
                             variant="ghost"
                             onClick={() => setCollapsedGroups(graphInsights.clusters.map((cluster) => cluster.id))}
                             disabled={!graphInsights.clusters.length}
+                            className="h-8 px-2.5 text-xs"
                           >
                             Collapse all
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setCollapsedGroups([])} disabled={!collapsedGroups.length}>
+                          <Button size="sm" variant="ghost" onClick={() => setCollapsedGroups([])} disabled={!collapsedGroups.length} className="h-8 px-2.5 text-xs">
                             Expand all
                           </Button>
                           {graphFocus ? (
-                            <Button size="sm" variant="secondary" onClick={() => setGraphFocus(null)}>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                setGraphFocus(null);
+                                setGraphInspect(null);
+                              }}
+                              className="h-8 px-2.5 text-xs"
+                            >
                               Clear focus
                             </Button>
                           ) : null}
                         </div>
+
+                        {availableGraphProviders.length ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Source</span>
+                            {availableGraphProviders.map((provider) => {
+                              const active = graphProviderFilter.has(provider);
+                              return (
+                                <button
+                                  key={provider}
+                                  type="button"
+                                  onClick={() => {
+                                    setGraphProviderFilter((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(provider)) {
+                                        next.delete(provider);
+                                      } else {
+                                        next.add(provider);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+                                    active
+                                      ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                                      : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)]"
+                                  }`}
+                                  style={
+                                    active
+                                      ? { backgroundColor: providerColors[provider], borderColor: providerColors[provider] }
+                                      : undefined
+                                  }
+                                >
+                                  {providerLabels[provider]}
+                                </button>
+                              );
+                            })}
+                            {graphProviderFilter.size ? (
+                              <button
+                                type="button"
+                                onClick={() => setGraphProviderFilter(new Set())}
+                                className="text-[11px] text-[var(--color-ink-subtle)] underline-offset-2 hover:underline"
+                              >
+                                Clear
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {availableGraphKinds.length ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">
+                              {categoryLabels[activeDisplayCategory]}
+                            </span>
+                            {availableGraphKinds.map((kind) => {
+                              const active = graphKindFilter.has(kind);
+                              return (
+                                <button
+                                  key={kind}
+                                  type="button"
+                                  onClick={() => {
+                                    setGraphKindFilter((current) => {
+                                      const next = new Set(current);
+                                      if (next.has(kind)) {
+                                        next.delete(kind);
+                                      } else {
+                                        next.add(kind);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
+                                    active
+                                      ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                                      : "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)]"
+                                  }`}
+                                >
+                                  {kind}
+                                </button>
+                              );
+                            })}
+                            {graphKindFilter.size ? (
+                              <button
+                                type="button"
+                                onClick={() => setGraphKindFilter(new Set())}
+                                className="text-[11px] text-[var(--color-ink-subtle)] underline-offset-2 hover:underline"
+                              >
+                                Clear
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
 
                       <CategoryGraph
-                        graph={graph}
+                        graph={filteredGraph}
                         category={activeDisplayCategory}
                         groupingMode={groupingMode}
                         collapsedGroups={collapsedGroups}
                         density={graphDensity}
                         focusMode={graphFocusMode}
                         focusSessionIds={graphFocus?.sessionIds}
-                        className="min-h-[420px] h-[min(62vh,700px)]"
+                        className="min-h-[380px] h-full flex-1 xl:min-h-0"
                         onFocus={handleFocus}
+                        onInspect={setGraphInspect}
                       />
                     </div>
 
-                    <div className="space-y-4">
-                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Scope summary</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="min-h-0 space-y-3 xl:overflow-y-auto xl:pr-1">
+                      {scopePills.length ? (
+                        <div className="flex flex-wrap gap-1.5">
                           {scopePills.map((pill) => (
                             <Badge key={pill.key} tone="neutral">
                               {pill.label}: {pill.value}
                             </Badge>
                           ))}
-                          {!scopePills.length ? <Badge tone="neutral">Full category</Badge> : null}
                         </div>
-                        <div className="mt-4 grid grid-cols-2 gap-2">
-                          {[
-                            { label: "Linked notes", value: formatNumber(graphInsights.graphSessionIds.length) },
-                            { label: "Outside graph", value: formatNumber(graphInsights.uncoveredSessions) },
-                            { label: "Clusters", value: formatNumber(graphInsights.clusters.length) },
-                            { label: "Map mode", value: graphDensity === "curated" ? "Clean" : "Full" },
-                            { label: "Collapsed", value: formatNumber(collapsedGroups.length) }
-                          ].map((metric) => (
-                            <div key={metric.label} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
-                              <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{metric.label}</div>
-                              <div className="mt-2 text-lg font-semibold text-[var(--color-ink)]">{metric.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      ) : null}
 
-                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-4">
-                        <div className="mb-3 flex items-center justify-between gap-3">
+                      <GraphEvidencePanel graph={graph} selection={graphInspect} onClear={() => setGraphInspect(null)} />
+
+                      <GraphPathPanel
+                        nodes={graphNodeOptions}
+                        sourceId={pathSourceId}
+                        targetId={pathTargetId}
+                        path={pathQuery.data ?? null}
+                        loading={pathQuery.isFetching}
+                        error={pathQuery.error instanceof Error ? pathQuery.error : null}
+                        onSourceChange={(nodeId) => {
+                          setPathSourceId(nodeId);
+                          if (nodeId === pathTargetId) {
+                            setPathTargetId(graphNodeOptions.find((node) => node.id !== nodeId)?.id ?? null);
+                          }
+                        }}
+                        onTargetChange={(nodeId) => {
+                          setPathTargetId(nodeId);
+                          if (nodeId === pathSourceId) {
+                            setPathSourceId(graphNodeOptions.find((node) => node.id !== nodeId)?.id ?? null);
+                          }
+                        }}
+                        onFocusPath={handlePathFocus}
+                      />
+
+                      <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
                           <div>
                             <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">Semantic groups</div>
-                            <div className="mt-1 text-base font-semibold text-[var(--color-ink)]">
-                              {groupingMode === "community" ? "Topic communities" : groupingMode === "provider" ? "Provider clusters" : "Node type groups"}
+                            <div className="mt-0.5 text-sm font-semibold text-[var(--color-ink)]">
+                              {groupingMode === "community" ? "Topics" : groupingMode === "provider" ? "Providers" : "Types"}
                             </div>
                           </div>
                           <Badge tone="neutral">{formatNumber(graphInsights.clusters.length)}</Badge>
                         </div>
 
-                        <ScrollArea className="h-[min(46vh,448px)] pr-4">
-                          <div className="space-y-3">
+                        <ScrollArea className="h-[220px]">
+                          <div className="space-y-2 pr-3">
                             {graphInsights.clusters.map((cluster) => {
                               const collapsed = collapsedGroups.includes(cluster.id);
                               return (
-                                <div key={cluster.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
-                                  <div className="flex items-start justify-between gap-3">
+                                <div key={cluster.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2">
+                                  <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
                                       <div className="flex items-center gap-2">
-                                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cluster.accent }} />
-                                        <div className="truncate text-sm font-semibold text-[var(--color-ink)]">{cluster.label}</div>
+                                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cluster.accent }} />
+                                        <div className="truncate text-xs font-semibold text-[var(--color-ink)]">{cluster.label}</div>
                                       </div>
-                                      <div className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+                                      <div className="mt-1 text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
                                         {formatNumber(cluster.nodeCount)} nodes · {formatNumber(cluster.noteCount)} notes
                                       </div>
                                     </div>
                                     {collapsed ? <Badge tone="info">Collapsed</Badge> : null}
                                   </div>
 
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                    <Button size="sm" variant="secondary" onClick={() => activateFocus(cluster.label, cluster.sessionIds)}>
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    <Button size="sm" variant="secondary" className="h-7 px-2 text-[11px]" onClick={() => activateFocus(cluster.label, cluster.sessionIds)}>
                                       Focus
                                     </Button>
                                     <Button
                                       size="sm"
                                       variant="ghost"
+                                      className="h-7 px-2 text-[11px]"
                                       onClick={() =>
                                         setCollapsedGroups((current) =>
                                           current.includes(cluster.id)
@@ -1310,7 +1668,7 @@ function App() {
                   </div>
                 </Tabs.Content>
 
-                <Tabs.Content value="story" className="mt-5 outline-none">
+                <Tabs.Content value="story" className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 outline-none">
                   <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
                     <div className="grid gap-3 md:grid-cols-2">
                       {graphInsights.storylines.map((storyline) => (
@@ -1416,7 +1774,7 @@ function App() {
                   </div>
                 </Tabs.Content>
 
-                <Tabs.Content value="ops" className="mt-5 outline-none">
+                <Tabs.Content value="ops" className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1 outline-none">
                   <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
                     <div className="space-y-4">
                       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1537,6 +1895,7 @@ function App() {
                               type="button"
                               onClick={() => {
                                 setGraphFocus(null);
+                                setGraphInspect(null);
                                 updateRoute({ q: item.label, view: "atlas", note: null }, true);
                               }}
                               className="flex w-full items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-3 text-left transition hover:bg-[var(--color-paper-sunken)]"
@@ -1555,21 +1914,25 @@ function App() {
               )}
             </CardContent>
           </Card>
+        </div>
+      </div>
 
-          <div className="grid gap-4 2xl:grid-cols-[360px_minmax(0,1fr)]">
-            <Card className="p-4">
-              <CardHeader>
-                <div>
+      <div className="grid gap-4 2xl:grid-cols-[360px_minmax(0,1fr)]">
+            <Card className="overflow-hidden p-3">
+              <CardHeader className="flex-col gap-2 sm:flex-row sm:items-start">
+                <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Results</div>
-                  <CardTitle className="mt-1 text-lg">
+                  <CardTitle className="mt-0.5 text-base">
                     {!isCustomScope && route.category === "todo" ? "Change log notes" : isCustomScope ? "Notes in custom category" : "Notes in scope"}
                   </CardTitle>
                 </div>
-                <div className="text-sm text-[var(--color-ink-soft)]">{noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}</div>
+                <div className="max-w-[30ch] text-left text-xs leading-5 text-[var(--color-ink-soft)] sm:text-right">
+                  {noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}
+                </div>
               </CardHeader>
-              <CardContent className="mt-4">
-                <ScrollArea className="h-[min(56vh,560px)] pr-4">
-                  <div className="space-y-2">
+              <CardContent className="mt-3">
+                <ScrollArea className="h-[min(56vh,560px)]">
+                  <div className="space-y-2 pr-5 pb-1">
                     {noteListItems.map((session) => {
                       const match = matches.get(session.id);
                       const isActive = session.id === selectedSessionId;
@@ -1578,16 +1941,18 @@ function App() {
                           key={session.id}
                           type="button"
                           onClick={() => updateRoute({ note: session.id }, false)}
-                          className={`w-full rounded-[8px] border p-3 text-left transition ${
+                          className={`w-full rounded-[8px] border p-2.5 text-left transition ${
                             isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                           }`}
                         >
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <span className="truncate text-sm font-semibold">{titleFromSession(session)}</span>
-                            <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
+                          <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
+                            <span className="min-w-0 truncate text-sm font-semibold">{titleFromSession(session)}</span>
+                            <span className="shrink-0">
+                              <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
+                            </span>
                           </div>
                           {(session.user_categories ?? []).length ? (
-                            <div className="mb-2 flex flex-wrap gap-1.5">
+                            <div className="mb-1.5 flex flex-wrap gap-1">
                               {(session.user_categories ?? []).slice(0, 3).map((category) => (
                                 <span
                                   key={category}
@@ -1601,7 +1966,7 @@ function App() {
                           <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
                             {formatCompactDate(session.updated_at)}
                           </div>
-                          <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-ink-soft)]"}>
+                          <p className={isActive ? "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-white/80" : "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-[var(--color-ink-soft)]"}>
                             {sessionPreviewText(session, match, session.category ?? activeDisplayCategory)}
                           </p>
                         </button>
@@ -1613,12 +1978,12 @@ function App() {
               </CardContent>
             </Card>
 
-            <Card className="p-4">
-              <CardHeader>
-                <div>
+            <Card className="overflow-hidden p-3">
+              <CardHeader className="gap-3">
+                <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Reader</div>
-                  <CardTitle className="mt-1 text-lg">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
-                  <CardDescription>
+                  <CardTitle className="mt-0.5 truncate text-base">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
+                  <CardDescription className="line-clamp-1 text-xs leading-5">
                     {noteQuery.data
                       ? [
                           providerLabels[noteQuery.data.provider],
@@ -1629,7 +1994,7 @@ function App() {
                       : "Select a note, graph node, or storyline to inspect it."}
                   </CardDescription>
                   {selectedSession ? (
-                    <div className="mt-4 space-y-3">
+                    <div className="mt-4 space-y-3 xl:hidden">
                       <div>
                         <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -1669,10 +2034,12 @@ function App() {
                     </div>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   {selectedSession ? (
                     <Button
                       variant="secondary"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs"
                       onClick={() => {
                         window.location.href = notePageUrl({
                           id: selectedSession.id,
@@ -1688,14 +2055,14 @@ function App() {
                     </Button>
                   ) : null}
                   {noteQuery.data?.source_url ? (
-                    <Button variant="secondary" onClick={() => void chrome.tabs.create({ url: noteQuery.data!.source_url! })}>
+                    <Button variant="secondary" size="sm" className="h-8 px-2.5 text-xs" onClick={() => void chrome.tabs.create({ url: noteQuery.data!.source_url! })}>
                       <ExternalLink className="h-4 w-4" />
                       Source
                     </Button>
                   ) : null}
                 </div>
               </CardHeader>
-              <CardContent className="mt-4">
+              <CardContent className="mt-2">
                 {userCategoryError ? (
                   <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{userCategoryError}</div>
                 ) : null}
@@ -1703,7 +2070,7 @@ function App() {
                   <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content…</div>
                 ) : selectedSession && noteQuery.data ? (
                   <Tabs.Root value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
-                    <Tabs.List className="mb-4 inline-flex rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
+                    <Tabs.List className="mb-2 inline-flex rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
                       {[
                         { value: "overview", label: "Overview" },
                         { value: "transcript", label: "Transcript" },
@@ -1712,23 +2079,25 @@ function App() {
                         <Tabs.Trigger
                           key={tab.value}
                           value={tab.value}
-                          className="rounded-[6px] px-3 py-2 text-sm font-medium text-[var(--color-ink-soft)] outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm"
+                          className="rounded-[6px] px-2.5 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm"
                         >
                           {tab.label}
                         </Tabs.Trigger>
                       ))}
                     </Tabs.List>
 
-                    <ScrollArea className="h-[min(56vh,560px)] pr-4">
-                      <Tabs.Content value="overview" className="outline-none">
-                        <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
-                      </Tabs.Content>
-                      <Tabs.Content value="transcript" className="outline-none">
-                        <TranscriptView note={noteQuery.data as BackendSessionNoteRead} />
-                      </Tabs.Content>
-                      <Tabs.Content value="markdown" className="outline-none">
-                        <MarkdownView note={noteQuery.data as BackendSessionNoteRead} />
-                      </Tabs.Content>
+                    <ScrollArea className="h-[min(56vh,560px)]">
+                      <div className="pr-5 pb-1">
+                        <Tabs.Content value="overview" className="outline-none">
+                          <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
+                        </Tabs.Content>
+                        <Tabs.Content value="transcript" className="outline-none">
+                          <TranscriptView note={noteQuery.data as BackendSessionNoteRead} />
+                        </Tabs.Content>
+                        <Tabs.Content value="markdown" className="outline-none">
+                          <MarkdownView note={noteQuery.data as BackendSessionNoteRead} />
+                        </Tabs.Content>
+                      </div>
                     </ScrollArea>
                   </Tabs.Root>
                 ) : (
@@ -1738,8 +2107,6 @@ function App() {
                 )}
               </CardContent>
             </Card>
-          </div>
-        </div>
       </div>
 
       {error ||

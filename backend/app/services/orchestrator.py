@@ -9,13 +9,17 @@ from app.models import ChatMessage
 from app.models.enums import SessionCategory
 from app.schemas.processing import (
     ClassificationResult,
+    FactualResult,
     IdeaResult,
     JournalResult,
     PileClassificationResult,
+    SegmentedClassificationResult,
+    SegmentRouting,
     TodoResult,
     TripletResult,
 )
 from app.services.heuristics import (
+    _slice_is_explicit_todo_request,
     heuristic_classification,
     heuristic_idea,
     heuristic_journal,
@@ -41,6 +45,28 @@ def render_transcript(messages: list[ChatMessage]) -> str:
     for message in messages:
         lines.append(f"{message.role.value.upper()}: {message.content.strip()}")
     return "\n".join(lines).strip()
+
+
+def render_indexed_transcript(messages: list[ChatMessage]) -> str:
+    """Transcript with a leading message index so the classifier can carve ranges."""
+    lines: list[str] = []
+    for index, message in enumerate(messages):
+        lines.append(f"[{index}] {message.role.value.upper()}: {message.content.strip()}")
+    return "\n".join(lines).strip()
+
+
+BUILT_IN_PILE_RULES = (
+    "Use 'journal' only for the user's personal day-to-day life: what they did, how they "
+    "felt, relationships, relatives, routines, reflections. Not a catch-all.\n"
+    "Use 'todo' only when the user explicitly asks to add, edit, remove, mark, or reorder "
+    "items on the shared to-do list. Generic planning language is never 'todo'.\n"
+    "Use 'factual' for objective knowledge the user wants stored as a reference: coding, "
+    "research, explanation, how-to, historical or scientific Q&A. It is a queryable dump; "
+    "facts are stable and do not depend on the user's opinions.\n"
+    "Use 'ideas' only when the user is developing their own original thought: "
+    "brainstorming, speculation, 'what if', design directions, arguments, creative "
+    "ideation. Ideas are the user's evolving positions, not stored facts.\n"
+)
 
 
 class ProcessingOrchestrator:
@@ -93,11 +119,9 @@ class ProcessingOrchestrator:
                     "Return JSON with keys category and reason."
                 ),
                 user_prompt=(
-                    "Classify this transcript. Use 'journal' for personal context, day-to-day planning, reminders, prioritization, or reflection. "
-                    "Use 'todo' only when the user explicitly asks to create, edit, add, remove, reorder, reopen, or complete items on a shared to-do list or checklist file. "
-                    "General planning, reminders, or scheduling are not 'todo' unless the transcript explicitly mentions modifying the shared to-do list. "
-                    "Use 'factual' for coding, research, explanation, or objective Q&A. "
-                    "Use 'ideas' for brainstorming, creative exploration, or original concepts."
+                    "Classify this transcript using the rules below. Pick the single pile that best fits the "
+                    "dominant intent of the conversation.\n\n"
+                    f"{BUILT_IN_PILE_RULES}"
                     f"{discard_addendum}\n\n"
                     f"{transcript}"
                 ),
@@ -182,6 +206,115 @@ class ProcessingOrchestrator:
         except Exception:
             return None
 
+    async def classify_segments(
+        self,
+        messages: list[ChatMessage],
+        *,
+        candidates: list[tuple[str, str]] | None = None,
+        auto_discard_categories: list[str] | None = None,
+    ) -> list[SegmentRouting]:
+        """Split a session into contiguous segments, each routed to a pile.
+
+        Returns `[]` when no LLM is configured or when the model's response is
+        unusable; callers should fall back to single-pile classification. When
+        the transcript is short or clearly on a single topic, the model is free
+        to return a single segment spanning the whole session.
+        """
+        if not messages:
+            return []
+        transcript = render_indexed_transcript(messages)
+        if not transcript or not self.client:
+            return []
+
+        if not candidates:
+            candidates = [
+                ("journal", "Personal day-to-day life, routines, relationships, reflection."),
+                ("factual", "Objective reference knowledge: coding, research, explanation."),
+                ("ideas", "The user's own original thoughts, brainstorming, speculation."),
+                ("todo", "Explicit add/edit/remove on the shared to-do list."),
+            ]
+        candidate_lines = "\n".join(f"- '{slug}': {description.strip()}" for slug, description in candidates)
+        valid_slugs = {slug for slug, _ in candidates}
+        total = len(messages)
+        cleaned_discard = [item.strip() for item in (auto_discard_categories or []) if item and item.strip()]
+
+        try:
+            result = await self.client.generate_json(
+                system_prompt=(
+                    "You split a chat transcript into contiguous segments and route each to a pile. "
+                    "Return STRICT JSON: {\"segments\":[{\"pile_slug\":\"...\",\"reason\":\"...\",\"start_index\":N,\"end_index\":N}]}. "
+                    "start_index and end_index are inclusive message indexes matching the transcript. "
+                    "Segments must be contiguous, non-overlapping, and cover every message once."
+                ),
+                user_prompt=(
+                    "Split this transcript into segments by topic/intent and assign each to a pile. "
+                    "Return a single segment covering the whole transcript if it is on one topic. "
+                    "Segments are at message boundaries; do not carve inside a message.\n\n"
+                    f"{BUILT_IN_PILE_RULES}"
+                    "\nAvailable piles:\n"
+                    f"{candidate_lines}\n\n"
+                    f"Messages are numbered [0]..[{total - 1}].\n"
+                    "Transcript:\n"
+                    f"{transcript}"
+                ),
+                schema=SegmentedClassificationResult,
+            )
+        except Exception:
+            return []
+
+        segments = [seg for seg in result.segments if seg.pile_slug in valid_slugs]
+        if not segments:
+            return []
+        segments.sort(key=lambda seg: seg.start_index)
+        # Clip to valid range and ensure contiguity.
+        cleaned: list[SegmentRouting] = []
+        cursor = 0
+        for seg in segments:
+            start = max(seg.start_index, cursor)
+            end = min(seg.end_index, total - 1)
+            if end < start:
+                continue
+            if seg.pile_slug == "discarded" and not cleaned_discard:
+                # Don't trust 'discarded' unless auto-discard is configured.
+                continue
+            if seg.pile_slug == "todo" and not _slice_is_explicit_todo_request(messages, start, end):
+                # Same guardrail as the single-shot classifier.
+                continue
+            cleaned.append(
+                SegmentRouting(
+                    pile_slug=seg.pile_slug,
+                    reason=seg.reason,
+                    start_index=start,
+                    end_index=end,
+                )
+            )
+            cursor = end + 1
+        if not cleaned:
+            return []
+        if cleaned[-1].end_index < total - 1:
+            # Extend the last segment to cover any trailing messages the model skipped.
+            last = cleaned[-1]
+            cleaned[-1] = SegmentRouting(
+                pile_slug=last.pile_slug,
+                reason=last.reason,
+                start_index=last.start_index,
+                end_index=total - 1,
+            )
+        # Collapse consecutive segments that pick the same pile.
+        merged: list[SegmentRouting] = []
+        for seg in cleaned:
+            if merged and merged[-1].pile_slug == seg.pile_slug and merged[-1].end_index + 1 == seg.start_index:
+                prev = merged[-1]
+                merged[-1] = SegmentRouting(
+                    pile_slug=prev.pile_slug,
+                    reason=prev.reason,
+                    start_index=prev.start_index,
+                    end_index=seg.end_index,
+                )
+            else:
+                merged.append(seg)
+        return merged
+
     async def journal(self, messages: list[ChatMessage]) -> JournalResult:
         transcript = render_transcript(messages)
         if not transcript or not self.client:
@@ -190,12 +323,14 @@ class ProcessingOrchestrator:
         try:
             return await self.client.generate_json(
                 system_prompt=(
-                    "You write concise diary-style notes from a user transcript. "
-                    "Return JSON with keys entry and action_items."
+                    "You write concise diary-style notes from a user transcript and extract structured "
+                    "daily-life fields. Return JSON with keys entry, action_items, occurred_on (ISO date or null), "
+                    "people (list of names), activities (list), locations (list), mood (short phrase or null)."
                 ),
                 user_prompt=(
-                    "Summarize the transcript into a short journal entry focused on the user's context and action items. "
-                    "Strip AI filler and keep the note grounded and practical.\n\n"
+                    "Focus only on the user's personal day-to-day life: what they did, how they felt, who they "
+                    "interacted with, routines and reflections. Do not invent content; leave fields empty when "
+                    "the transcript does not mention them. Strip AI filler. Keep the entry grounded.\n\n"
                     f"{transcript}"
                 ),
                 schema=JournalResult,
@@ -204,29 +339,39 @@ class ProcessingOrchestrator:
             return heuristic_journal(messages)
 
     async def factual_triplets(self, messages: list[ChatMessage]) -> list[TripletResult]:
+        result = await self.factual(messages)
+        return result.triplets
+
+    async def factual(self, messages: list[ChatMessage]) -> FactualResult:
+        """Factuals are a lightweight substrate: a queryable dump of the user's
+        referenced facts. Triplets are emitted for rough semantic anchoring, not
+        for strong graph enforcement. Graph visualization renders these as a
+        loose concept map rather than a dependency DAG.
+        """
         transcript = render_transcript(messages)
         if not transcript or not self.client:
-            return heuristic_triplets(messages)
+            return FactualResult(triplets=heuristic_triplets(messages))
 
         try:
             wrapper = await self.client.generate_json(
                 system_prompt=(
-                    "Extract subject-predicate-object triplets from factual transcripts. "
-                    "Return JSON with one key named triplets containing a list of objects with subject, predicate, object, confidence."
+                    "Extract a small factual substrate from a transcript. "
+                    "Return JSON with keys summary (1-2 sentence neutral recap or null), "
+                    "keywords (list of durable concept tags), and triplets "
+                    "(list of {subject, predicate, object, confidence, keywords})."
                 ),
                 user_prompt=(
-                    "Extract the clearest factual relationships from this transcript. "
-                    "Use normalized predicates and skip speculative relationships. "
-                    "Prefer durable entities such as libraries, frameworks, protocols, runtimes, files, or products. "
-                    "Avoid vague outcome phrases, generic adjectives, and long descriptive clauses as nodes. "
-                    "Keep the set small and high signal.\n\n"
+                    "Emit a lightweight reference pile for this transcript. Triplets anchor durable entities "
+                    "(libraries, frameworks, protocols, products, concepts). Keep the set small, high signal, "
+                    "and skip speculative relationships. The pile is a queryable substrate, so keywords on each "
+                    "triplet should be the tags a user might search for later.\n\n"
                     f"{transcript}"
                 ),
-                schema=TripletListSchema,
+                schema=FactualResult,
             )
-            return wrapper.triplets
+            return wrapper
         except Exception:
-            return heuristic_triplets(messages)
+            return FactualResult(triplets=heuristic_triplets(messages))
 
     async def todo(self, messages: list[ChatMessage], current_markdown: str) -> TodoResult:
         transcript = render_transcript(messages)
@@ -236,14 +381,21 @@ class ProcessingOrchestrator:
         try:
             return await self.client.generate_json(
                 system_prompt=(
-                    "You maintain a single shared markdown to-do list for a user. "
-                    "Return JSON with keys summary and updated_markdown."
+                    "You maintain a shared markdown to-do list and emit structured metadata for each item. "
+                    "Return JSON with keys summary, updated_markdown, and items. items is a list of "
+                    "{text, deadline (ISO date or null), reminder_at (ISO datetime or null), is_persistent "
+                    "(true when the item has no date), completed}. In updated_markdown, dated items "
+                    "appear in Active with a `(YYYY-MM-DD)` prefix before the item text; undated items are "
+                    "persistent and appear without a date prefix. Keep `## Active` and `## Done` as the "
+                    "top-level sections so the file stays compatible with existing parsers."
                 ),
                 user_prompt=(
                     "Update the shared markdown to-do list using the transcript.\n"
                     "Only apply changes the user clearly requested to the shared to-do list.\n"
                     "Do not turn general planning advice into to-do items unless the transcript explicitly asks to modify the shared list.\n"
                     "Preserve unfinished work unless the transcript says to remove or complete it.\n"
+                    "If the user gives a date or relative date, convert to ISO (YYYY-MM-DD) and write it as a "
+                    "`(YYYY-MM-DD)` prefix on the item text. Undated items are persistent.\n"
                     "Keep the response markdown concise and readable for Obsidian.\n"
                     "The file should remain a complete standalone markdown document.\n\n"
                     "Current to-do list markdown:\n"
@@ -257,6 +409,10 @@ class ProcessingOrchestrator:
             return heuristic_todo_result(messages, current_markdown)
 
     async def ideas(self, messages: list[ChatMessage]) -> IdeaResult:
+        """Ideas are dynamic. Each idea can evolve across sessions, conflict
+        with prior threads, and anchor on facts. The structured output keeps
+        the graph of threads rich enough to visualize reasoning steps later.
+        """
         transcript = render_transcript(messages)
         if not transcript or not self.client:
             return heuristic_idea(messages)
@@ -264,14 +420,21 @@ class ProcessingOrchestrator:
         try:
             return await self.client.generate_json(
                 system_prompt=(
-                    "Summarize ideation transcripts. "
-                    "Return JSON with keys core_idea, pros, cons, next_steps, and share_post."
+                    "Summarize ideation transcripts and extract the causal / reasoning structure. "
+                    "Return JSON with keys core_idea, pros, cons, next_steps, share_post, "
+                    "reasoning_steps (ordered list of inference steps that developed the idea), "
+                    "related_facts (short list of durable facts/entities the idea rests on — "
+                    "these anchor into the factual substrate), supports (prior ideas this one reinforces), "
+                    "conflicts_with (prior ideas this one contradicts), and thread_hint (a short phrase "
+                    "identifying the broader thread of thought, or null)."
                 ),
                 user_prompt=(
-                    "Distill the transcript into a structured brainstorm summary. "
-                    "Keep the share_post concise, specific, and credible. "
-                    "Avoid hype words such as revolutionary, effortless, unlock, game-changing, or world-class. "
-                    "Write it like a thoughtful builder note that another person would actually want to share.\n\n"
+                    "Distill the transcript into a structured brainstorm summary. Capture the reasoning "
+                    "path, not just the conclusion: reasoning_steps should read as a chain the user can "
+                    "pick up later. Related_facts are pointers into stored factual knowledge.\n"
+                    "Keep the share_post concise, specific, and credible. Avoid hype words such as "
+                    "revolutionary, effortless, unlock, game-changing, or world-class. Write it like a "
+                    "thoughtful builder note.\n\n"
                     f"{transcript}"
                 ),
                 schema=IdeaResult,

@@ -21,6 +21,7 @@ from app.cli_paths import CLIPaths, host_platform
 MANAGED_UNIT_HEADER = "# Managed by SaveMyContext. Manual edits may be overwritten.\n"
 MANAGED_PLIST_KEY = "SaveMyContextManaged"
 CLI_CONFIG_PATH_ENV = "SAVEMYCONTEXT_CLI_CONFIG_PATH"
+CLI_EXECUTABLE_CANDIDATES = ("smc", "savemycontext")
 
 
 @dataclass(frozen=True)
@@ -52,10 +53,11 @@ def service_manager_display_name(system_name: str | None = None) -> str:
     return "unsupported"
 
 
-def savemycontext_executable_path() -> Path:
-    executable = shutil.which("savemycontext")
-    if executable:
-        return Path(executable).resolve()
+def cli_executable_path() -> Path:
+    for candidate in CLI_EXECUTABLE_CANDIDATES:
+        executable = shutil.which(candidate)
+        if executable:
+            return Path(executable).resolve()
     return Path(sys.argv[0]).resolve()
 
 
@@ -76,7 +78,7 @@ def render_systemd_unit(config: CLIConfig, paths: CLIPaths) -> str:
 
         [Service]
         Type=simple
-        ExecStart={savemycontext_executable_path()} run --config {paths.config_path}
+        ExecStart={cli_executable_path()} run --config {paths.config_path}
         EnvironmentFile={paths.env_path}
         WorkingDirectory={config.data_dir}
         Restart=on-failure
@@ -91,7 +93,7 @@ def render_systemd_unit(config: CLIConfig, paths: CLIPaths) -> str:
 def render_launchd_plist(config: CLIConfig, paths: CLIPaths) -> bytes:
     command = (
         f". {shlex.quote(str(paths.env_path))} && "
-        f"exec {shlex.quote(str(savemycontext_executable_path()))} run --config {shlex.quote(str(paths.config_path))}"
+        f"exec {shlex.quote(str(cli_executable_path()))} run --config {shlex.quote(str(paths.config_path))}"
     )
     payload = {
         "Label": launchd_label(config),
@@ -136,7 +138,7 @@ def ensure_service_manager_available() -> str:
         if not shutil.which("launchctl"):
             raise RuntimeError("launchctl is not available.")
         return manager
-    raise RuntimeError("Background service management is not supported on this operating system. Use `savemycontext run` instead.")
+    raise RuntimeError("Background service management is not supported on this operating system. Use `smc run` instead.")
 
 
 def is_managed_service_definition(path: Path) -> bool:
@@ -168,7 +170,7 @@ def write_service_definition(config: CLIConfig, paths: CLIPaths, *, force: bool 
     if manager == "launchd":
         destination.write_bytes(render_launchd_plist(config, paths))
         return destination
-    raise RuntimeError("Background service management is not supported on this operating system. Use `savemycontext run` instead.")
+    raise RuntimeError("Background service management is not supported on this operating system. Use `smc run` instead.")
 
 
 def reload_service_manager() -> None:

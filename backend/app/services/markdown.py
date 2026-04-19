@@ -202,6 +202,9 @@ class MarkdownExporter:
         if session.share_post:
             lines.extend(["## Share Post", "", session.share_post.strip(), ""])
 
+        if session.segments:
+            lines.extend(self._render_segments(session.segments))
+
         if session.pile_outputs:
             lines.extend(self._render_pile_outputs(session.pile_outputs))
 
@@ -614,6 +617,22 @@ class MarkdownExporter:
             return f"[[{relative.as_posix()}|{label}]]"
         return f"[[{relative.as_posix()}]]"
 
+    def _render_segments(self, segments: list[dict[str, object]]) -> list[str]:
+        lines = ["## Segments", ""]
+        for index, segment in enumerate(segments, start=1):
+            pile_slug = str(segment.get("pile_slug") or "unknown")
+            start_index = segment.get("start_index")
+            end_index = segment.get("end_index")
+            reason = str(segment.get("reason") or "").strip()
+            header = f"### {index}. `{pile_slug}`"
+            if isinstance(start_index, int) and isinstance(end_index, int):
+                header += f" — messages [{start_index}..{end_index}]"
+            lines.append(header)
+            lines.append("")
+            if reason:
+                lines.extend([reason, ""])
+        return lines
+
     def _render_pile_outputs(self, pile_outputs: dict[str, object]) -> list[str]:
         lines = ["## Pile Outputs", ""]
 
@@ -667,6 +686,10 @@ class MarkdownExporter:
         if core_idea:
             lines.extend(["### Core Idea", "", core_idea, ""])
 
+        thread_hint = str(idea_summary.get("thread_hint") or "").strip()
+        if thread_hint:
+            lines.extend(["### Thread", "", thread_hint, ""])
+
         for heading, key in (
             ("Pros", "pros"),
             ("Cons", "cons"),
@@ -679,6 +702,18 @@ class MarkdownExporter:
             else:
                 lines.append("- None")
             lines.append("")
+
+        for heading, key in (
+            ("Reasoning Steps", "reasoning_steps"),
+            ("Related Facts", "related_facts"),
+            ("Supports", "supports"),
+            ("Conflicts With", "conflicts_with"),
+        ):
+            values = idea_summary.get(key)
+            if isinstance(values, list) and any(str(value).strip() for value in values):
+                lines.extend([f"### {heading}", ""])
+                lines.extend(f"- {str(value).strip()}" for value in values if str(value).strip())
+                lines.append("")
 
         return lines
 

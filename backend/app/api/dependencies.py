@@ -103,6 +103,14 @@ async def require_bearer_token_context(
     return context
 
 
+async def optional_bearer_token_context(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db_session),
+) -> AuthContext | None:
+    return await authenticate_bearer_token(request, credentials, db)
+
+
 async def resolve_auth_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),

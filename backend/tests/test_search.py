@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
-from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, SessionCategory
+from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, SessionCategory, SourceCapture
 from app.models.base import Base
 from app.services.graph import GraphService
 from app.services.search import SearchService
@@ -81,6 +81,94 @@ async def test_search_includes_shared_todo_list(tmp_path, monkeypatch) -> None:
         async with session_factory() as session:
             search = await SearchService(session).search("milk")
             assert any(result.kind == "todo_list" and result.title == "To-Do List" for result in search.results)
+    finally:
+        get_settings.cache_clear()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_search_reads_session_markdown_files_with_shell_search(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-search-markdown.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        note_path = tmp_path / "markdown" / "SaveMyContext" / "Factual" / "storage-note.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text(
+            "# Storage internals\n\nThis note mentions zero-copy indexes for compact search.\n",
+            encoding="utf-8",
+        )
+
+        async with session_factory() as session:
+            chat_session = ChatSession(
+                provider=ProviderName.CHATGPT,
+                external_session_id="session-markdown-only",
+                title="Storage internals",
+                category=SessionCategory.FACTUAL,
+                markdown_path=str(note_path),
+                last_captured_at=datetime.now(timezone.utc),
+            )
+            session.add(chat_session)
+            await session.commit()
+            session_id = chat_session.id
+
+        async with session_factory() as session:
+            search = await SearchService(session).search("zero-copy indexes")
+            assert any(result.session_id == session_id for result in search.results)
+            assert any("zero-copy" in result.snippet.lower() for result in search.results if result.session_id == session_id)
+    finally:
+        get_settings.cache_clear()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_search_reads_capture_source_files_with_shell_search(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-search-captures.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        capture_note_path = tmp_path / "markdown" / "SaveMyContext" / "Captures" / "page--systems-note--12345678.md"
+        raw_source_path = tmp_path / "markdown" / "SaveMyContext" / "Captures" / "page--systems-note--12345678--source.md"
+        capture_note_path.parent.mkdir(parents=True, exist_ok=True)
+        capture_note_path.write_text("# Systems note\n\nDurable queues.\n", encoding="utf-8")
+        raw_source_path.write_text(
+            "# Source Document\n\nAn obscure cap theorem footnote lives here.\n",
+            encoding="utf-8",
+        )
+
+        async with session_factory() as session:
+            source_capture = SourceCapture(
+                capture_kind="page",
+                save_mode="raw",
+                title="Systems note",
+                source_text="Durable queues.",
+                markdown_path=str(capture_note_path),
+                raw_source_path=str(raw_source_path),
+            )
+            session.add(source_capture)
+            await session.commit()
+            source_id = source_capture.id
+
+        async with session_factory() as session:
+            search = await SearchService(session).search("cap theorem footnote")
+            assert any(result.kind == "source_capture" and result.source_id == source_id for result in search.results)
+            assert any(
+                "cap theorem footnote" in result.snippet.lower()
+                for result in search.results
+                if result.source_id == source_id
+            )
     finally:
         get_settings.cache_clear()
 

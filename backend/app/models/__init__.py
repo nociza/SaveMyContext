@@ -1,4 +1,5 @@
 from app.models.api_token import APIToken
+from app.models.connection_grant import ConnectionGrant
 from app.models.enums import BUILT_IN_PILE_KINDS, MessageRole, PileKind, ProviderName, SessionCategory
 from app.models.message import ChatMessage
 from app.models.pile import Pile
@@ -13,6 +14,7 @@ __all__ = [
     "BUILT_IN_PILE_KINDS",
     "ChatMessage",
     "ChatSession",
+    "ConnectionGrant",
     "FactTriplet",
     "MessageRole",
     "Pile",

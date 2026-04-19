@@ -4,7 +4,46 @@ title: Using SaveMyContext
 
 # Using SaveMyContext
 
-Once the backend and extension are connected, SaveMyContext has four main workflows: automatic chat sync, manual source capture, search, and vault browsing.
+Once the backend and extension are connected, SaveMyContext mostly disappears into the background. You use ChatGPT, Gemini, or Grok normally, and SaveMyContext keeps the useful parts.
+
+## Three concrete ways people use it
+
+### Grok in a Tesla
+
+You talk to Grok while driving about a decision, idea, or reminder.
+
+Later, SaveMyContext can already have that conversation in your vault:
+
+- the full conversation is archived
+- the note is searchable from the extension
+- the result is classified into `journal`, `ideas`, or `factual` depending on what you discussed
+
+This is useful when the chat happened in a context where you were never going to manually copy it anywhere.
+
+### ChatGPT research
+
+You use ChatGPT for deep research, technical comparisons, or working through a complicated topic over a long thread.
+
+SaveMyContext keeps that work from disappearing:
+
+- the conversation is mirrored into your local archive
+- a readable note is written alongside the raw source document
+- research-heavy threads usually land in `factual`
+- graph entities and relationships can be extracted from the result
+
+This is the main use case when ChatGPT has effectively become part of your research workflow.
+
+### Gemini journal and planning
+
+You use Gemini for reflection, personal journaling, planning your week, or keeping a running task list.
+
+SaveMyContext turns that into durable notes:
+
+- reflective conversations usually land in `journal`
+- brainstorming threads usually land in `ideas`
+- explicit requests to add, remove, complete, or edit tasks update the shared to-do list
+
+This is useful when you want AI chat to behave more like a daily notebook than a disposable conversation.
 
 ## Automatic conversation sync
 
@@ -42,11 +81,11 @@ Each synced conversation is classified into one of four categories:
 
 ### Journal
 
-Journal notes include a cleaned transcript plus a short journal entry with action items.
+Journal notes include a cleaned transcript plus a short journal entry with action items. This is where reflective chats, personal planning, and conversational thinking usually end up.
 
 ### Factual
 
-Factual notes extract subject-predicate-object triplets and feed the graph views. SaveMyContext also writes separate entity notes under `Graph/Entities/`.
+Factual notes extract subject-predicate-object triplets and feed the graph views. SaveMyContext also writes separate entity notes under `Graph/Entities/`. Research threads, technical questions, and explanation-heavy chats usually land here.
 
 Entity note filenames are stable and collision-resistant, so closely named concepts such as `C`, `C#`, and `C++` stay separate instead of collapsing into one file.
 
@@ -60,9 +99,13 @@ Ideas notes include a structured summary:
 - next steps
 - a short share post
 
+This is where brainstorming, product ideas, and early concept work usually land.
+
 ### To-Do
 
 `todo` is reserved for explicit shared-list editing requests. General planning does not update the shared to-do list unless the conversation clearly asks to add, remove, complete, reopen, or change list items.
+
+If you say something like "add these three tasks to my list" or "mark this done," SaveMyContext treats that as a shared to-do edit instead of a regular note.
 
 ## Saving a full page
 
@@ -84,7 +127,7 @@ SaveMyContext shows a small capture bubble with two choices:
 - `Add to Knowledge Base`: stores the selection as a raw capture
 - `Save with AI`: stores it with title cleanup, classification, and summary when AI processing is available
 
-Selection captures are separate from provider chat sync. They are good for articles, docs, error messages, code examples, and snippets you want to keep alongside your conversation archive.
+Selection captures are separate from provider chat sync. They are good for articles, docs, error messages, code examples, quotes, and snippets you want to keep alongside your conversation archive.
 
 ## Quick search on any page
 
@@ -103,6 +146,8 @@ Quick search runs against your saved knowledge and can search:
 - the shared to-do list
 
 If you open it while focused in an input, textarea, or rich-text editor, SaveMyContext can insert the selected result into that field.
+
+That makes it useful for pulling an old research note, quote, or task detail back into the page you are currently writing.
 
 ## Processing modes
 

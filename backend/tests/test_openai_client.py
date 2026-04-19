@@ -6,7 +6,7 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from app.core.config import get_settings
+from app.core.config import DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_MODEL_FALLBACKS, get_settings
 from app.services.llm.openai_client import OpenAIClient
 
 
@@ -87,9 +87,11 @@ async def test_openai_client_accepts_generic_openai_env_names_and_openrouter_def
 
         assert settings.openai_api_key == "sk-or-v1-test-secret"
         assert settings.resolved_openai_base_url == "https://openrouter.ai/api/v1"
-        assert settings.resolved_openai_model == "openai/gpt-4.1-mini"
+        assert settings.resolved_openai_model == DEFAULT_OPENROUTER_MODEL
+        assert settings.resolved_openai_model_candidates == [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
         assert client.base_url == "https://openrouter.ai/api/v1"
-        assert client.model == "openai/gpt-4.1-mini"
+        assert client.model == DEFAULT_OPENROUTER_MODEL
+        assert client.models == [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
     finally:
         get_settings.cache_clear()
 
@@ -148,5 +150,59 @@ async def test_openai_client_retries_without_response_format_when_provider_rejec
         assert result.value == "ok"
         assert attempts[0]["response_format"] == {"type": "json_object"}
         assert "response_format" not in attempts[1]
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_openai_client_falls_back_to_next_model_when_primary_is_rate_limited(monkeypatch) -> None:
+    attempts: list[str] = []
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"choices": [{"message": {"content": '{"value":"ok"}'}}]}
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+            attempts.append(str(json["model"]))
+            if json["model"] == "google/gemma-4-31b-it:free":
+                response = httpx.Response(
+                    status_code=429,
+                    request=request,
+                    text='{"error":{"message":"rate limit exceeded"}}',
+                )
+                raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+            return FakeResponse()
+
+    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_API_KEY", "openrouter-secret")
+    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL", "google/gemma-4-31b-it:free")
+    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL_FALLBACKS", "openai/gpt-4.1-mini")
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    get_settings.cache_clear()
+
+    try:
+        client = OpenAIClient()
+        result = await client.generate_json(
+            system_prompt="Return JSON.",
+            user_prompt="Say ok.",
+            schema=EchoSchema,
+        )
+
+        assert result.value == "ok"
+        assert attempts == ["google/gemma-4-31b-it:free", "openai/gpt-4.1-mini"]
     finally:
         get_settings.cache_clear()

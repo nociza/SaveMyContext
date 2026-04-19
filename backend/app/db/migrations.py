@@ -36,6 +36,8 @@ def apply_schema_migrations(sync_connection) -> None:
             sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN discarded_reason TEXT")
         if "pile_outputs" not in chat_columns:
             sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN pile_outputs JSON")
+        if "segments" not in chat_columns:
+            sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN segments JSON")
 
     if "source_captures" in table_names:
         capture_columns = {column["name"] for column in inspector.get_columns("source_captures")}

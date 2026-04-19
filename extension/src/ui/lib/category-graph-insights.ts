@@ -227,21 +227,42 @@ function nodeImportance(node: BackendExplorerGraphNode, adjacency: Map<string, M
   return degree * 5 + node.session_ids.length * 4 + Math.log(node.size + 1) * 6;
 }
 
+function backendCommunityMap(graph: BackendCategoryGraph): Map<string, string> | null {
+  const values = graph.nodes
+    .map((node) => node.community_id?.trim())
+    .filter((value): value is string => Boolean(value));
+  if (!values.length) {
+    return null;
+  }
+  return new Map(graph.nodes.map((node) => [node.id, node.community_id?.trim() || "community:peripheral"] as const));
+}
+
 export function buildCategoryGraphClusters(
   graph: BackendCategoryGraph,
   category: SessionCategoryName,
   groupingMode: GraphGroupingMode
 ): CategoryGraphClusterLookup {
   const adjacency = buildAdjacency(graph);
-  const communityByNodeId = groupingMode === "community" ? detectCommunities(graph) : null;
+  const backendCommunities = groupingMode === "community" ? backendCommunityMap(graph) : null;
+  const communityByNodeId = groupingMode === "community" ? backendCommunities ?? detectCommunities(graph) : null;
+  const usesBackendCommunities = Boolean(backendCommunities);
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
   const mutableClusters = new Map<string, MutableCluster>();
+  const communityClusterId = (node: BackendExplorerGraphNode): string => {
+    const rawCommunityId = communityByNodeId?.get(node.id)?.trim();
+    if (!rawCommunityId) {
+      return `community:${node.id}`;
+    }
+    if (usesBackendCommunities || rawCommunityId.startsWith("community:")) {
+      return rawCommunityId;
+    }
+    return `community:${rawCommunityId}`;
+  };
 
   const ensureCluster = (node: BackendExplorerGraphNode): MutableCluster => {
-    const communityId = communityByNodeId?.get(node.id);
     const id =
       groupingMode === "community"
-        ? `community:${communityId ?? node.id}`
+        ? communityClusterId(node)
         : clusterKeyForNode(node, groupingMode);
     const created =
       mutableClusters.get(id) ??
@@ -250,9 +271,7 @@ export function buildCategoryGraphClusters(
           id,
           label:
             groupingMode === "community"
-              ? communityId === "peripheral"
-                ? "Peripheral facts"
-                : "Community"
+              ? node.community_label?.trim() || (id === "community:peripheral" || id === "peripheral" ? "Peripheral facts" : "Community")
               : clusterLabelForNode(node, groupingMode),
           accent:
             groupingMode === "community"
@@ -312,6 +331,14 @@ export function buildCategoryGraphClusters(
       continue;
     }
 
+    const backendLabel = [...cluster.nodeIds]
+      .map((nodeId) => nodeById.get(nodeId)?.community_label?.trim())
+      .find((value): value is string => Boolean(value));
+    if (backendLabel) {
+      cluster.label = backendLabel;
+      continue;
+    }
+
     const anchorLabels = [...cluster.nodeIds]
       .map((nodeId) => nodeById.get(nodeId))
       .filter((node): node is BackendExplorerGraphNode => Boolean(node))
@@ -339,7 +366,7 @@ export function buildCategoryGraphClusters(
   for (const node of graph.nodes) {
     const clusterId =
       groupingMode === "community"
-        ? `community:${communityByNodeId?.get(node.id) ?? node.id}`
+        ? communityClusterId(node)
         : clusterKeyForNode(node, groupingMode);
     const cluster = clusterById.get(clusterId);
     if (cluster) {

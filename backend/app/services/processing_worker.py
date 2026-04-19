@@ -40,12 +40,12 @@ def immediate_processing_model(settings: Settings | None = None) -> str | None:
     resolved = settings or get_settings()
     backend = resolved.llm_backend.lower()
     if backend == "openai":
-        return resolved.openai_model
+        return resolved.resolved_openai_model
     if backend == "google":
         return resolved.google_model
     if backend == "auto":
         if resolved.openai_api_key:
-            return resolved.openai_model
+            return resolved.resolved_openai_model
         if resolved.google_api_key:
             return resolved.google_model
     return None

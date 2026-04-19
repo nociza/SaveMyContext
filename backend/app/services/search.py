@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import Text, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import ChatMessage, ChatSession, FactTriplet, ProviderName, SessionCategory, SourceCapture
 from app.schemas.search import SearchResult, SearchResponse
+from app.services.agentic_search import AgenticVaultSearchService
 from app.services.graph import entity_note_path
 from app.services.todo import TODO_TITLE, TodoListService
 from app.services.user_categories import extract_user_categories, has_user_category
@@ -23,6 +26,55 @@ def _snippet(text: str | None, query: str) -> str:
     start = max(0, position - 80)
     end = min(len(value), position + len(query) + 120)
     return value[start:end].strip()
+
+
+def _normalize_path(path_text: str | None) -> str | None:
+    if not path_text:
+        return None
+    try:
+        return str(Path(path_text).expanduser().resolve())
+    except OSError:
+        return None
+
+
+def _result_identity(result: SearchResult) -> tuple[str, str]:
+    if result.kind == "entity" and result.entity_id:
+        return ("entity", result.entity_id.casefold())
+    if result.kind == "source_capture" and result.source_id:
+        return ("source_capture", result.source_id)
+    if result.kind == "session" and result.session_id:
+        return ("session", result.session_id)
+    if result.kind == "todo_list":
+        return ("todo_list", result.markdown_path or TODO_TITLE)
+    if result.source_id:
+        return ("source_capture", result.source_id)
+    if result.session_id:
+        return ("session", result.session_id)
+    if result.entity_id:
+        return ("entity", result.entity_id.casefold())
+    if result.markdown_path:
+        return (result.kind, result.markdown_path)
+    return (result.kind, result.title.casefold())
+
+
+def _merge_duplicate_results(primary: SearchResult, fallback: SearchResult) -> SearchResult:
+    authoritative = (
+        fallback
+        if fallback.session_id or fallback.source_id or fallback.entity_id or fallback.kind == "todo_list"
+        else primary
+    )
+    return SearchResult(
+        kind=authoritative.kind or primary.kind,
+        title=authoritative.title or primary.title,
+        snippet=primary.snippet or fallback.snippet,
+        session_id=primary.session_id or fallback.session_id,
+        source_id=primary.source_id or fallback.source_id,
+        entity_id=primary.entity_id or fallback.entity_id,
+        category=primary.category or fallback.category,
+        provider=primary.provider or fallback.provider,
+        user_categories=primary.user_categories or fallback.user_categories,
+        markdown_path=primary.markdown_path or fallback.markdown_path,
+    )
 
 
 class SearchService:
@@ -204,5 +256,125 @@ class SearchService:
                 )
             )
 
-        ordered = results[:limit]
+        shell_results = await self._shell_results(
+            query,
+            limit=max(limit * 4, 24),
+            category=category,
+            provider=provider,
+            user_category=user_category,
+            allowed_kinds=allowed_kinds,
+            include_discarded=include_discarded,
+        )
+        ordered = self._merge_results(shell_results, results, limit=limit)
         return SearchResponse(query=query, count=len(ordered), results=ordered)
+
+    async def _shell_results(
+        self,
+        query: str,
+        *,
+        limit: int,
+        category: SessionCategory | None,
+        provider: ProviderName | None,
+        user_category: str | None,
+        allowed_kinds: set[str],
+        include_discarded: bool,
+    ) -> list[SearchResult]:
+        if not {"session", "source_capture"} & allowed_kinds:
+            return []
+
+        hits = AgenticVaultSearchService().search(query, limit=limit)
+        if not hits:
+            return []
+
+        normalized_paths = [hit.path for hit in hits]
+
+        session_statement = select(ChatSession).where(ChatSession.markdown_path.in_(normalized_paths))
+        if category:
+            session_statement = session_statement.where(ChatSession.category == category)
+        if provider:
+            session_statement = session_statement.where(ChatSession.provider == provider)
+        if not include_discarded:
+            session_statement = session_statement.where(ChatSession.is_discarded.is_(False))
+        session_rows = (await self.db.execute(session_statement)).scalars().all()
+        if user_category:
+            session_rows = [session for session in session_rows if has_user_category(session.custom_tags, user_category)]
+
+        session_by_path: dict[str, ChatSession] = {}
+        for session in session_rows:
+            normalized_path = _normalize_path(session.markdown_path)
+            if normalized_path:
+                session_by_path[normalized_path] = session
+
+        source_by_path: dict[str, SourceCapture] = {}
+        if provider is None:
+            source_statement = select(SourceCapture).where(
+                or_(
+                    SourceCapture.markdown_path.in_(normalized_paths),
+                    SourceCapture.raw_source_path.in_(normalized_paths),
+                )
+            )
+            if category:
+                source_statement = source_statement.where(SourceCapture.category == category)
+            if not include_discarded:
+                source_statement = source_statement.where(SourceCapture.is_discarded.is_(False))
+            source_rows = (await self.db.execute(source_statement)).scalars().all()
+            for source_capture in source_rows:
+                for candidate in (source_capture.markdown_path, source_capture.raw_source_path):
+                    normalized_path = _normalize_path(candidate)
+                    if normalized_path:
+                        source_by_path[normalized_path] = source_capture
+
+        resolved: list[SearchResult] = []
+        for hit in hits:
+            session = session_by_path.get(hit.path)
+            if session is not None and "session" in allowed_kinds:
+                resolved.append(
+                    SearchResult(
+                        kind="session",
+                        title=session.title or session.external_session_id,
+                        snippet=hit.snippet,
+                        session_id=session.id,
+                        category=session.category,
+                        provider=session.provider,
+                        user_categories=extract_user_categories(session.custom_tags),
+                        markdown_path=session.markdown_path,
+                    )
+                )
+                continue
+
+            source_capture = source_by_path.get(hit.path)
+            if source_capture is not None and "source_capture" in allowed_kinds:
+                resolved.append(
+                    SearchResult(
+                        kind="source_capture",
+                        title=source_capture.title or source_capture.page_title or "Saved source",
+                        snippet=hit.snippet,
+                        source_id=source_capture.id,
+                        category=source_capture.category,
+                        markdown_path=source_capture.markdown_path or source_capture.raw_source_path,
+                    )
+                )
+                continue
+
+        return resolved
+
+    def _merge_results(
+        self,
+        primary_results: list[SearchResult],
+        fallback_results: list[SearchResult],
+        *,
+        limit: int,
+    ) -> list[SearchResult]:
+        ordered: list[SearchResult] = []
+        index_by_identity: dict[tuple[str, str], int] = {}
+
+        for result in [*primary_results, *fallback_results]:
+            identity = _result_identity(result)
+            existing_index = index_by_identity.get(identity)
+            if existing_index is None:
+                index_by_identity[identity] = len(ordered)
+                ordered.append(result)
+                continue
+            ordered[existing_index] = _merge_duplicate_results(ordered[existing_index], result)
+
+        return ordered[:limit]

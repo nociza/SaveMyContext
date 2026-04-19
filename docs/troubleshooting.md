@@ -19,9 +19,9 @@ Check these first:
 Useful backend commands:
 
 ```bash
-savemycontext service status
-savemycontext service logs -f
-savemycontext doctor
+smc status
+smc logs -f
+smc doctor
 ```
 
 ## Localhost suddenly started asking for a token

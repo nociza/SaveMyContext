@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.cli_config import CLIConfig, default_cli_config, merge_cli_config, parse_cli_config, render_cli_config
 from app.cli_paths import CLIPaths, default_cli_paths
-from app.cli_service import render_launchd_plist, render_systemd_unit
+from app.cli_service import cli_executable_path, render_launchd_plist, render_systemd_unit
 
 
 def make_paths(tmp_path: Path) -> CLIPaths:
@@ -77,6 +77,15 @@ def test_render_systemd_unit_uses_savemycontext_run_command(tmp_path: Path) -> N
     assert " run --config " in unit
     assert str(paths.config_path) in unit
     assert str(paths.env_path) in unit
+
+
+def test_cli_executable_path_prefers_smc(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "app.cli_service.shutil.which",
+        lambda command: str(tmp_path / "smc") if command == "smc" else None,
+    )
+
+    assert cli_executable_path() == (tmp_path / "smc").resolve()
 
 
 def test_default_cli_paths_use_launchagents_on_macos(tmp_path: Path, monkeypatch) -> None:

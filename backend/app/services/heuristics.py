@@ -120,6 +120,10 @@ def is_explicit_todo_request(messages: Iterable[ChatMessage]) -> bool:
     return TODO_REQUEST_RE.search(user_text.lower()) is not None
 
 
+def _slice_is_explicit_todo_request(messages: list[ChatMessage], start: int, end: int) -> bool:
+    return is_explicit_todo_request(messages[start : end + 1])
+
+
 def heuristic_classification(messages: list[ChatMessage]) -> ClassificationResult:
     user_text = " ".join(message_texts(messages, MessageRole.USER))
     transcript = " ".join(message_texts(messages))

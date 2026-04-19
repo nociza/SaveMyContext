@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, SessionCategory
 from app.models.base import Base
+from app.services.graph import entity_id
 
 
 @pytest.mark.asyncio
@@ -132,6 +133,10 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
             stats_response = await client.get("/api/v1/categories/factual/stats")
             graph_response = await client.get("/api/v1/categories/factual/graph")
+            path_response = await client.get(
+                "/api/v1/categories/factual/graph/path",
+                params={"source": entity_id("Search"), "target": entity_id("notes")},
+            )
             ideas_graph_response = await client.get("/api/v1/categories/ideas/graph")
             search_response = await client.get(
                 "/api/v1/search",
@@ -150,8 +155,19 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
         assert graph_response.status_code == 200
         graph_payload = graph_response.json()
         assert graph_payload["category"] == "factual"
-        assert any(node["label"] == "SQLite" and factual_session_id in node["session_ids"] for node in graph_payload["nodes"])
-        assert any(edge["label"] == "stores" for edge in graph_payload["edges"])
+        sqlite_node = next(node for node in graph_payload["nodes"] if node["label"] == "SQLite")
+        assert factual_session_id in sqlite_node["session_ids"]
+        assert sqlite_node["degree"] >= 1
+        assert sqlite_node["community_id"]
+        assert sqlite_node["evidence"][0]["snippet"] == "SQLite | stores | notes"
+        assert any(edge["label"] == "stores" and edge["evidence_count"] >= 1 for edge in graph_payload["edges"])
+
+        assert path_response.status_code == 200
+        path_payload = path_response.json()
+        assert path_payload["source"] == entity_id("Search")
+        assert path_payload["target"] == entity_id("notes")
+        assert path_payload["paths"][0]["hop_count"] == 2
+        assert factual_session_id in path_payload["paths"][0]["evidence_session_ids"]
 
         assert ideas_graph_response.status_code == 200
         ideas_graph_payload = ideas_graph_response.json()

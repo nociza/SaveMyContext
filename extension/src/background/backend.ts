@@ -1,7 +1,9 @@
 import type {
   BackendCapabilities,
   BackendCategoryGraph,
+  BackendCategoryGraphPath,
   BackendCategoryStats,
+  ConnectionRedeemResponse,
   BackendDashboardSummary,
   BackendDiscardedSessionsResponse,
   BackendExplorerGraphEdge,
@@ -18,6 +20,7 @@ import type {
   BackendSystemStatus,
   BackendTodoListRead,
   BackendTodoListUpdate,
+  ParsedConnectionBundle,
   BackendUserCategorySummary,
   ExtensionSettings,
   ProcessingCompleteResponse,
@@ -152,6 +155,42 @@ export async function validateBackendConfiguration(settings: ExtensionSettings):
     normalizedUrl,
     capabilities
   };
+}
+
+export async function redeemConnectionBundle(
+  bundle: ParsedConnectionBundle,
+  payload: {
+    installationId: string;
+    clientName?: string;
+    verificationCode?: string;
+  }
+): Promise<ConnectionRedeemResponse> {
+  const response = await fetch(`${bundle.baseUrl}/api/v1/auth/connections/redeem`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      grant_id: bundle.grantId,
+      secret: bundle.secret,
+      installation_id: payload.installationId,
+      client_name: payload.clientName,
+      verification_code: payload.verificationCode?.trim() || undefined
+    })
+  });
+  if (!response.ok) {
+    let detail = `Connection enrollment failed with ${response.status}.`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) {
+        detail = payload.detail;
+      }
+    } catch {
+      // ignore non-json failures and keep the status-based message
+    }
+    throw new Error(detail);
+  }
+  return (await response.json()) as ConnectionRedeemResponse;
 }
 
 export async function fetchProcessingStatus(
@@ -531,6 +570,56 @@ export async function fetchCustomCategoryGraph(
   return fetchBackendJson<BackendCategoryGraph>(
     settings,
     `/custom-categories/${encodeURIComponent(name)}/graph${query ? `?${query}` : ""}`,
+    capabilities
+  );
+}
+
+export async function fetchCategoryGraphPath(
+  settings: ExtensionSettings,
+  category: SessionCategoryName,
+  source: string,
+  target: string,
+  filters?: {
+    provider?: ProviderName;
+    sessionIds?: string[];
+  },
+  capabilities?: BackendCapabilities
+): Promise<BackendCategoryGraphPath> {
+  const search = new URLSearchParams({ source, target });
+  if (filters?.provider) {
+    search.set("provider", filters.provider);
+  }
+  for (const sessionId of filters?.sessionIds ?? []) {
+    search.append("session_id", sessionId);
+  }
+  return fetchBackendJson<BackendCategoryGraphPath>(
+    settings,
+    `/categories/${encodeURIComponent(category)}/graph/path?${search.toString()}`,
+    capabilities
+  );
+}
+
+export async function fetchCustomCategoryGraphPath(
+  settings: ExtensionSettings,
+  name: string,
+  source: string,
+  target: string,
+  filters?: {
+    provider?: ProviderName;
+    sessionIds?: string[];
+  },
+  capabilities?: BackendCapabilities
+): Promise<BackendCategoryGraphPath> {
+  const search = new URLSearchParams({ source, target });
+  if (filters?.provider) {
+    search.set("provider", filters.provider);
+  }
+  for (const sessionId of filters?.sessionIds ?? []) {
+    search.append("session_id", sessionId);
+  }
+  return fetchBackendJson<BackendCategoryGraphPath>(
+    settings,
+    `/custom-categories/${encodeURIComponent(name)}/graph/path?${search.toString()}`,
     capabilities
   );
 }

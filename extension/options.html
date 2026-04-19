@@ -34,15 +34,38 @@
           </div>
           <div class="section-body">
             <label class="field">
+              <span class="field-label">Connection string</span>
+              <input
+                id="connection-string"
+                name="connection-string"
+                type="text"
+                placeholder="smc_conn_1_…"
+                autocomplete="off"
+              />
+              <small>Paste the single string emitted by <code>savemycontext expose ...</code>.</small>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Verification code</span>
+              <input
+                id="verification-code"
+                name="verification-code"
+                type="text"
+                placeholder="1234-5678"
+                autocomplete="one-time-code"
+              />
+              <small>Only needed for higher-security per-device bundles.</small>
+            </label>
+
+            <label class="field">
               <span class="field-label">Backend URL</span>
               <input
                 id="backend-url"
                 name="backend-url"
                 type="url"
                 placeholder="http://127.0.0.1:18888"
-                required
               />
-              <small>The base URL of your locally running SaveMyContext service.</small>
+              <small>Manual fallback. Leave this blank if you are using a connection string.</small>
             </label>
 
             <label class="field">
@@ -54,7 +77,7 @@
                 placeholder="savemycontext_pat_…"
                 autocomplete="new-password"
               />
-              <small>Optional. Required only if your backend is not bound to localhost.</small>
+              <small>Manual fallback. Not needed when you paste a connection string.</small>
             </label>
 
             <div class="status-row">

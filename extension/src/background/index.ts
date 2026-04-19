@@ -4,6 +4,7 @@ import {
   fetchKnowledgeSearch,
   fetchNextProcessingTask,
   fetchProcessingStatus,
+  redeemConnectionBundle,
   saveSourceCaptureToBackend,
   updateKnowledgeStoragePath,
   validateBackendConfiguration
@@ -23,6 +24,7 @@ import {
   normalizeProcessingResponseJson
 } from "../injected/proxy-json";
 import {
+  getInstallationId,
   getProviderHistorySyncState,
   clearProviderHistorySyncStates,
   getProcessingWorkerSessionUrl,
@@ -38,6 +40,7 @@ import {
   saveSettings,
   setStatus
 } from "../shared/storage";
+import { parseConnectionString } from "../shared/connection";
 import { evaluateDiscardWords, evaluateIndexingRules, indexingRulesFingerprint } from "../shared/indexing-rules";
 import type {
   CapturedNetworkEvent,
@@ -53,6 +56,7 @@ import type {
   RuntimeMessage,
   SourceCapturePayload,
   SourceCaptureResponse,
+  SaveConnectionBundleResponse,
   SaveKnowledgePathResponse,
   SaveSettingsResponse,
   SyncStatus
@@ -109,6 +113,11 @@ function formatProviderName(provider: ProviderName): string {
 function formatProviderList(providers: ProviderName[] | undefined, fallback: ProviderName | undefined): string {
   const names = (providers?.length ? providers : fallback ? [fallback] : []).map(formatProviderName);
   return names.length ? names.join(", ") : "provider";
+}
+
+async function extensionClientName(): Promise<string> {
+  const platform = await chrome.runtime.getPlatformInfo();
+  return `Chrome ${platform.os}`;
 }
 
 function isFreshHistorySyncInProgress(state: ProviderHistorySyncState): boolean {
@@ -567,7 +576,7 @@ async function handleSaveSourceCapture(payload: SourceCapturePayload): Promise<S
   }
 }
 
-async function handleSaveCurrentPageSource(saveMode: "raw" | "ai" = "ai"): Promise<SourceCaptureResponse> {
+async function handleSaveCurrentPageSource(saveMode: "raw" | "ai" = "raw"): Promise<SourceCaptureResponse> {
   try {
     return await sendMessageToActivePage<SourceCaptureResponse>({
       type: "SAVE_CURRENT_PAGE_SOURCE",
@@ -686,8 +695,8 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         backendVersion: capabilities.version,
         backendAuthMode: capabilities.auth.mode,
         backendValidationError: null,
-        backendMarkdownRoot: capabilities.storage.markdown_root,
-        backendVaultRoot: capabilities.storage.vault_root,
+        backendMarkdownRoot: capabilities.storage.markdown_root ?? undefined,
+        backendVaultRoot: capabilities.storage.vault_root ?? undefined,
         processingMode: processing.mode,
         processingWorkerModel: processing.worker_model,
         processingPendingCount: processing.pending_count,
@@ -866,6 +875,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return true;
   }
 
+  if (message.type === "SAVE_CONNECTION_BUNDLE") {
+    void enqueueTask(() => handleSaveConnectionBundle(message.payload))
+      .then(sendResponse)
+      .catch((error) => {
+        console.error("SaveMyContext connection enrollment failed", error);
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        } satisfies SaveConnectionBundleResponse);
+      });
+    return true;
+  }
+
   if (message.type === "GET_STATUS") {
     void refreshBackendStatus(false).then(sendResponse);
     return true;
@@ -898,7 +920,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 
   if (message.type === "SAVE_CURRENT_PAGE_SOURCE") {
-    void enqueueTask(() => handleSaveCurrentPageSource(message.payload?.saveMode ?? "ai"))
+    void enqueueTask(() => handleSaveCurrentPageSource(message.payload?.saveMode ?? "raw"))
       .then(sendResponse)
       .catch((error) => {
         console.error("SaveMyContext page capture failed", error);
@@ -1640,8 +1662,8 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendVersion: capabilities.version,
       backendAuthMode: capabilities.auth.mode,
       backendValidationError: null,
-      backendMarkdownRoot: capabilities.storage.markdown_root,
-      backendVaultRoot: capabilities.storage.vault_root,
+      backendMarkdownRoot: capabilities.storage.markdown_root ?? undefined,
+      backendVaultRoot: capabilities.storage.vault_root ?? undefined,
       processingMode: processing.mode,
       processingWorkerModel: processing.worker_model,
       processingPendingCount: processing.pending_count,
@@ -1670,6 +1692,28 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       error: message
     };
   }
+}
+
+async function handleSaveConnectionBundle(payload: {
+  connectionString: string;
+  verificationCode?: string;
+  settings: Partial<ExtensionSettings>;
+}): Promise<SaveConnectionBundleResponse> {
+  const bundle = parseConnectionString(payload.connectionString);
+  const redeemed = await redeemConnectionBundle(bundle, {
+    installationId: await getInstallationId(),
+    clientName: await extensionClientName(),
+    verificationCode: payload.verificationCode
+  });
+  const response = await handleSaveSettings({
+    ...payload.settings,
+    backendUrl: bundle.baseUrl,
+    backendToken: redeemed.token
+  });
+  return {
+    ...response,
+    redeemed
+  };
 }
 
 async function handleSaveKnowledgePath(markdownRoot: string): Promise<SaveKnowledgePathResponse> {

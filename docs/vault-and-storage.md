@@ -29,7 +29,7 @@ The exact paths depend on how you run SaveMyContext.
 You can print the active paths with:
 
 ```bash
-savemycontext config path
+smc config path
 ```
 
 ## Vault layout
@@ -110,7 +110,7 @@ This makes the vault easier to audit and roll through over time.
 To move the vault to a new Markdown root:
 
 ```bash
-savemycontext config set --markdown-dir /absolute/path
+smc config set --markdown-dir /absolute/path
 ```
 
 You can also change the storage path from the extension settings, but that is an admin operation. In practice:

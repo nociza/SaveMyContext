@@ -155,7 +155,7 @@ function PopupApp() {
     try {
       const response = await sendRuntimeMessage<SourceCaptureResponse>({
         type: "SAVE_CURRENT_PAGE_SOURCE",
-        payload: { saveMode: "ai" }
+        payload: { saveMode: "raw" }
       });
 
       if (!response.ok) throw new Error(response.error ?? "Could not save the current page.");

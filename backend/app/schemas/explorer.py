@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import ProviderName, SessionCategory
 from app.schemas.session import SessionRead
@@ -62,6 +62,12 @@ class ExplorerGraphNode(BaseModel):
     category: SessionCategory | None = None
     updated_at: datetime | None = None
     note_path: str | None = None
+    degree: int = 0
+    centrality: float = 0
+    community_id: str | None = None
+    community_label: str | None = None
+    evidence_count: int = 0
+    evidence: list["ExplorerGraphEvidence"] = Field(default_factory=list)
 
 
 class ExplorerGraphEdge(BaseModel):
@@ -71,6 +77,21 @@ class ExplorerGraphEdge(BaseModel):
     label: str | None = None
     weight: int
     session_ids: list[str]
+    predicate_count: int = 1
+    evidence_count: int = 0
+    evidence: list["ExplorerGraphEvidence"] = Field(default_factory=list)
+
+
+class ExplorerGraphEvidence(BaseModel):
+    session_id: str
+    title: str | None = None
+    provider: ProviderName | None = None
+    updated_at: datetime | None = None
+    note_path: str | None = None
+    triplet_id: str | None = None
+    predicate: str | None = None
+    confidence: float | None = None
+    snippet: str | None = None
 
 
 class CategoryGraph(BaseModel):
@@ -82,6 +103,26 @@ class CategoryGraph(BaseModel):
     edge_count: int
     nodes: list[ExplorerGraphNode]
     edges: list[ExplorerGraphEdge]
+
+
+class ExplorerGraphPath(BaseModel):
+    node_ids: list[str]
+    edge_ids: list[str]
+    nodes: list[ExplorerGraphNode]
+    edges: list[ExplorerGraphEdge]
+    hop_count: int
+    score: float
+    evidence_session_ids: list[str]
+
+
+class CategoryGraphPath(BaseModel):
+    category: SessionCategory
+    scope_kind: Literal["default", "custom"] = "default"
+    scope_label: str
+    dominant_category: SessionCategory
+    source: str
+    target: str
+    paths: list[ExplorerGraphPath]
 
 
 class SessionNoteRead(SessionRead):

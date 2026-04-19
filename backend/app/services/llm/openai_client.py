@@ -16,7 +16,8 @@ class OpenAIClient(LLMClient):
         settings = get_settings()
         self.api_key = settings.openai_api_key
         self.base_url = settings.resolved_openai_base_url.rstrip("/")
-        self.model = settings.resolved_openai_model
+        self.models = settings.resolved_openai_model_candidates
+        self.model = self.models[0]
         self.site_url = settings.openai_site_url or settings.public_url
         self.app_name = settings.openai_app_name
         self.timeout = settings.request_timeout_seconds
@@ -60,11 +61,42 @@ class OpenAIClient(LLMClient):
         system_prompt: str,
         user_prompt: str,
     ) -> dict[str, Any]:
+        last_error: httpx.RequestError | httpx.HTTPStatusError | None = None
+        for model in self.models:
+            try:
+                return await self._request_json_completion_for_model(
+                    client,
+                    headers=headers,
+                    model=model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
+            except httpx.HTTPStatusError as exc:
+                if not self._should_retry_with_next_model(exc):
+                    raise
+                last_error = exc
+            except httpx.RequestError as exc:
+                last_error = exc
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("No OpenAI-compatible model is configured.")
+
+    async def _request_json_completion_for_model(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        headers: dict[str, str],
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict[str, Any]:
         try:
             return await self._post_completion(
                 client,
                 headers=headers,
                 payload=self._build_payload(
+                    model=model,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     prefer_json_mode=True,
@@ -77,6 +109,7 @@ class OpenAIClient(LLMClient):
                 client,
                 headers=headers,
                 payload=self._build_payload(
+                    model=model,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     prefer_json_mode=False,
@@ -101,12 +134,13 @@ class OpenAIClient(LLMClient):
     def _build_payload(
         self,
         *,
+        model: str,
         system_prompt: str,
         user_prompt: str,
         prefer_json_mode: bool,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": model,
             "temperature": 0,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -122,6 +156,22 @@ class OpenAIClient(LLMClient):
             return False
         message = exc.response.text.lower()
         return "response_format" in message or "json_object" in message or "json schema" in message
+
+    def _should_retry_with_next_model(self, exc: httpx.HTTPStatusError) -> bool:
+        status_code = exc.response.status_code
+        if status_code in {402, 404, 408, 409, 429} or status_code >= 500:
+            return True
+        message = exc.response.text.lower()
+        return any(
+            marker in message
+            for marker in (
+                "model not found",
+                "no endpoints found",
+                "rate limit",
+                "temporarily unavailable",
+                "provider returned error",
+            )
+        )
 
     def _extract_content(self, data: dict[str, Any]) -> str:
         message = data["choices"][0]["message"]["content"]

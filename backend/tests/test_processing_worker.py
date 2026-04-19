@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.config import DEFAULT_OPENROUTER_MODEL, get_settings
 from app.models import ChatSession
 from app.models.base import Base
 from app.models.enums import MessageRole, ProviderName
-from app.core.config import get_settings
 from app.schemas.ingest import IngestDiffRequest, IngestMessage
 from app.services.ingest import IngestService
-from app.services.processing_worker import ExtensionBrowserProcessingService
+from app.services.processing_worker import ExtensionBrowserProcessingService, immediate_processing_model
 
 
 @pytest.mark.asyncio
@@ -95,6 +95,17 @@ async def test_processing_worker_complete_applies_pipeline_result_batch_and_writ
         get_settings.cache_clear()
 
     await engine.dispose()
+
+
+def test_immediate_processing_model_uses_resolved_openrouter_default(monkeypatch) -> None:
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "auto")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-or-v1-test-secret")
+    get_settings.cache_clear()
+
+    try:
+        assert immediate_processing_model() == DEFAULT_OPENROUTER_MODEL
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

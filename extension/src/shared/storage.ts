@@ -18,6 +18,7 @@ const SYNC_STATE_KEY = "savemycontext.sync-state";
 const STATUS_KEY = "savemycontext.status";
 const HISTORY_SYNC_KEY = "savemycontext.history-sync";
 const PROCESSING_WORKER_KEY = "savemycontext.processing-worker";
+const INSTALLATION_ID_KEY = "savemycontext.installation-id";
 
 export const defaultSettings: ExtensionSettings = {
   backendUrl: "http://127.0.0.1:18888",
@@ -179,6 +180,19 @@ export async function saveSettings(update: Partial<ExtensionSettings>): Promise<
   return next;
 }
 
+export async function getInstallationId(): Promise<string> {
+  const stored = await chrome.storage.local.get(INSTALLATION_ID_KEY);
+  const current = stored[INSTALLATION_ID_KEY];
+  if (typeof current === "string" && current.trim()) {
+    return current;
+  }
+  const next = crypto.randomUUID();
+  await chrome.storage.local.set({
+    [INSTALLATION_ID_KEY]: next
+  });
+  return next;
+}
+
 export async function getSessionSyncState(sessionKey: string): Promise<SessionSyncState> {
   const allStates = await getAllSessionSyncStates();
   return allStates[sessionKey] ?? { seenMessageIds: [] };
@@ -234,8 +248,8 @@ export async function saveBackendValidation(
     backendProduct: capabilities?.product,
     backendVersion: capabilities?.version,
     backendAuthMode: capabilities?.auth.mode,
-    backendMarkdownRoot: capabilities?.storage.markdown_root,
-    backendVaultRoot: capabilities?.storage.vault_root,
+    backendMarkdownRoot: capabilities?.storage.markdown_root ?? undefined,
+    backendVaultRoot: capabilities?.storage.vault_root ?? undefined,
     backendValidationError: error
   });
 }

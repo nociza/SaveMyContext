@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from app.cli_paths import CLIPaths, default_cli_paths
+from app.core.config import DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_MODEL_FALLBACKS
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -19,7 +20,8 @@ DEFAULT_ENV_VALUES: dict[str, str] = {
     "SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION": "false",
     "SAVEMYCONTEXT_OPENAI_API_KEY": "",
     "SAVEMYCONTEXT_OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
-    "SAVEMYCONTEXT_OPENAI_MODEL": "openai/gpt-4.1-mini",
+    "SAVEMYCONTEXT_OPENAI_MODEL": DEFAULT_OPENROUTER_MODEL,
+    "SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS": ",".join(DEFAULT_OPENROUTER_MODEL_FALLBACKS),
     "SAVEMYCONTEXT_OPENAI_APP_NAME": "SaveMyContext",
     "SAVEMYCONTEXT_OPENAI_SITE_URL": "",
     "SAVEMYCONTEXT_GOOGLE_API_KEY": "",
