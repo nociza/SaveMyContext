@@ -98,6 +98,8 @@ const ACTION_ICON_PATHS: Record<number, string> = {
 const ACTION_ICON_SIZES = [16, 32, 48, 128] as const;
 const syncIconImageData = new Map<number, ImageData>();
 let actionIconMode: "default" | "syncing" = "default";
+const recentProviderVisitsByTabId = new Map<number, { pageUrl: string; startedAt: number }>();
+const RECENT_PROVIDER_VISIT_TTL_MS = 750;
 
 function refreshedProcessingLastError(status: SyncStatus, pendingCount: number): string | null {
   if (status.processingInProgress) {
@@ -155,6 +157,35 @@ function clearActiveChatContext(tabId: number | undefined): void {
   if (typeof tabId === "number") {
     activeChatContextsByTabId.delete(tabId);
   }
+}
+
+function wasRecentProviderVisit(tabId: number | undefined, pageUrl: string): boolean {
+  if (typeof tabId !== "number") {
+    return false;
+  }
+
+  const current = recentProviderVisitsByTabId.get(tabId);
+  if (!current) {
+    return false;
+  }
+
+  if (Date.now() - current.startedAt >= RECENT_PROVIDER_VISIT_TTL_MS) {
+    recentProviderVisitsByTabId.delete(tabId);
+    return false;
+  }
+
+  return current.pageUrl === pageUrl;
+}
+
+function rememberRecentProviderVisit(tabId: number | undefined, pageUrl: string): void {
+  if (typeof tabId !== "number") {
+    return;
+  }
+
+  recentProviderVisitsByTabId.set(tabId, {
+    pageUrl,
+    startedAt: Date.now()
+  });
 }
 
 function searchResultIdentity(result: BackendSearchResult): string {
@@ -334,16 +365,52 @@ async function setExtensionStatus(update: Partial<SyncStatus>): Promise<SyncStat
   return status;
 }
 
+function sameProviderList(left: ProviderName[] | undefined, right: ProviderName[]): boolean {
+  const resolvedLeft = left ?? [];
+  return (
+    resolvedLeft.length === right.length &&
+    resolvedLeft.every((provider, index) => provider === right[index])
+  );
+}
+
 async function getActiveHistorySyncProviders(
   overrides: Partial<Record<ProviderName, boolean>> = {}
 ): Promise<ProviderName[]> {
   const states = await Promise.all(
     HISTORY_SYNC_PROVIDERS.map(async (provider) => {
-      const inProgress = overrides[provider] ?? (await getProviderHistorySyncState(provider)).inProgress ?? false;
+      const override = overrides[provider];
+      if (typeof override === "boolean") {
+        return [provider, override] as const;
+      }
+
+      const state = await getProviderHistorySyncState(provider);
+      const inProgress = isFreshHistorySyncInProgress(state);
+      if (state.inProgress && !inProgress) {
+        await saveProviderHistorySyncState(provider, {
+          ...state,
+          inProgress: false
+        });
+      }
       return [provider, inProgress] as const;
     })
   );
   return states.filter(([, inProgress]) => inProgress).map(([provider]) => provider);
+}
+
+async function reconcileHistorySyncStatus(status: SyncStatus): Promise<SyncStatus> {
+  const activeProviders = await getActiveHistorySyncProviders();
+  const historySyncInProgress = activeProviders.length > 0;
+  if (
+    status.historySyncInProgress === historySyncInProgress &&
+    sameProviderList(status.historySyncActiveProviders, activeProviders)
+  ) {
+    return status;
+  }
+
+  return await setExtensionStatus({
+    historySyncInProgress,
+    historySyncActiveProviders: activeProviders
+  });
 }
 
 function clearRecoveredProviderDriftAlert(
@@ -862,7 +929,7 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
       validationKey === backendValidationLastKey &&
       now - backendValidationLastCompletedAt < BACKEND_VALIDATION_TTL_MS
     ) {
-      return refreshProcessingFields(settings, await getStatus());
+      return await reconcileHistorySyncStatus(await refreshProcessingFields(settings, await getStatus()));
     }
   }
 
@@ -904,7 +971,7 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
       });
       backendValidationLastKey = validationKey;
       backendValidationLastCompletedAt = Date.now();
-      return nextStatus;
+      return await reconcileHistorySyncStatus(nextStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const latestSettings = await getSettings();
@@ -927,7 +994,7 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
       });
       backendValidationLastKey = validationKey;
       backendValidationLastCompletedAt = Date.now();
-      return nextStatus;
+      return await reconcileHistorySyncStatus(nextStatus);
     } finally {
       if (backendValidationInFlightKey === validationKey && validationGeneration === backendValidationGeneration) {
         backendValidationInFlight = null;
@@ -1012,12 +1079,35 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearActiveChatContext(tabId);
+  recentProviderVisitsByTabId.delete(tabId);
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "loading" || typeof changeInfo.url === "string") {
     clearActiveChatContext(tabId);
   }
+
+  if (changeInfo.status !== "complete") {
+    return;
+  }
+
+  const pageUrl = changeInfo.url ?? tab.url;
+  if (!pageUrl) {
+    return;
+  }
+
+  const provider = detectProviderFromUrl(pageUrl);
+  if (!provider) {
+    return;
+  }
+
+  void handlePageVisit(
+    {
+      provider,
+      pageUrl
+    },
+    tabId
+  );
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -1494,6 +1584,10 @@ async function handlePageVisit(
     return { triggered: false, reason: "missing-tab-id" };
   }
 
+  if (wasRecentProviderVisit(tabId, payload.pageUrl)) {
+    return { triggered: false, reason: "recent-page-visit" };
+  }
+
   const currentState = await getProviderHistorySyncState(payload.provider);
   if (isFreshHistorySyncInProgress(currentState)) {
     return { triggered: false, reason: "already-in-progress" };
@@ -1506,6 +1600,7 @@ async function handlePageVisit(
     : extractExternalSessionIds(payload.provider, await getProviderSessionSyncStates(payload.provider), settings);
   const previousTopSessionIds = activeWatermarks;
   const now = new Date().toISOString();
+  rememberRecentProviderVisit(tabId, payload.pageUrl);
   await saveProviderHistorySyncState(payload.provider, {
     ...currentState,
     inProgress: true,

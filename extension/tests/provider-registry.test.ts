@@ -38,4 +38,10 @@ describe("providerRegistry", () => {
     expect(detectProviderFromUrl("https://notchatgpt.com/backend-api/conversation/abc123")).toBeNull();
     expect(detectProviderFromUrl("https://chatgpt.com/c/example")).toBe("chatgpt");
   });
+
+  it("does not classify generic Google, OpenAI, or Twitter hosts as provider pages", () => {
+    expect(detectProviderFromUrl("https://docs.google.com/document/d/123/edit")).toBeNull();
+    expect(detectProviderFromUrl("https://platform.openai.com/docs/overview")).toBeNull();
+    expect(detectProviderFromUrl("https://twitter.com/home")).toBeNull();
+  });
 });

@@ -17,7 +17,6 @@ export default defineConfig({
       input: {
         background: resolve(rootDir, "src/background/index.ts"),
         category: resolve(rootDir, "category.html"),
-        content: resolve(rootDir, "src/content/index.ts"),
         dashboard: resolve(rootDir, "dashboard.html"),
         note: resolve(rootDir, "note.html"),
         options: resolve(rootDir, "options.html"),

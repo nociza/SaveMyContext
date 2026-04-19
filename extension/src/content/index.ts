@@ -16,6 +16,8 @@ import { createSelectionCaptureController } from "./selection-capture";
 const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 const BRIDGE_CONNECT_ATTEMPT_TIMEOUT_MS = 400;
 const BRIDGE_CONNECT_RETRY_INTERVAL_MS = 50;
+const RUNTIME_MESSAGE_RETRY_ATTEMPTS = 4;
+const RUNTIME_MESSAGE_RETRY_INTERVAL_MS = 150;
 
 let bridgePort: MessagePort | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
@@ -40,10 +42,16 @@ const pendingProxyRequests = new Map<
 
 function enqueueRuntimeMessage(message: RuntimeMessage): void {
   const dispatch = async (): Promise<void> => {
-    try {
-      await chrome.runtime.sendMessage(message);
-    } catch {
-      // The background service worker may be restarting; the next message will retry naturally.
+    for (let attempt = 0; attempt < RUNTIME_MESSAGE_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        await chrome.runtime.sendMessage(message);
+        return;
+      } catch {
+        if (attempt >= RUNTIME_MESSAGE_RETRY_ATTEMPTS - 1) {
+          return;
+        }
+        await sleep(RUNTIME_MESSAGE_RETRY_INTERVAL_MS);
+      }
     }
   };
 
@@ -207,7 +215,7 @@ function notifyPageVisit(): void {
       pageUrl: window.location.href
     }
   };
-  void chrome.runtime.sendMessage(message).catch(() => undefined);
+  enqueueRuntimeMessage(message);
 }
 
 function installNavigationObserver(): void {
@@ -235,6 +243,15 @@ function installNavigationObserver(): void {
 
   window.addEventListener("popstate", notifyIfChanged);
   window.addEventListener("hashchange", notifyIfChanged);
+}
+
+function installPageVisitObserver(): void {
+  const notify = (): void => {
+    notifyPageVisit();
+  };
+
+  document.addEventListener("DOMContentLoaded", notify, { once: true });
+  window.addEventListener("pageshow", notify);
 }
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
@@ -327,4 +344,5 @@ window.addEventListener("beforeunload", () => {
 
 void ensureBridgeReady().catch(() => undefined);
 installNavigationObserver();
+installPageVisitObserver();
 notifyPageVisit();

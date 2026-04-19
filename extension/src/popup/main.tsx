@@ -22,6 +22,7 @@ import {
   providerLabels,
   titleFromSession
 } from "../shared/explorer";
+import { detectProviderFromUrl } from "../shared/provider";
 import type {
   BackendDashboardSummary,
   BackendSessionListItem,
@@ -79,19 +80,6 @@ function summaryOrNull(summary: BackendDashboardSummary | undefined, status: Syn
   return summary;
 }
 
-function providerFromUrl(urlString: string | undefined): "chatgpt" | "gemini" | "grok" | null {
-  if (!urlString) return null;
-  try {
-    const host = new URL(urlString).hostname;
-    if (host.includes("chatgpt") || host.includes("openai")) return "chatgpt";
-    if (host.includes("gemini") || host.includes("google")) return "gemini";
-    if (host.includes("grok") || host.includes("x.ai") || host.includes("twitter")) return "grok";
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 function PopupApp() {
   const { settings, status, loading, error, reload } = useExtensionBootstrap();
   const [captureStatus, setCaptureStatus] = useState("");
@@ -139,10 +127,10 @@ function PopupApp() {
       }));
   }, [summary]);
 
-  const activeProvider = providerFromUrl(activeTabInfo?.url);
+  const activeProvider = detectProviderFromUrl(activeTabInfo?.url ?? "");
   const isProviderTab = Boolean(activeProvider);
   const primaryLabel = isProviderTab
-    ? `Capture this ${providerLabels[activeProvider as "chatgpt"]} chat`
+    ? `Capture this ${providerLabels[activeProvider]} chat`
     : "Save this page";
 
   const lastErrorText = status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None";
@@ -152,20 +140,16 @@ function PopupApp() {
   const historySyncProcessed = status?.historySyncProcessedCount ?? 0;
   const historySyncTotal = status?.historySyncTotalCount;
   const historySyncSkipped = status?.historySyncSkippedCount ?? 0;
-  const historySyncStatusProviders = status?.historySyncActiveProviders?.length
-    ? status.historySyncActiveProviders
-    : status?.historySyncProvider
-      ? [status.historySyncProvider]
-      : [];
-  const historySyncProviderLabel = historySyncStatusProviders.length
-    ? historySyncStatusProviders.map((provider) => providerLabels[provider]).join(", ")
+  const historySyncCurrentProvider = status?.historySyncProvider ?? null;
+  const historySyncProviderLabel = historySyncCurrentProvider
+    ? providerLabels[historySyncCurrentProvider]
     : activeProvider
       ? providerLabels[activeProvider]
       : "provider";
   const showHistorySyncBanner = Boolean(
     historySyncing &&
       activeProvider &&
-      historySyncStatusProviders.includes(activeProvider)
+      historySyncCurrentProvider === activeProvider
   );
   const historySyncKnownTotal = typeof historySyncTotal === "number" && historySyncTotal > 0 ? historySyncTotal : null;
   const historySyncProgressCount = historySyncKnownTotal !== null
