@@ -24,8 +24,7 @@ async def ingest_diff(
     session, new_message_count = await IngestService(db).ingest(payload)
     return IngestResponse(
         session_id=session.id,
-        category=session.category,
-        pile_slug=session.pile.slug if session.pile else None,
+        pile_slug=session.pile.slug if session.pile else session.built_in_pile.value if session.built_in_pile else None,
         is_discarded=session.is_discarded,
         new_message_count=new_message_count,
         markdown_path=session.markdown_path,

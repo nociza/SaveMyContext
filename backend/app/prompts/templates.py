@@ -43,7 +43,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         description="Routes a transcript into the built-in journal, factual, ideas, todo, or discarded piles.",
         system_prompt=(
             "You classify transcripts into one of these buckets: journal, factual, ideas, todo, or discarded. "
-            "Return JSON with keys category and reason."
+            "Return JSON with keys pile and reason."
         ),
         user_prompt=(
             "Classify this transcript using the rules below. Pick the single pile that best fits the "
@@ -53,7 +53,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         ),
         variables=(
             PromptVariableDefinition("built_in_pile_rules", "The built-in routing rules for journal, factual, ideas, and todo."),
-            PromptVariableDefinition("discard_addendum_block", "Optional extra guidance for auto-discard categories."),
+            PromptVariableDefinition("discard_addendum_block", "Optional extra guidance for auto-discard pile hints."),
             PromptVariableDefinition("transcript", "The plain transcript text."),
         ),
         order=10,
@@ -259,7 +259,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         description="Cleans and classifies saved page or selection captures.",
         system_prompt=(
             "You clean captured web content into faithful Markdown and classify it into one of four buckets: "
-            "journal, factual, ideas, or todo. Return JSON with keys title, category, classification_reason, "
+            "journal, factual, ideas, or todo. Return JSON with keys title, pile, classification_reason, "
             "summary, and cleaned_markdown. Keep cleaned_markdown concise but faithful. Do not invent facts."
         ),
         user_prompt=(
@@ -294,12 +294,12 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "Use fast mode. Do not use extended reasoning, hidden chain-of-thought, or thinking mode.\n"
             "Treat each batch as a fresh independent task.\n"
             "Return exactly one JSON object with this shape:\n"
-            "{\"results\":[{\"task_key\":\"task_1\",\"category\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"]}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\"}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\"}|null}]}\n"
+            "{\"results\":[{\"task_key\":\"task_1\",\"pile\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"]}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\"}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\"}|null}]}\n"
             "The results array must contain exactly one item for each task and must use the same task_key values.\n"
-            "If category is journal, journal is required and factual_triplets must be empty and idea null.\n"
-            "If category is todo, todo is required and must contain the full updated markdown for the shared to-do list after applying that task.\n"
-            "If category is factual, factual_triplets may be non-empty and journal and idea must be null.\n"
-            "If category is ideas, idea is required and journal must be null and factual_triplets must be empty.\n"
+            "If pile is journal, journal is required and factual_triplets must be empty and idea null.\n"
+            "If pile is todo, todo is required and must contain the full updated markdown for the shared to-do list after applying that task.\n"
+            "If pile is factual, factual_triplets may be non-empty and journal and idea must be null.\n"
+            "If pile is ideas, idea is required and journal must be null and factual_triplets must be empty.\n"
             "If multiple tasks are classified as todo, apply them in task order against the same shared list and return each task's cumulative updated_markdown.\n"
             "Keep every result grounded in its transcript. Do not invent facts.\n"
             "Keep the JSON compact and return no prose."

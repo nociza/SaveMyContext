@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import ProviderName, SessionCategory
+from app.models.enums import ProviderName, BuiltInPileSlug
 from app.schemas.session import SessionRead
 
 
@@ -24,11 +24,11 @@ class ActivityBucket(BaseModel):
     count: int
 
 
-class CategoryStats(BaseModel):
-    category: SessionCategory
+class PileStats(BaseModel):
+    pile_slug: BuiltInPileSlug
     scope_kind: Literal["default", "custom"] = "default"
     scope_label: str
-    dominant_category: SessionCategory
+    dominant_pile_slug: BuiltInPileSlug
     total_sessions: int
     total_messages: int
     total_triplets: int
@@ -39,7 +39,7 @@ class CategoryStats(BaseModel):
     notes_with_idea_summary: int
     notes_with_journal_entry: int
     notes_with_todo_summary: int
-    system_category_counts: list["CategorySystemCount"]
+    built_in_pile_counts: list["BuiltInPileCount"]
     provider_counts: list[ProviderCount]
     activity: list[ActivityBucket]
     top_tags: list[LabelCount]
@@ -47,8 +47,8 @@ class CategoryStats(BaseModel):
     top_predicates: list[LabelCount]
 
 
-class CategorySystemCount(BaseModel):
-    category: SessionCategory
+class BuiltInPileCount(BaseModel):
+    pile_slug: BuiltInPileSlug
     count: int
 
 
@@ -59,7 +59,7 @@ class ExplorerGraphNode(BaseModel):
     size: int
     session_ids: list[str]
     provider: ProviderName | None = None
-    category: SessionCategory | None = None
+    pile_slug: BuiltInPileSlug | None = None
     updated_at: datetime | None = None
     note_path: str | None = None
     degree: int = 0
@@ -94,11 +94,11 @@ class ExplorerGraphEvidence(BaseModel):
     snippet: str | None = None
 
 
-class CategoryGraph(BaseModel):
-    category: SessionCategory
+class PileGraph(BaseModel):
+    pile_slug: BuiltInPileSlug
     scope_kind: Literal["default", "custom"] = "default"
     scope_label: str
-    dominant_category: SessionCategory
+    dominant_pile_slug: BuiltInPileSlug
     node_count: int
     edge_count: int
     nodes: list[ExplorerGraphNode]
@@ -115,11 +115,11 @@ class ExplorerGraphPath(BaseModel):
     evidence_session_ids: list[str]
 
 
-class CategoryGraphPath(BaseModel):
-    category: SessionCategory
+class PileGraphPath(BaseModel):
+    pile_slug: BuiltInPileSlug
     scope_kind: Literal["default", "custom"] = "default"
     scope_label: str
-    dominant_category: SessionCategory
+    dominant_pile_slug: BuiltInPileSlug
     source: str
     target: str
     paths: list[ExplorerGraphPath]

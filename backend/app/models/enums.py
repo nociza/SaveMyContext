@@ -9,7 +9,7 @@ class ProviderName(StrEnum):
     GROK = "grok"
 
 
-class SessionCategory(StrEnum):
+class BuiltInPileSlug(StrEnum):
     JOURNAL = "journal"
     FACTUAL = "factual"
     IDEAS = "ideas"

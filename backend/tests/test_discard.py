@@ -128,9 +128,9 @@ async def test_recover_from_discard_runs_classification(tmp_path, monkeypatch) -
             assert recovered.is_discarded is False
             assert recovered.discarded_reason is None
             # The factual heuristic should pick the FastAPI/uvloop content as factual.
-            from app.models import SessionCategory
+            from app.models import BuiltInPileSlug
 
-            assert recovered.category in {SessionCategory.FACTUAL, SessionCategory.JOURNAL, SessionCategory.IDEAS}
+            assert recovered.built_in_pile in {BuiltInPileSlug.FACTUAL, BuiltInPileSlug.JOURNAL, BuiltInPileSlug.IDEAS}
             assert recovered.pile_id is not None
     finally:
         get_settings.cache_clear()
@@ -237,11 +237,11 @@ async def test_process_applies_multi_pile_segments(tmp_path, monkeypatch) -> Non
             processed = await processor.process(session_id)
             await session.commit()
 
-            from app.models import SessionCategory
+            from app.models import BuiltInPileSlug
 
             # Journal and factual segments are the same size, so the dominant one is
             # the first recorded (journal) per stable ordering.
-            assert processed.category in {SessionCategory.JOURNAL, SessionCategory.FACTUAL}
+            assert processed.built_in_pile in {BuiltInPileSlug.JOURNAL, BuiltInPileSlug.FACTUAL}
             assert processed.segments is not None
             assert [s["pile_slug"] for s in processed.segments] == ["journal", "factual"]
             assert "Walked with mom at the park." in (processed.journal_entry or "")

@@ -6,7 +6,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import ChatSession, FactTriplet, Pile, PileKind, SessionCategory
+from app.models import ChatSession, FactTriplet, Pile, PileKind, BuiltInPileSlug
 from app.models.base import utcnow
 from app.schemas.processing import SegmentRouting, TripletResult
 from app.schemas.processing_worker import SessionPipelineResult
@@ -63,14 +63,14 @@ class SessionProcessor:
             auto_discard_categories=auto_discard_categories,
         )
 
-        if classification.category == SessionCategory.DISCARDED:
-            reason = classification.reason or "LLM matched an auto-discard category."
+        if classification.pile == BuiltInPileSlug.DISCARDED:
+            reason = classification.reason or "LLM matched an auto-discard pile hint."
             return await self.route_to_discard(session_id, reason=reason)
 
-        if classification.category == SessionCategory.JOURNAL:
-            prompt_addendum = await self._prompt_addendum_for_category(classification.category)
+        if classification.pile == BuiltInPileSlug.JOURNAL:
+            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
             result = SessionPipelineResult(
-                category=classification.category,
+                pile=classification.pile,
                 classification_reason=classification.reason,
                 journal=await self._invoke_pipeline(
                     self.orchestrator.journal,
@@ -78,23 +78,23 @@ class SessionProcessor:
                     prompt_addendum=prompt_addendum,
                 ),
             )
-        elif classification.category == SessionCategory.FACTUAL:
-            prompt_addendum = await self._prompt_addendum_for_category(classification.category)
+        elif classification.pile == BuiltInPileSlug.FACTUAL:
+            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
             factual = await self._invoke_pipeline(
                 self.orchestrator.factual,
                 session.messages,
                 prompt_addendum=prompt_addendum,
             )
             result = SessionPipelineResult(
-                category=classification.category,
+                pile=classification.pile,
                 classification_reason=classification.reason,
                 factual_triplets=factual.triplets,
             )
-        elif classification.category == SessionCategory.TODO:
+        elif classification.pile == BuiltInPileSlug.TODO:
             todo_markdown = TodoListService(base_dir=self.base_dir).read_markdown()
-            prompt_addendum = await self._prompt_addendum_for_category(classification.category)
+            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
             result = SessionPipelineResult(
-                category=classification.category,
+                pile=classification.pile,
                 classification_reason=classification.reason,
                 todo=await self._invoke_pipeline(
                     self.orchestrator.todo,
@@ -104,9 +104,9 @@ class SessionProcessor:
                 ),
             )
         else:
-            prompt_addendum = await self._prompt_addendum_for_category(classification.category)
+            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
             result = SessionPipelineResult(
-                category=classification.category,
+                pile=classification.pile,
                 classification_reason=classification.reason,
                 idea=await self._invoke_pipeline(
                     self.orchestrator.ideas,
@@ -175,7 +175,7 @@ class SessionProcessor:
             attributes=attributes,
             custom_prompt_addendum=custom_addendum,
         )
-        session.category = None
+        session.built_in_pile = None
         session.pile_id = target.id
         session.is_discarded = False
         session.discarded_reason = None
@@ -197,7 +197,7 @@ class SessionProcessor:
         segments: list[SegmentRouting],
     ) -> ChatSession:
         """Run each segment through its pile's pipeline and fold the results onto
-        the session. The session's primary category/pile becomes the dominant
+        the session. The session's primary built-in pile / pile becomes the dominant
         segment (largest by message count); per-segment outputs live on
         `ChatSession.segments` for the markdown renderer and dashboards.
         """
@@ -280,16 +280,16 @@ class SessionProcessor:
         if not segment_records:
             return session
 
-        # Pick the dominant segment as the session's primary pile/category.
+        # Pick the dominant segment as the session's primary pile.
         dominant = max(
             segment_records,
             key=lambda record: int(record["end_index"]) - int(record["start_index"]) + 1,
         )
         dominant_slug = str(dominant["pile_slug"])
-        dominant_category = BUILT_IN_SLUG_TO_CATEGORY.get(dominant_slug)
+        dominant_pile = BUILT_IN_SLUG_TO_CATEGORY.get(dominant_slug)
 
-        session.category = dominant_category
-        session.pile_id = await self._resolve_pile_id_for_category(dominant_category)
+        session.built_in_pile = dominant_pile
+        session.pile_id = await self._resolve_pile_id_for_built_in_pile(dominant_pile)
         session.is_discarded = False
         session.discarded_reason = None
         session.classification_reason = str(dominant.get("reason") or "Segmented classification.")
@@ -337,8 +337,8 @@ class SessionProcessor:
         await self.db.flush()
         return session
 
-    async def _prompt_addendum_for_category(self, category: SessionCategory | None) -> str | None:
-        pile = await self.piles.resolve_pile_for_category(category)
+    async def _prompt_addendum_for_built_in_pile(self, built_in_pile: BuiltInPileSlug | None) -> str | None:
+        pile = await self.piles.resolve_pile_for_built_in_pile(built_in_pile)
         return pipeline_prompt_addendum_from_config(pile.pipeline_config if pile else None)
 
     async def _built_in_prompt_addendum_map(self) -> dict[str, str]:
@@ -366,7 +366,7 @@ class SessionProcessor:
 
     async def mark_pending(self, session_id: str) -> ChatSession:
         session = await self._load_session(session_id)
-        session.category = None
+        session.built_in_pile = None
         session.pile_id = None
         session.is_discarded = False
         session.discarded_reason = None
@@ -384,9 +384,9 @@ class SessionProcessor:
 
     async def apply_pipeline_result(self, session_id: str, result: SessionPipelineResult) -> ChatSession:
         session = await self._load_session(session_id)
-        session.category = result.category
-        session.pile_id = await self._resolve_pile_id_for_category(result.category)
-        session.is_discarded = result.category == SessionCategory.DISCARDED
+        session.built_in_pile = result.pile
+        session.pile_id = await self._resolve_pile_id_for_built_in_pile(result.pile)
+        session.is_discarded = result.pile == BuiltInPileSlug.DISCARDED
         session.classification_reason = result.classification_reason
         session.segments = None
         session.journal_entry = None
@@ -394,20 +394,20 @@ class SessionProcessor:
         session.idea_summary = None
         session.share_post = None
 
-        if result.category == SessionCategory.JOURNAL and result.journal is not None:
+        if result.pile == BuiltInPileSlug.JOURNAL and result.journal is not None:
             action_lines = [f"- {item}" for item in result.journal.action_items]
             if action_lines:
                 session.journal_entry = f"{result.journal.entry}\n\nAction Items:\n" + "\n".join(action_lines)
             else:
                 session.journal_entry = result.journal.entry
             await self._replace_triplets(session, [])
-        elif result.category == SessionCategory.TODO and result.todo is not None:
+        elif result.pile == BuiltInPileSlug.TODO and result.todo is not None:
             TodoListService(base_dir=self.base_dir).write_markdown(result.todo.updated_markdown)
             session.todo_summary = result.todo.summary
             await self._replace_triplets(session, [])
-        elif result.category == SessionCategory.FACTUAL:
+        elif result.pile == BuiltInPileSlug.FACTUAL:
             await self._replace_triplets(session, result.factual_triplets)
-        elif result.category == SessionCategory.IDEAS and result.idea is not None:
+        elif result.pile == BuiltInPileSlug.IDEAS and result.idea is not None:
             session.idea_summary = result.idea.model_dump(exclude={"share_post"})
             session.share_post = result.idea.share_post
             await self._replace_triplets(session, [])
@@ -421,7 +421,7 @@ class SessionProcessor:
     async def route_to_discard(self, session_id: str, *, reason: str) -> ChatSession:
         session = await self._load_session(session_id)
         discarded_pile = await self.piles.discarded_pile()
-        session.category = SessionCategory.DISCARDED
+        session.built_in_pile = BuiltInPileSlug.DISCARDED
         session.pile_id = discarded_pile.id if discarded_pile else None
         session.is_discarded = True
         session.discarded_reason = reason
@@ -443,15 +443,15 @@ class SessionProcessor:
             return session
         session.is_discarded = False
         session.discarded_reason = None
-        session.category = None
+        session.built_in_pile = None
         session.pile_id = None
         session.classification_reason = None
         session.last_processed_at = None
         await self.db.flush()
         return await self.process(session_id)
 
-    async def _resolve_pile_id_for_category(self, category: SessionCategory | None) -> str | None:
-        slug = CATEGORY_TO_BUILT_IN_SLUG.get(category) if category else None
+    async def _resolve_pile_id_for_built_in_pile(self, built_in_pile: BuiltInPileSlug | None) -> str | None:
+        slug = CATEGORY_TO_BUILT_IN_SLUG.get(built_in_pile) if built_in_pile else None
         if not slug:
             return None
         pile = await self.piles.get_by_slug(slug)
@@ -474,8 +474,8 @@ class SessionProcessor:
 
         if PileService.is_built_in(target):
             # Built-in piles use the existing typed pipeline. Fall back to a fresh
-            # process() call and overwrite the session's category to match.
-            session.category = PileService.category_for_pile(target)
+            # process() call and overwrite the session's built-in pile to match.
+            session.built_in_pile = PileService.built_in_pile_for_pile(target)
             session.pile_id = target.id
             await self.db.flush()
             return await self.process(session_id)
@@ -488,7 +488,7 @@ class SessionProcessor:
             attributes=attributes,
             custom_prompt_addendum=custom_addendum if isinstance(custom_addendum, str) else None,
         )
-        session.category = None
+        session.built_in_pile = None
         session.pile_id = target.id
         session.is_discarded = False
         session.discarded_reason = None

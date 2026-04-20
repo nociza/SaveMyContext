@@ -1,6 +1,6 @@
 from app.models.api_token import APIToken
 from app.models.connection_grant import ConnectionGrant
-from app.models.enums import BUILT_IN_PILE_KINDS, MessageRole, PileKind, ProviderName, SessionCategory
+from app.models.enums import BUILT_IN_PILE_KINDS, MessageRole, PileKind, ProviderName, BuiltInPileSlug
 from app.models.message import ChatMessage
 from app.models.pile import Pile
 from app.models.prompt_template import PromptTemplate
@@ -22,7 +22,7 @@ __all__ = [
     "PileKind",
     "ProviderName",
     "PromptTemplate",
-    "SessionCategory",
+    "BuiltInPileSlug",
     "SourceCapture",
     "SyncEvent",
     "User",

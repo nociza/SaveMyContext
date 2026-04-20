@@ -137,13 +137,13 @@ async def test_apply_schema_migrations_backfills_pile_id_from_category(tmp_path)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    from app.models import ChatSession, ProviderName, SessionCategory
+    from app.models import ChatSession, ProviderName, BuiltInPileSlug
 
     async with session_factory() as session:
         legacy = ChatSession(
             provider=ProviderName.GEMINI,
             external_session_id="legacy-1",
-            category=SessionCategory.JOURNAL,
+            built_in_pile=BuiltInPileSlug.JOURNAL,
             last_captured_at=datetime(2026, 4, 18, tzinfo=timezone.utc),
         )
         session.add(legacy)

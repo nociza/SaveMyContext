@@ -243,10 +243,10 @@ describe("backend validation helpers", () => {
         total_sync_events: 3,
         active_tokens: 0,
         latest_sync_at: "2026-04-14T00:00:00Z",
-        categories: [
-          { category: "factual", count: 1 },
-          { category: "ideas", count: 1 },
-          { category: "todo", count: 1 }
+        piles: [
+          { pile_slug: "factual", count: 1 },
+          { pile_slug: "ideas", count: 1 },
+          { pile_slug: "todo", count: 1 }
         ]
       })
     }));
@@ -278,7 +278,7 @@ describe("backend validation helpers", () => {
       }
     });
     expect(summary.total_sessions).toBe(3);
-    expect(summary.categories).toHaveLength(3);
+    expect(summary.piles).toHaveLength(3);
   });
 
   it("fetches knowledge search results with encoded query params", async () => {
@@ -392,7 +392,7 @@ describe("backend validation helpers", () => {
         capture_kind: "selection",
         save_mode: "ai",
         processed: true,
-        category: "factual",
+        pile_slug: "factual",
         markdown_path: "/srv/knowledge/SaveMyContext/Captures/selection--rust-ownership-note--capture.md",
         raw_source_path: "/srv/knowledge/SaveMyContext/Sources/selection--rust-ownership-note--capture--source.md"
       })
@@ -455,7 +455,7 @@ describe("backend validation helpers", () => {
       })
     });
     expect(response.ok).toBe(true);
-    expect(response.category).toBe("factual");
+    expect(response.pile_slug).toBe("factual");
     expect(response.sourceId).toBe("capture-1");
   });
 });

@@ -11,7 +11,7 @@ from app.api.routes_dashboard import router as dashboard_router
 from app.api.routes_sessions import router as sessions_router
 from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, SessionCategory
+from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, BuiltInPileSlug
 from app.models.base import Base
 from app.services.graph import entity_id
 
@@ -42,7 +42,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 provider=ProviderName.GEMINI,
                 external_session_id="session-factual",
                 title="SQLite search design",
-                category=SessionCategory.FACTUAL,
+                built_in_pile=BuiltInPileSlug.FACTUAL,
                 markdown_path=str(factual_note_path),
                 source_url="https://example.com/sqlite",
                 classification_reason="Grounded factual note.",
@@ -55,7 +55,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 provider=ProviderName.GEMINI,
                 external_session_id="session-idea-1",
                 title="Capability badge workflow",
-                category=SessionCategory.IDEAS,
+                built_in_pile=BuiltInPileSlug.IDEAS,
                 source_url="https://example.com/badge",
                 idea_summary={
                     "core_idea": "Build a workflow badge for the agent.",
@@ -71,7 +71,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 provider=ProviderName.GROK,
                 external_session_id="session-idea-2",
                 title="Workflow graph for capability pages",
-                category=SessionCategory.IDEAS,
+                built_in_pile=BuiltInPileSlug.IDEAS,
                 source_url="https://example.com/workflow-graph",
                 idea_summary={
                     "core_idea": "Use a graph to connect capability pages and workflow notes.",
@@ -140,7 +140,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
             ideas_graph_response = await client.get("/api/v1/categories/ideas/graph")
             search_response = await client.get(
                 "/api/v1/search",
-                params={"q": "workflow", "category": "ideas", "provider": "gemini"},
+                params={"q": "workflow", "pile": "ideas", "provider": "gemini"},
             )
             note_response = await client.get(f"/api/v1/notes/{factual_session_id}")
 
@@ -154,7 +154,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
 
         assert graph_response.status_code == 200
         graph_payload = graph_response.json()
-        assert graph_payload["category"] == "factual"
+        assert graph_payload["pile_slug"] == "factual"
         sqlite_node = next(node for node in graph_payload["nodes"] if node["label"] == "SQLite")
         assert factual_session_id in sqlite_node["session_ids"]
         assert sqlite_node["degree"] >= 1
@@ -171,14 +171,14 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
 
         assert ideas_graph_response.status_code == 200
         ideas_graph_payload = ideas_graph_response.json()
-        assert ideas_graph_payload["category"] == "ideas"
+        assert ideas_graph_payload["pile_slug"] == "ideas"
         assert all(node["kind"] == "session" for node in ideas_graph_payload["nodes"])
         assert ideas_graph_payload["edge_count"] >= 1
 
         assert search_response.status_code == 200
         search_payload = search_response.json()
         assert search_payload["count"] >= 1
-        assert all(result["category"] == "ideas" for result in search_payload["results"])
+        assert all(result["pile_slug"] == "ideas" for result in search_payload["results"])
         assert all(result.get("provider") in {"gemini", None} for result in search_payload["results"])
 
         assert note_response.status_code == 200
@@ -219,7 +219,7 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
                 provider=ProviderName.CHATGPT,
                 external_session_id="custom-factual-1",
                 title="Architecture evidence",
-                category=SessionCategory.FACTUAL,
+                built_in_pile=BuiltInPileSlug.FACTUAL,
                 markdown_path=str(factual_note_path),
                 share_post="Architecture reviews need evidence connected back to the context graph.",
                 custom_tags=["systems", "category:Architecture Review"],
@@ -230,7 +230,7 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
                 provider=ProviderName.GEMINI,
                 external_session_id="custom-factual-2",
                 title="Platform topology",
-                category=SessionCategory.FACTUAL,
+                built_in_pile=BuiltInPileSlug.FACTUAL,
                 share_post="Platform topology should stay searchable during architecture reviews.",
                 custom_tags=["topology", "category:Architecture Review"],
                 last_captured_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
@@ -240,7 +240,7 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
                 provider=ProviderName.GROK,
                 external_session_id="custom-idea-1",
                 title="Architecture review workflow",
-                category=SessionCategory.IDEAS,
+                built_in_pile=BuiltInPileSlug.IDEAS,
                 share_post="Prototype a review workflow that groups related notes under Architecture Review.",
                 custom_tags=["workflow", "category:Architecture Review"],
                 idea_summary={
@@ -256,7 +256,7 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
                 provider=ProviderName.CHATGPT,
                 external_session_id="custom-todo-1",
                 title="Launch board",
-                category=SessionCategory.TODO,
+                built_in_pile=BuiltInPileSlug.TODO,
                 share_post="Launch notes stay in a separate custom category.",
                 todo_summary="Track launch blockers and approvals.",
                 custom_tags=["release", "category:Launch"],
@@ -312,25 +312,25 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
         app.dependency_overrides[get_db_session] = override_db_session
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
-            categories_response = await client.get("/api/v1/user-categories")
-            factual_categories_response = await client.get("/api/v1/user-categories", params={"category": "factual"})
-            sessions_response = await client.get("/api/v1/sessions", params={"user_category": "Architecture Review"})
-            stats_response = await client.get("/api/v1/custom-categories/Architecture%20Review/stats")
-            graph_response = await client.get("/api/v1/custom-categories/Architecture%20Review/graph")
-            search_response = await client.get("/api/v1/search", params={"q": "architecture", "user_category": "Architecture Review"})
+            categories_response = await client.get("/api/v1/extra-piles")
+            factual_categories_response = await client.get("/api/v1/extra-piles", params={"pile": "factual"})
+            sessions_response = await client.get("/api/v1/sessions", params={"extra_pile": "Architecture Review"})
+            stats_response = await client.get("/api/v1/extra-piles/Architecture%20Review/stats")
+            graph_response = await client.get("/api/v1/extra-piles/Architecture%20Review/graph")
+            search_response = await client.get("/api/v1/search", params={"q": "architecture", "extra_pile": "Architecture Review"})
             update_response = await client.put(
-                f"/api/v1/sessions/{factual_primary_id}/user-categories",
-                json={"user_categories": ["Architecture Review", "Platform Work"]},
+                f"/api/v1/sessions/{factual_primary_id}/extra-piles",
+                json={"extra_piles": ["Architecture Review", "Platform Work"]},
             )
             reserved_response = await client.put(
-                f"/api/v1/sessions/{factual_primary_id}/user-categories",
-                json={"user_categories": ["todo"]},
+                f"/api/v1/sessions/{factual_primary_id}/extra-piles",
+                json={"extra_piles": ["todo"]},
             )
 
         assert categories_response.status_code == 200
-        category_payload = categories_response.json()
-        assert category_payload[0] == {"name": "Architecture Review", "count": 3}
-        assert {"name": "Launch", "count": 1} in category_payload
+        pile_payload = categories_response.json()
+        assert pile_payload[0] == {"name": "Architecture Review", "count": 3}
+        assert {"name": "Launch", "count": 1} in pile_payload
 
         assert factual_categories_response.status_code == 200
         assert factual_categories_response.json() == [{"name": "Architecture Review", "count": 2}]
@@ -338,18 +338,18 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
         assert sessions_response.status_code == 200
         session_payload = sessions_response.json()
         assert len(session_payload) == 3
-        assert all("Architecture Review" in item["user_categories"] for item in session_payload)
+        assert all("Architecture Review" in item["extra_piles"] for item in session_payload)
         assert all("category:Architecture Review" not in item["custom_tags"] for item in session_payload)
 
         assert stats_response.status_code == 200
         stats_payload = stats_response.json()
         assert stats_payload["scope_kind"] == "custom"
         assert stats_payload["scope_label"] == "Architecture Review"
-        assert stats_payload["dominant_category"] == "factual"
+        assert stats_payload["dominant_pile_slug"] == "factual"
         assert stats_payload["total_sessions"] == 3
         assert stats_payload["total_messages"] == 2
         assert stats_payload["total_triplets"] == 2
-        assert {item["category"]: item["count"] for item in stats_payload["system_category_counts"]} == {
+        assert {item["pile_slug"]: item["count"] for item in stats_payload["built_in_pile_counts"]} == {
             "factual": 2,
             "ideas": 1,
         }
@@ -358,18 +358,18 @@ async def test_custom_category_routes_allow_user_defined_groupings(tmp_path, mon
         graph_payload = graph_response.json()
         assert graph_payload["scope_kind"] == "custom"
         assert graph_payload["scope_label"] == "Architecture Review"
-        assert graph_payload["dominant_category"] == "factual"
+        assert graph_payload["dominant_pile_slug"] == "factual"
         assert graph_payload["node_count"] >= 3
         assert all(node["kind"] == "session" for node in graph_payload["nodes"])
 
         assert search_response.status_code == 200
         search_payload = search_response.json()
         assert search_payload["count"] >= 1
-        assert all("Architecture Review" in result["user_categories"] for result in search_payload["results"])
+        assert all("Architecture Review" in result["extra_piles"] for result in search_payload["results"])
 
         assert update_response.status_code == 200
         updated_session = update_response.json()
-        assert updated_session["user_categories"] == ["Architecture Review", "Platform Work"]
+        assert updated_session["extra_piles"] == ["Architecture Review", "Platform Work"]
         assert updated_session["custom_tags"] == ["systems"]
 
         assert reserved_response.status_code == 422

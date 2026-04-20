@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { BackendCategoryGraph, BackendSessionListItem } from "../src/shared/types";
-import { buildCategoryGraphClusters, buildCategoryGraphInsights, clusterKeyForNode } from "../src/ui/lib/category-graph-insights";
+import type { BackendPileGraph, BackendSessionListItem } from "../src/shared/types";
+import { buildPileGraphClusters, buildPileGraphInsights, clusterKeyForPileNode } from "../src/ui/lib/pile-graph-insights";
 
 const sessions: BackendSessionListItem[] = [
   {
@@ -9,9 +9,9 @@ const sessions: BackendSessionListItem[] = [
     provider: "chatgpt",
     external_session_id: "ext-1",
     title: "Neural nets",
-    category: "factual",
+    pile_slug: "factual",
     custom_tags: [],
-    user_categories: [],
+    extra_piles: [],
     updated_at: "2026-04-14T11:00:00Z"
   },
   {
@@ -19,9 +19,9 @@ const sessions: BackendSessionListItem[] = [
     provider: "gemini",
     external_session_id: "ext-2",
     title: "Optimizers",
-    category: "factual",
+    pile_slug: "factual",
     custom_tags: [],
-    user_categories: [],
+    extra_piles: [],
     updated_at: "2026-04-15T11:00:00Z"
   },
   {
@@ -29,18 +29,18 @@ const sessions: BackendSessionListItem[] = [
     provider: "grok",
     external_session_id: "ext-3",
     title: "Detached note",
-    category: "factual",
+    pile_slug: "factual",
     custom_tags: [],
-    user_categories: [],
+    extra_piles: [],
     updated_at: "2026-04-16T11:00:00Z"
   }
 ];
 
-const graph: BackendCategoryGraph = {
-  category: "factual",
+const graph: BackendPileGraph = {
+  pile_slug: "factual",
   scope_kind: "default",
   scope_label: "Factual",
-  dominant_category: "factual",
+  dominant_pile_slug: "factual",
   node_count: 3,
   edge_count: 1,
   nodes: [
@@ -84,9 +84,9 @@ const graph: BackendCategoryGraph = {
   ]
 };
 
-describe("category graph insights", () => {
+describe("pile graph insights", () => {
   it("groups nodes by provider and surfaces coverage warnings", () => {
-    const insights = buildCategoryGraphInsights(graph, sessions, "factual", "provider");
+    const insights = buildPileGraphInsights(graph, sessions, "factual", "provider");
 
     expect(insights.clusters.map((cluster) => cluster.id)).toEqual(["provider:chatgpt", "provider:gemini"]);
     expect(insights.corroboratedNodes).toBe(1);
@@ -98,16 +98,16 @@ describe("category graph insights", () => {
   });
 
   it("can cluster by semantic kind", () => {
-    const insights = buildCategoryGraphInsights(graph, sessions, "factual", "kind");
+    const insights = buildPileGraphInsights(graph, sessions, "factual", "kind");
 
     expect(insights.clusters.map((cluster) => cluster.id)).toEqual(["kind:concept", "kind:entity"]);
-    expect(clusterKeyForNode(graph.nodes[1], "kind")).toBe("kind:concept");
+    expect(clusterKeyForPileNode(graph.nodes[1], "kind")).toBe("kind:concept");
     expect(insights.denseNodes[0]?.neighbors).toContain("Attention");
   });
 
   it("can cluster by graph community and preserve peripheral nodes", () => {
-    const lookup = buildCategoryGraphClusters(graph, "factual", "community");
-    const insights = buildCategoryGraphInsights(graph, sessions, "factual", "community");
+    const lookup = buildPileGraphClusters(graph, "factual", "community");
+    const insights = buildPileGraphInsights(graph, sessions, "factual", "community");
 
     expect(lookup.clusters.map((cluster) => cluster.id)).toEqual(["community:n2", "community:peripheral"]);
     expect(lookup.byNodeId.get("n1")?.label).toBe("Transformer + Attention");

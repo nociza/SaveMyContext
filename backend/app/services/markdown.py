@@ -13,18 +13,18 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.core.config import get_settings
-from app.models import ChatMessage, ChatSession, FactTriplet, SessionCategory, SourceCapture, SyncEvent
+from app.models import ChatMessage, ChatSession, FactTriplet, BuiltInPileSlug, SourceCapture, SyncEvent
 from app.services.git_versioning import GitVersioningService
 from app.services.text import take_sentences
 from app.services.todo import TodoListService, TODO_TITLE
-from app.services.user_categories import extract_user_categories, visible_custom_tags
+from app.services.extra_piles import extract_extra_piles, visible_custom_tags
 
 
 CATEGORY_LABELS = {
-    SessionCategory.JOURNAL: "Journal",
-    SessionCategory.FACTUAL: "Factual",
-    SessionCategory.IDEAS: "Ideas",
-    SessionCategory.TODO: "Todo",
+    BuiltInPileSlug.JOURNAL: "Journal",
+    BuiltInPileSlug.FACTUAL: "Factual",
+    BuiltInPileSlug.IDEAS: "Ideas",
+    BuiltInPileSlug.TODO: "Todo",
 }
 
 DISCARDED_FOLDER = "Discarded"
@@ -152,7 +152,7 @@ class MarkdownExporter:
             "",
             f"- Provider: `{session.provider.value}`",
             f"- External Session ID: `{session.external_session_id}`",
-            f"- Category: `{session.category.value if session.category else 'unclassified'}`",
+            f"- Pile: `{session.built_in_pile.value if session.built_in_pile else 'unclassified'}`",
             f"- Tags: {', '.join(session.custom_tags) if session.custom_tags else 'none'}",
             f"- Last Captured: {datetime_isoformat(session.last_captured_at) or 'n/a'}",
             "",
@@ -262,7 +262,7 @@ class MarkdownExporter:
             f"type: {yaml_scalar('source_capture')}",
             f"capture_kind: {yaml_scalar(source_capture.capture_kind)}",
             f"save_mode: {yaml_scalar(source_capture.save_mode)}",
-            f"category: {yaml_scalar(source_capture.category.value if source_capture.category else 'unclassified')}",
+            f"pile: {yaml_scalar(source_capture.built_in_pile.value if source_capture.built_in_pile else 'unclassified')}",
             f"source_url: {yaml_scalar(source_capture.source_url or '')}",
             f"created_at: {yaml_scalar(source_capture.created_at)}",
             f"updated_at: {yaml_scalar(source_capture.updated_at)}",
@@ -274,7 +274,7 @@ class MarkdownExporter:
             "",
             f"- Capture Kind: `{source_capture.capture_kind}`",
             f"- Save Mode: `{source_capture.save_mode}`",
-            f"- Category: `{source_capture.category.value if source_capture.category else 'unclassified'}`",
+            f"- Pile: `{source_capture.built_in_pile.value if source_capture.built_in_pile else 'unclassified'}`",
             f"- Page Title: {source_capture.page_title or 'n/a'}",
             f"- Source URL: {source_capture.source_url or 'n/a'}",
             f"- Raw Source: {self._wiki_link(self._source_capture_source_path(source_capture), 'Source Document')}",
@@ -416,26 +416,26 @@ class MarkdownExporter:
         triplet_count = int((await self.db.scalar(select(func.count(FactTriplet.id)))) or 0)
 
         dashboards_dir = self.vault_root / "Dashboards"
-        for category, label in CATEGORY_LABELS.items():
+        for built_in_pile, label in CATEGORY_LABELS.items():
             lines = [f"# {label} Index", ""]
-            category_sessions = [session for session in sessions if session.category == category]
-            category_captures = [capture for capture in source_captures if capture.category == category]
-            lines.append(f"- Total sessions: {len(category_sessions)}")
-            lines.append(f"- Total saved sources: {len(category_captures)}")
+            pile_sessions = [session for session in sessions if session.built_in_pile == built_in_pile]
+            pile_captures = [capture for capture in source_captures if capture.built_in_pile == built_in_pile]
+            lines.append(f"- Total sessions: {len(pile_sessions)}")
+            lines.append(f"- Total saved sources: {len(pile_captures)}")
             lines.append("")
-            if category == SessionCategory.TODO:
+            if built_in_pile == BuiltInPileSlug.TODO:
                 lines.append(f"- Shared List: {self._wiki_link(self._todo_list_path(), TODO_TITLE)}")
                 lines.append("")
-            if category_sessions:
+            if pile_sessions:
                 lines.extend(["## Sessions", ""])
-                for session in category_sessions:
+                for session in pile_sessions:
                     lines.append(
                         f"- {self._wiki_link(self._session_note_path(session), session.title or session.external_session_id)}"
                     )
                 lines.append("")
-            if category_captures:
+            if pile_captures:
                 lines.extend(["## Saved Sources", ""])
-                for capture in category_captures:
+                for capture in pile_captures:
                     lines.append(
                         f"- {self._wiki_link(self._source_capture_note_path(capture), self._capture_display_title(capture))}"
                     )
@@ -513,24 +513,24 @@ class MarkdownExporter:
         )
 
     def _session_front_matter(self, session: ChatSession) -> list[str]:
-        user_categories = extract_user_categories(session.custom_tags)
+        extra_piles = extract_extra_piles(session.custom_tags)
         visible_tags = visible_custom_tags(session.custom_tags)
         lines = [
             f"id: {yaml_scalar(session.id)}",
             f"type: {yaml_scalar('session')}",
             f"provider: {yaml_scalar(session.provider.value)}",
             f"external_session_id: {yaml_scalar(session.external_session_id)}",
-            f"category: {yaml_scalar(session.category.value if session.category else 'unclassified')}",
+            f"pile: {yaml_scalar(session.built_in_pile.value if session.built_in_pile else 'unclassified')}",
             f"source_url: {yaml_scalar(session.source_url or '')}",
             f"captured_at: {yaml_scalar(session.last_captured_at)}",
             f"updated_at: {yaml_scalar(session.updated_at)}",
         ]
-        if user_categories:
-            lines.append("user_categories:")
-            lines.extend(f"  - {yaml_scalar(category)}" for category in user_categories)
+        if extra_piles:
+            lines.append("extra_piles:")
+            lines.extend(f"  - {yaml_scalar(extra_pile)}" for extra_pile in extra_piles)
         lines.extend(["tags:", "  - savemycontext"])
-        if session.category:
-            lines.append(f"  - {session.category.value}")
+        if session.built_in_pile:
+            lines.append(f"  - {session.built_in_pile.value}")
         for tag in visible_tags:
             lines.append(f"  - {tag}")
         return lines
@@ -582,9 +582,9 @@ class MarkdownExporter:
             day = f"{timestamp.month:02d}-{timestamp.day:02d}"
             filename = f"{day}--{session.provider.value}--{slugify(session.external_session_id)}.md"
             return self.vault_root / DISCARDED_FOLDER / year / filename
-        category_dir = CATEGORY_LABELS.get(session.category, "Sessions")
+        pile_dir = CATEGORY_LABELS.get(session.built_in_pile, "Sessions")
         filename = f"{session.provider.value}--{slugify(session.external_session_id)}.md"
-        return self.vault_root / category_dir / filename
+        return self.vault_root / pile_dir / filename
 
     def _entity_note_path(self, entity: str) -> Path:
         return self.vault_root / "Graph" / "Entities" / f"{stable_note_token(entity, fallback='entity')}.md"
@@ -782,7 +782,7 @@ class MarkdownExporter:
             f"- Total saved sources: {len(source_captures)}",
             f"- Total fact triplets: {triplet_count}",
             "",
-            "## Collections",
+            "## Piles",
             "",
         ]
         for _, label in CATEGORY_LABELS.items():
@@ -870,14 +870,14 @@ class MarkdownExporter:
             "",
             "- `Sources/` contains the raw scraped content and raw payloads.",
             "- `Captures/` contains user-saved selections and full-page captures.",
-            "- Processed category notes summarize and organize those sources for reuse.",
+            "- Processed pile notes summarize and organize those sources for reuse.",
             "- `Graph/` captures extracted entities and relationships for factual retrieval.",
             "- `Dashboards/To-Do List.md` is the single shared to-do file.",
             "",
             "## Suggested Retrieval Order",
             "",
             f"1. Open {self._wiki_link(self.vault_root / 'Dashboards' / 'Home.md', 'Home Dashboard')}.",
-            f"2. Follow category indexes or {self._wiki_link(self.vault_root / 'Dashboards' / 'Graph Index.md', 'Graph Index')}.",
+            f"2. Follow pile indexes or {self._wiki_link(self.vault_root / 'Dashboards' / 'Graph Index.md', 'Graph Index')}.",
             "3. When precision matters, open the linked source document and inspect the raw capture.",
             "4. If editing to-dos or notes, preserve structure and let git capture the revision.",
             "",
@@ -903,11 +903,11 @@ class MarkdownExporter:
         source_captures: list[SourceCapture],
         triplet_count: int,
     ) -> str:
-        categories = {
-            (category.value if category else "unclassified"): len(
-                [session for session in sessions if session.category == category]
+        piles = {
+            (built_in_pile.value if built_in_pile else "unclassified"): len(
+                [session for session in sessions if session.built_in_pile == built_in_pile]
             )
-            for category in [*CATEGORY_LABELS.keys(), None]
+            for built_in_pile in [*CATEGORY_LABELS.keys(), None]
         }
         manifest = {
             "generated_at": datetime_isoformat(datetime.now(timezone.utc)),
@@ -924,7 +924,7 @@ class MarkdownExporter:
                 "source_captures": len(source_captures),
                 "triplets": triplet_count,
                 "providers": self._provider_counts(sessions),
-                "categories": categories,
+                "piles": piles,
                 "capture_kinds": {
                     "selection": len([capture for capture in source_captures if capture.capture_kind == "selection"]),
                     "page": len([capture for capture in source_captures if capture.capture_kind == "page"]),
@@ -956,7 +956,7 @@ class MarkdownExporter:
 
     async def _commit_vault(self, session: ChatSession) -> None:
         message = f"Update vault for {session.provider.value}:{session.external_session_id}"
-        if session.category == SessionCategory.TODO:
+        if session.built_in_pile == BuiltInPileSlug.TODO:
             message = f"Update to-do list from {session.provider.value}:{session.external_session_id}"
         await GitVersioningService(repo_root=self.vault_root).commit_all(message=message)
 

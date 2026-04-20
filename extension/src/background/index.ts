@@ -330,7 +330,11 @@ async function syncActionBadge(status: SyncStatus): Promise<void> {
 
 async function setExtensionStatus(update: Partial<SyncStatus>): Promise<SyncStatus> {
   const status = await setStatus(update);
-  await syncActionBadge(status);
+  try {
+    await syncActionBadge(status);
+  } catch (error) {
+    console.warn("SaveMyContext action badge update failed", error);
+  }
   return status;
 }
 

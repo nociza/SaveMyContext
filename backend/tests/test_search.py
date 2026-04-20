@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
-from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, SessionCategory, SourceCapture
+from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, BuiltInPileSlug, SourceCapture
 from app.models.base import Base
 from app.services.agentic_search import AgenticSearchCandidate
 from app.services.graph import GraphService
@@ -27,7 +27,7 @@ async def test_search_and_graph_services_return_agent_friendly_results(tmp_path)
             provider=ProviderName.GEMINI,
             external_session_id="session-1",
             title="SQLite search design",
-            category=SessionCategory.FACTUAL,
+            built_in_pile=BuiltInPileSlug.FACTUAL,
             last_captured_at=datetime.now(timezone.utc),
         )
         session.add(chat_session)
@@ -111,7 +111,7 @@ async def test_search_reads_session_markdown_files_with_shell_search(tmp_path, m
                 provider=ProviderName.CHATGPT,
                 external_session_id="session-markdown-only",
                 title="Storage internals",
-                category=SessionCategory.FACTUAL,
+                built_in_pile=BuiltInPileSlug.FACTUAL,
                 markdown_path=str(note_path),
                 last_captured_at=datetime.now(timezone.utc),
             )
@@ -197,7 +197,7 @@ async def test_search_uses_adk_candidates_when_google_is_configured(tmp_path, mo
                 provider=ProviderName.GEMINI,
                 external_session_id="session-adk-only",
                 title="ADK note",
-                category=SessionCategory.FACTUAL,
+                built_in_pile=BuiltInPileSlug.FACTUAL,
                 markdown_path=str(note_path),
                 last_captured_at=datetime.now(timezone.utc),
             )
@@ -249,7 +249,7 @@ async def test_graph_keeps_distinct_entities_that_share_the_same_human_slug(tmp_
             provider=ProviderName.GEMINI,
             external_session_id="session-collisions",
             title="Language collisions",
-            category=SessionCategory.FACTUAL,
+            built_in_pile=BuiltInPileSlug.FACTUAL,
             last_captured_at=datetime.now(timezone.utc),
         )
         session.add(chat_session)

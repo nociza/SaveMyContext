@@ -13,7 +13,7 @@ const sessions = [
     title: "Context engineering notes",
     category: "factual",
     custom_tags: ["context"],
-    user_categories: ["Architecture Review"],
+    extra_piles: ["Architecture Review"],
     markdown_path: "factual/context-engineering-notes.md",
     share_post: "Working notes on persistent context surfaces and retrieval boundaries.",
     updated_at: "2026-04-11T17:30:00Z",
@@ -27,7 +27,7 @@ const sessions = [
     title: "Knowledge graph management",
     category: "factual",
     custom_tags: ["graph"],
-    user_categories: ["Architecture Review", "Knowledge Ops"],
+    extra_piles: ["Architecture Review", "Knowledge Ops"],
     markdown_path: "factual/knowledge-graph-management.md",
     share_post: "Design notes on graph coverage, provenance, and maintenance loops.",
     updated_at: "2026-04-12T20:15:00Z",
@@ -41,7 +41,7 @@ const sessions = [
     title: "Retrieval diagnostics",
     category: "factual",
     custom_tags: ["retrieval"],
-    user_categories: ["Knowledge Ops"],
+    extra_piles: ["Knowledge Ops"],
     markdown_path: "factual/retrieval-diagnostics.md",
     share_post: "How to trace missing evidence and disconnected entities.",
     updated_at: "2026-04-13T09:45:00Z",
@@ -55,7 +55,7 @@ const sessions = [
     title: "Atlas and storyline surfaces",
     category: "factual",
     custom_tags: ["story"],
-    user_categories: ["Knowledge Ops"],
+    extra_piles: ["Knowledge Ops"],
     markdown_path: "factual/atlas-and-storyline-surfaces.md",
     share_post: "Atlas view should support cluster navigation and guided exploration.",
     updated_at: "2026-04-14T11:10:00Z",
@@ -69,7 +69,7 @@ const sessions = [
     title: "Temporal memory patterns",
     category: "factual",
     custom_tags: ["memory"],
-    user_categories: ["Memory Lab"],
+    extra_piles: ["Memory Lab"],
     markdown_path: "factual/temporal-memory-patterns.md",
     share_post: "Timeline filters reveal how concepts evolve across sessions.",
     updated_at: "2026-04-15T16:40:00Z",
@@ -83,7 +83,7 @@ const sessions = [
     title: "Karpathy LLM wiki patterns",
     category: "factual",
     custom_tags: ["wiki"],
-    user_categories: ["Knowledge Ops", "Research"],
+    extra_piles: ["Knowledge Ops", "Research"],
     markdown_path: "factual/karpathy-llm-wiki-patterns.md",
     share_post: "Index, sync, log, lint, and query should be first-class graph management surfaces.",
     updated_at: "2026-04-16T08:05:00Z",
@@ -97,7 +97,7 @@ const sessions = [
     title: "Sprint checklist cleanup",
     category: "todo",
     custom_tags: ["shared-list"],
-    user_categories: ["Launch"],
+    extra_piles: ["Launch"],
     markdown_path: "todo/sprint-checklist-cleanup.md",
     share_post: "Closed two stale tasks and reopened release notes for final review.",
     todo_summary: "Checked off 'Archive stale branches' and reopened 'Review release notes'.",
@@ -112,7 +112,7 @@ const sessions = [
     title: "Product launch board",
     category: "todo",
     custom_tags: ["launch"],
-    user_categories: ["Launch", "Operations"],
+    extra_piles: ["Launch", "Operations"],
     markdown_path: "todo/product-launch-board.md",
     share_post: "Added the rollout checklist and marked launch copy review complete.",
     todo_summary: "Added 'Dry run launch email' and marked 'Review launch copy' done.",
@@ -304,7 +304,7 @@ function dominantCategory(availableSessions, fallback = "factual") {
   return Array.from(counts.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] ?? fallback;
 }
 
-function pathUserCategory(url) {
+function pathExtraPile(url) {
   const marker = "/custom-categories/";
   const index = url.pathname.indexOf(marker);
   if (index < 0) {
@@ -316,13 +316,13 @@ function pathUserCategory(url) {
 }
 
 function scopeLabel(url) {
-  return url.searchParams.get("user_category") ?? pathUserCategory(url) ?? url.searchParams.get("category") ?? "factual";
+  return url.searchParams.get("extra_pile") ?? pathExtraPile(url) ?? url.searchParams.get("category") ?? "factual";
 }
 
 function summarizeUserCategories(availableSessions) {
   const counts = new Map();
   for (const session of availableSessions) {
-    for (const category of session.user_categories ?? []) {
+    for (const category of session.extra_piles ?? []) {
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
   }
@@ -334,12 +334,12 @@ function summarizeUserCategories(availableSessions) {
 function filteredSessions(url) {
   const provider = url.searchParams.get("provider");
   const category = url.searchParams.get("category");
-  const userCategory = url.searchParams.get("user_category") ?? pathUserCategory(url);
+  const extraPile = url.searchParams.get("extra_pile") ?? pathExtraPile(url);
   return sessions.filter(
     (session) =>
       (!provider || session.provider === provider) &&
       (!category || session.category === category) &&
-      (!userCategory || (session.user_categories ?? []).includes(userCategory))
+      (!extraPile || (session.extra_piles ?? []).includes(extraPile))
   );
 }
 
@@ -348,7 +348,7 @@ function buildSessionGraph(availableSessions, category) {
     id: session.id,
     label: session.title,
     kind: "session",
-    size: 2 + (session.user_categories?.length ?? 0),
+    size: 2 + (session.extra_piles?.length ?? 0),
     session_ids: [session.id],
     provider: session.provider,
     category: session.category,
@@ -362,8 +362,8 @@ function buildSessionGraph(availableSessions, category) {
     for (let inner = index + 1; inner < availableSessions.length; inner += 1) {
       const left = availableSessions[index];
       const right = availableSessions[inner];
-      const leftTags = new Set([...(left.custom_tags ?? []), ...(left.user_categories ?? [])]);
-      const sharedLabels = [...new Set([...(right.custom_tags ?? []), ...(right.user_categories ?? [])])].filter((value) => leftTags.has(value));
+      const leftTags = new Set([...(left.custom_tags ?? []), ...(left.extra_piles ?? [])]);
+      const sharedLabels = [...new Set([...(right.custom_tags ?? []), ...(right.extra_piles ?? [])])].filter((value) => leftTags.has(value));
       if (!sharedLabels.length && left.provider !== right.provider) {
         continue;
       }
@@ -396,7 +396,7 @@ function filteredGraph(url) {
   const sessionAllowed = (sessionId) => allowedSessionIds.has(sessionId) && (!hasScope || scopedIds.has(sessionId));
 
   let graphBody;
-  if ((url.searchParams.get("user_category") || dominant !== "factual") && availableSessions.length) {
+  if ((url.searchParams.get("extra_pile") || dominant !== "factual") && availableSessions.length) {
     const scopedSessions = hasScope ? availableSessions.filter((session) => scopedIds.has(session.id)) : availableSessions;
     graphBody = buildSessionGraph(scopedSessions, dominant);
   } else if ((url.searchParams.get("category") ?? "factual") !== "factual") {
@@ -425,7 +425,7 @@ function filteredGraph(url) {
 
   return {
     ...graphBody,
-    scope_kind: url.searchParams.get("user_category") ? "custom" : "default",
+    scope_kind: url.searchParams.get("extra_pile") ? "custom" : "default",
     scope_label: scopeLabel(url),
     dominant_category: dominant
   };
@@ -450,7 +450,7 @@ function buildStats(url) {
     const bucket = session.updated_at.slice(0, 10);
     activityMap.set(bucket, (activityMap.get(bucket) ?? 0) + 1);
   }
-  const systemCategoryCounts = Array.from(
+  const systemPileCounts = Array.from(
     visibleSessions.reduce((counts, session) => counts.set(session.category, (counts.get(session.category) ?? 0) + 1), new Map()).entries()
   ).map(([name, count]) => ({ category: name, count }));
   const entityCounts = graph.nodes
@@ -464,7 +464,7 @@ function buildStats(url) {
 
   return {
     category,
-    scope_kind: url.searchParams.get("user_category") ? "custom" : "default",
+    scope_kind: url.searchParams.get("extra_pile") ? "custom" : "default",
     scope_label: scopeLabel(url),
     dominant_category: category,
     total_sessions: visibleSessions.length,
@@ -479,7 +479,7 @@ function buildStats(url) {
     notes_with_idea_summary: 0,
     notes_with_journal_entry: 0,
     notes_with_todo_summary: visibleSessions.filter((session) => session.category === "todo" && session.todo_summary).length,
-    system_category_counts: systemCategoryCounts,
+    system_category_counts: systemPileCounts,
     provider_counts: providerCounts,
     activity: Array.from(activityMap.entries())
       .sort(([left], [right]) => left.localeCompare(right))
@@ -511,7 +511,7 @@ function buildSearch(url) {
       session_id: session.id,
       category: session.category,
       provider: session.provider,
-      user_categories: session.user_categories ?? [],
+      extra_piles: session.extra_piles ?? [],
       markdown_path: session.markdown_path
     }));
 
@@ -649,14 +649,14 @@ async function main() {
         const sessionId = decodeURIComponent(url.pathname.split("/").slice(-2, -1)[0] ?? "");
         const session = sessions.find((item) => item.id === sessionId);
         const payload = route.request().postDataJSON?.() ?? {};
-        const nextCategories = Array.isArray(payload.user_categories) ? payload.user_categories.filter(Boolean) : [];
+        const nextCategories = Array.isArray(payload.extra_piles) ? payload.extra_piles.filter(Boolean) : [];
         if (!session) {
           await route.fulfill({ status: 404, body: "not found" });
           return;
         }
-        session.user_categories = [...new Set(nextCategories)];
+        session.extra_piles = [...new Set(nextCategories)];
         if (notes[session.id]) {
-          notes[session.id].user_categories = [...session.user_categories];
+          notes[session.id].extra_piles = [...session.extra_piles];
         }
         body = session;
       } else if (url.pathname.endsWith("/sessions")) {
@@ -727,7 +727,7 @@ async function main() {
     const atlasPage = await context.newPage();
     attachDebug(atlasPage, "atlas");
     console.log("opening-atlas");
-    await atlasPage.goto(`chrome-extension://${extensionId}/category.html?category=factual`, {
+    await atlasPage.goto(`chrome-extension://${extensionId}/pile.html?category=factual`, {
       waitUntil: "domcontentloaded"
     });
     try {
@@ -745,7 +745,7 @@ async function main() {
     const storyPage = await context.newPage();
     attachDebug(storyPage, "story");
     console.log("opening-story");
-    await storyPage.goto(`chrome-extension://${extensionId}/category.html?category=factual&view=story`, {
+    await storyPage.goto(`chrome-extension://${extensionId}/pile.html?category=factual&view=story`, {
       waitUntil: "domcontentloaded"
     });
     await storyPage.locator("text=Recent note movement").waitFor();
@@ -755,7 +755,7 @@ async function main() {
     const opsPage = await context.newPage();
     attachDebug(opsPage, "ops");
     console.log("opening-ops");
-    await opsPage.goto(`chrome-extension://${extensionId}/category.html?category=factual&view=ops`, {
+    await opsPage.goto(`chrome-extension://${extensionId}/pile.html?category=factual&view=ops`, {
       waitUntil: "domcontentloaded"
     });
     await opsPage.locator("text=Graph hygiene").waitFor();
@@ -765,7 +765,7 @@ async function main() {
     const todoPage = await context.newPage();
     attachDebug(todoPage, "todo");
     console.log("opening-todo");
-    await todoPage.goto(`chrome-extension://${extensionId}/category.html?category=todo`, {
+    await todoPage.goto(`chrome-extension://${extensionId}/pile.html?category=todo`, {
       waitUntil: "domcontentloaded"
     });
     await todoPage.locator("text=Shared list workspace").waitFor();
@@ -775,7 +775,7 @@ async function main() {
     const customPage = await context.newPage();
     attachDebug(customPage, "custom");
     console.log("opening-custom");
-    await customPage.goto(`chrome-extension://${extensionId}/category.html?category=factual&userCategory=Knowledge%20Ops`, {
+    await customPage.goto(`chrome-extension://${extensionId}/pile.html?category=factual&extraPile=Knowledge%20Ops`, {
       waitUntil: "domcontentloaded"
     });
     await customPage.locator("text=Knowledge Ops").first().waitFor();

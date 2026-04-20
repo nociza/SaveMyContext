@@ -272,8 +272,9 @@ export function normalizeProcessingResponseJson(
     };
   }
 
-  const single = parsed as { category?: unknown; classification_reason?: unknown };
-  if (typeof single.category !== "string" || typeof single.classification_reason !== "string") {
+  const single = parsed as { pile?: unknown; category?: unknown; classification_reason?: unknown };
+  const pile = typeof single.pile === "string" ? single.pile : single.category;
+  if (typeof pile !== "string" || typeof single.classification_reason !== "string") {
     return {
       ok: false,
       error: processingJsonError("The single-session reply is missing required fields.")
@@ -282,7 +283,10 @@ export function normalizeProcessingResponseJson(
 
   return {
     ok: true,
-    jsonText: JSON.stringify(parsed)
+    jsonText: JSON.stringify({
+      ...parsed,
+      pile
+    })
   };
 }
 

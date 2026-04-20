@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChatMessage, MessageRole, SourceCapture
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 from app.schemas.source_capture import SourceCaptureRequest, SourceCaptureResponse
 from app.services.heuristics import heuristic_classification
 from app.services.markdown import MarkdownExporter
@@ -16,8 +16,10 @@ from app.services.text import normalize_whitespace, take_sentences
 
 
 class SourceCaptureAIResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str
-    category: SessionCategory
+    pile: BuiltInPileSlug = Field(validation_alias=AliasChoices("pile", "category"))
     classification_reason: str
     summary: str
     cleaned_markdown: str
@@ -26,7 +28,7 @@ class SourceCaptureAIResult(BaseModel):
 @dataclass
 class SourceCaptureEnrichment:
     title: str
-    category: SessionCategory | None
+    pile: BuiltInPileSlug | None
     classification_reason: str | None
     summary: str | None
     cleaned_markdown: str | None
@@ -60,7 +62,7 @@ class SourceCaptureProcessor:
                 )
                 return SourceCaptureEnrichment(
                     title=result.title.strip() or self._fallback_title(payload),
-                    category=result.category,
+                    pile=result.pile,
                     classification_reason=result.classification_reason.strip() or "AI-enriched source capture.",
                     summary=result.summary.strip() or take_sentences(transcript, 2),
                     cleaned_markdown=result.cleaned_markdown.strip() or self._fallback_markdown(payload),
@@ -84,7 +86,7 @@ class SourceCaptureProcessor:
         heuristic_result = heuristic_classification(synthetic_messages)
         return SourceCaptureEnrichment(
             title=self._fallback_title(payload),
-            category=heuristic_result.category,
+            pile=heuristic_result.pile,
             classification_reason=heuristic_result.reason,
             summary=take_sentences(transcript, 2),
             cleaned_markdown=self._fallback_markdown(payload),
@@ -134,7 +136,7 @@ class SourceCaptureService:
         if payload.save_mode == "ai":
             enrichment = await self.processor.enrich(payload)
             source_capture.title = enrichment.title
-            source_capture.category = enrichment.category
+            source_capture.built_in_pile = enrichment.pile
             source_capture.classification_reason = enrichment.classification_reason
             source_capture.summary = enrichment.summary
             source_capture.cleaned_markdown = enrichment.cleaned_markdown
@@ -157,7 +159,7 @@ class SourceCaptureService:
             capture_kind=payload.capture_kind,
             save_mode=payload.save_mode,
             processed=payload.save_mode == "ai",
-            category=source_capture.category,
+            pile_slug=source_capture.pile.slug if source_capture.pile else source_capture.built_in_pile.value if source_capture.built_in_pile else None,
             markdown_path=source_capture.markdown_path,
             raw_source_path=source_capture.raw_source_path,
         )

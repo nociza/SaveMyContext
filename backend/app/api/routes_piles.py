@@ -11,7 +11,7 @@ from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
 from app.models import ChatSession, Pile, PileKind, ProviderName
 from app.models.base import utcnow
-from app.schemas.explorer import CategoryGraph, CategoryStats
+from app.schemas.explorer import PileGraph, PileGraphPath, PileStats
 from app.schemas.pile import (
     DiscardedSessionItem,
     DiscardedSessionsResponse,
@@ -189,14 +189,14 @@ async def get_pile(
     return _serialize(pile)
 
 
-@router.get("/{slug}/stats", response_model=CategoryStats)
+@router.get("/{slug}/stats", response_model=PileStats)
 async def pile_stats(
     slug: str,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryStats:
+) -> PileStats:
     try:
         pile = await PileService(db).require_by_slug(slug)
     except PileNotFoundError as exc:
@@ -211,14 +211,14 @@ async def pile_stats(
     return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider)
 
 
-@router.get("/{slug}/graph", response_model=CategoryGraph)
+@router.get("/{slug}/graph", response_model=PileGraph)
 async def pile_graph(
     slug: str,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryGraph:
+) -> PileGraph:
     try:
         pile = await PileService(db).require_by_slug(slug)
     except PileNotFoundError as exc:
@@ -229,8 +229,38 @@ async def pile_graph(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Graph is only available for built-in piles in this release.",
-        )
+    )
     return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
+
+
+@router.get("/{slug}/graph/path", response_model=PileGraphPath)
+async def pile_graph_path(
+    slug: str,
+    source: str = Query(min_length=1),
+    target: str = Query(min_length=1),
+    provider: ProviderName | None = Query(default=None),
+    session_id: list[str] | None = Query(default=None),
+    _: AuthContext = Depends(require_scope("read")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileGraphPath:
+    try:
+        pile = await PileService(db).require_by_slug(slug)
+    except PileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    category = BUILT_IN_SLUG_TO_CATEGORY.get(pile.slug)
+    if category is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Graph paths are only available for built-in piles in this release.",
+        )
+    return await ExplorerService(db).category_graph_path(
+        category,
+        source=source,
+        target=target,
+        session_ids=session_id,
+        provider=provider,
+    )
 
 
 @router.post("", response_model=PileRead, status_code=status.HTTP_201_CREATED)

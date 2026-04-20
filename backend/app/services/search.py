@@ -3,17 +3,18 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from sqlalchemy import Text, cast, or_, select
+from sqlalchemy import Text, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.models import ChatMessage, ChatSession, FactTriplet, ProviderName, SessionCategory, SourceCapture
+from app.models import ChatMessage, ChatSession, FactTriplet, Pile, ProviderName, SourceCapture
 from app.schemas.search import SearchResult, SearchResponse
 from app.services.agentic_search import ADKVaultSearchService, VaultSearchToolkit
 from app.services.graph import entity_note_path
 from app.services.todo import TODO_TITLE, TodoListService
-from app.services.user_categories import extract_user_categories, has_user_category
+from app.services.extra_piles import extract_extra_piles, has_extra_pile
+from app.services.piles import category_for_pile_slug, pile_slug_for_category
 
 
 logger = logging.getLogger(__name__)
@@ -85,9 +86,9 @@ def _merge_duplicate_results(primary: SearchResult, fallback: SearchResult) -> S
         session_id=primary.session_id or fallback.session_id,
         source_id=primary.source_id or fallback.source_id,
         entity_id=primary.entity_id or fallback.entity_id,
-        category=primary.category or fallback.category,
+        pile_slug=primary.pile_slug or fallback.pile_slug,
         provider=primary.provider or fallback.provider,
-        user_categories=primary.user_categories or fallback.user_categories,
+        extra_piles=primary.extra_piles or fallback.extra_piles,
         markdown_path=primary.markdown_path or fallback.markdown_path,
     )
 
@@ -101,14 +102,14 @@ class SearchService:
         query: str,
         *,
         limit: int = 25,
-        category: SessionCategory | None = None,
+        pile: str | None = None,
         provider: ProviderName | None = None,
-        user_category: str | None = None,
+        extra_pile: str | None = None,
         kinds: set[str] | None = None,
         include_discarded: bool = False,
     ) -> SearchResponse:
         pattern = f"%{query}%"
-        fetch_limit = limit * 4 if user_category else limit
+        fetch_limit = limit * 4 if extra_pile else limit
         session_statement = select(ChatSession).options(selectinload(ChatSession.messages)).where(
             or_(
                 ChatSession.title.ilike(pattern),
@@ -120,16 +121,22 @@ class SearchService:
                 ChatSession.messages.any(ChatMessage.content.ilike(pattern)),
             )
         )
-        if category:
-            session_statement = session_statement.where(ChatSession.category == category)
+        if pile:
+            fallback_pile = category_for_pile_slug(pile)
+            session_statement = session_statement.where(
+                or_(
+                    ChatSession.pile.has(Pile.slug == pile),
+                    and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+                )
+            )
         if provider:
             session_statement = session_statement.where(ChatSession.provider == provider)
         if not include_discarded:
             session_statement = session_statement.where(ChatSession.is_discarded.is_(False))
         session_statement = session_statement.order_by(ChatSession.updated_at.desc()).limit(fetch_limit)
         session_rows = (await self.db.execute(session_statement)).scalars().all()
-        if user_category:
-            session_rows = [session for session in session_rows if has_user_category(session.custom_tags, user_category)]
+        if extra_pile:
+            session_rows = [session for session in session_rows if has_extra_pile(session.custom_tags, extra_pile)]
 
         triplet_statement = select(FactTriplet).options(selectinload(FactTriplet.session)).join(FactTriplet.session).where(
             or_(
@@ -138,16 +145,22 @@ class SearchService:
                 FactTriplet.object.ilike(pattern),
             )
         )
-        if category:
-            triplet_statement = triplet_statement.where(ChatSession.category == category)
+        if pile:
+            fallback_pile = category_for_pile_slug(pile)
+            triplet_statement = triplet_statement.where(
+                or_(
+                    ChatSession.pile.has(Pile.slug == pile),
+                    and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+                )
+            )
         if provider:
             triplet_statement = triplet_statement.where(ChatSession.provider == provider)
         if not include_discarded:
             triplet_statement = triplet_statement.where(ChatSession.is_discarded.is_(False))
         triplet_statement = triplet_statement.limit(fetch_limit)
         triplet_rows = (await self.db.execute(triplet_statement)).scalars().all()
-        if user_category:
-            triplet_rows = [triplet for triplet in triplet_rows if triplet.session and has_user_category(triplet.session.custom_tags, user_category)]
+        if extra_pile:
+            triplet_rows = [triplet for triplet in triplet_rows if triplet.session and has_extra_pile(triplet.session.custom_tags, extra_pile)]
         source_statement = select(SourceCapture).where(
             or_(
                 SourceCapture.title.ilike(pattern),
@@ -159,8 +172,14 @@ class SearchService:
                 SourceCapture.source_text.ilike(pattern),
             )
         )
-        if category:
-            source_statement = source_statement.where(SourceCapture.category == category)
+        if pile:
+            fallback_pile = category_for_pile_slug(pile)
+            source_statement = source_statement.where(
+                or_(
+                    SourceCapture.pile.has(Pile.slug == pile),
+                    and_(SourceCapture.pile_id.is_(None), SourceCapture.built_in_pile == fallback_pile),
+                )
+            )
         if not include_discarded:
             source_statement = source_statement.where(SourceCapture.is_discarded.is_(False))
         if provider:
@@ -196,9 +215,9 @@ class SearchService:
                         query,
                     ),
                     session_id=session.id,
-                    category=session.category,
+                    pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
                     provider=session.provider,
-                    user_categories=extract_user_categories(session.custom_tags),
+                    extra_piles=extract_extra_piles(session.custom_tags),
                     markdown_path=session.markdown_path,
                 )
             )
@@ -219,9 +238,9 @@ class SearchService:
                         snippet=f"{triplet.subject} | {triplet.predicate} | {triplet.object}",
                         session_id=session.id if session else None,
                         entity_id=entity,
-                        category=session.category if session else None,
+                        pile_slug=session.pile.slug if session and session.pile else pile_slug_for_category(session.built_in_pile if session else None),
                         provider=session.provider if session else None,
-                        user_categories=extract_user_categories(session.custom_tags) if session else [],
+                        extra_piles=extract_extra_piles(session.custom_tags) if session else [],
                         markdown_path=entity_note_path(entity),
                     )
                 )
@@ -248,7 +267,7 @@ class SearchService:
                         query,
                     ),
                     source_id=source_capture.id,
-                    category=source_capture.category,
+                    pile_slug=source_capture.pile.slug if source_capture.pile else pile_slug_for_category(source_capture.built_in_pile),
                     markdown_path=source_capture.markdown_path or source_capture.raw_source_path,
                 )
             )
@@ -258,7 +277,7 @@ class SearchService:
         if (
             "todo_list" in allowed_kinds
             and provider is None
-            and category in {None, SessionCategory.TODO}
+            and pile in {None, "todo"}
             and query.lower() in todo_markdown.lower()
         ):
             results.append(
@@ -266,7 +285,7 @@ class SearchService:
                     kind="todo_list",
                     title=TODO_TITLE,
                     snippet=_snippet(todo_markdown, query),
-                    category=SessionCategory.TODO,
+                    pile_slug="todo",
                     markdown_path=str(todo_service.path),
                 )
             )
@@ -274,9 +293,9 @@ class SearchService:
         agentic_results = await self._agentic_results(
             query,
             limit=max(limit * 4, 24),
-            category=category,
+            pile=pile,
             provider=provider,
-            user_category=user_category,
+            extra_pile=extra_pile,
             allowed_kinds=allowed_kinds,
             include_discarded=include_discarded,
         )
@@ -288,9 +307,9 @@ class SearchService:
         query: str,
         *,
         limit: int,
-        category: SessionCategory | None,
+        pile: str | None,
         provider: ProviderName | None,
-        user_category: str | None,
+        extra_pile: str | None,
         allowed_kinds: set[str],
         include_discarded: bool,
     ) -> list[SearchResult]:
@@ -304,15 +323,21 @@ class SearchService:
         normalized_paths = [hit.path for hit in hits]
 
         session_statement = select(ChatSession).where(ChatSession.markdown_path.in_(normalized_paths))
-        if category:
-            session_statement = session_statement.where(ChatSession.category == category)
+        if pile:
+            fallback_pile = category_for_pile_slug(pile)
+            session_statement = session_statement.where(
+                or_(
+                    ChatSession.pile.has(Pile.slug == pile),
+                    and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+                )
+            )
         if provider:
             session_statement = session_statement.where(ChatSession.provider == provider)
         if not include_discarded:
             session_statement = session_statement.where(ChatSession.is_discarded.is_(False))
         session_rows = (await self.db.execute(session_statement)).scalars().all()
-        if user_category:
-            session_rows = [session for session in session_rows if has_user_category(session.custom_tags, user_category)]
+        if extra_pile:
+            session_rows = [session for session in session_rows if has_extra_pile(session.custom_tags, extra_pile)]
 
         session_by_path: dict[str, ChatSession] = {}
         for session in session_rows:
@@ -328,8 +353,14 @@ class SearchService:
                     SourceCapture.raw_source_path.in_(normalized_paths),
                 )
             )
-            if category:
-                source_statement = source_statement.where(SourceCapture.category == category)
+            if pile:
+                fallback_pile = category_for_pile_slug(pile)
+                source_statement = source_statement.where(
+                    or_(
+                        SourceCapture.pile.has(Pile.slug == pile),
+                        and_(SourceCapture.pile_id.is_(None), SourceCapture.built_in_pile == fallback_pile),
+                    )
+                )
             if not include_discarded:
                 source_statement = source_statement.where(SourceCapture.is_discarded.is_(False))
             source_rows = (await self.db.execute(source_statement)).scalars().all()
@@ -349,9 +380,9 @@ class SearchService:
                         title=session.title or session.external_session_id,
                         snippet=_candidate_snippet(hit),
                         session_id=session.id,
-                        category=session.category,
+                        pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
                         provider=session.provider,
-                        user_categories=extract_user_categories(session.custom_tags),
+                        extra_piles=extract_extra_piles(session.custom_tags),
                         markdown_path=session.markdown_path,
                     )
                 )
@@ -365,7 +396,7 @@ class SearchService:
                         title=source_capture.title or source_capture.page_title or "Saved source",
                         snippet=_candidate_snippet(hit),
                         source_id=source_capture.id,
-                        category=source_capture.category,
+                        pile_slug=source_capture.pile.slug if source_capture.pile else pile_slug_for_category(source_capture.built_in_pile),
                         markdown_path=source_capture.markdown_path or source_capture.raw_source_path,
                     )
                 )

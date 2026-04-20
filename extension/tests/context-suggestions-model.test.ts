@@ -44,28 +44,28 @@ describe("context suggestions model", () => {
           kind: "session",
           title: "Hover button note injection",
           snippet: "A Grammarly style hover button can insert saved notes into a chat composer without auto-sending.",
-          category: "factual",
-          user_categories: []
+          pile_slug: "factual",
+          extra_piles: []
         },
         {
           kind: "entity",
           title: "Grammarly",
           snippet: "Grammarly | uses | hover button affordances near text inputs",
-          user_categories: []
+          extra_piles: []
         },
         {
           kind: "session",
           title: "Morning journal",
           snippet: "Today I walked to the coffee shop and wrote in my notebook.",
-          category: "journal",
-          user_categories: []
+          pile_slug: "journal",
+          extra_piles: []
         },
         {
           kind: "session",
           title: "Generic extension notes",
           snippet: "An extension can have a popup and a settings page.",
-          category: "factual",
-          user_categories: []
+          pile_slug: "factual",
+          extra_piles: []
         }
       ]
     );
@@ -92,8 +92,8 @@ describe("context suggestions model", () => {
           kind: "session",
           title: "Input validation",
           snippet: "Validate form input before saving extension settings.",
-          category: "factual",
-          user_categories: []
+          pile_slug: "factual",
+          extra_piles: []
         }
       ]
     );

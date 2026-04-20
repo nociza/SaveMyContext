@@ -9,7 +9,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import ProviderName, SessionCategory
+from app.models.enums import ProviderName, BuiltInPileSlug
 
 
 class ChatSession(TimestampMixin, Base):
@@ -32,8 +32,9 @@ class ChatSession(TimestampMixin, Base):
     title: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
     markdown_path: Mapped[str | None] = mapped_column(Text)
-    category: Mapped[SessionCategory | None] = mapped_column(
-        SAEnum(SessionCategory, native_enum=False),
+    built_in_pile: Mapped[BuiltInPileSlug | None] = mapped_column(
+        "category",
+        SAEnum(BuiltInPileSlug, native_enum=False),
         index=True,
     )
     pile_id: Mapped[str | None] = mapped_column(
@@ -72,3 +73,11 @@ class ChatSession(TimestampMixin, Base):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def category(self) -> BuiltInPileSlug | None:
+        return self.built_in_pile
+
+    @category.setter
+    def category(self, value: BuiltInPileSlug | None) -> None:
+        self.built_in_pile = value

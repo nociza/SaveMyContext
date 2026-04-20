@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import FactTriplet, SyncEvent
 from app.models.base import Base
-from app.models import ChatMessage, ChatSession, MessageRole, ProviderName, SessionCategory
+from app.models import ChatMessage, ChatSession, MessageRole, ProviderName, BuiltInPileSlug
 from app.services.markdown import MarkdownExporter
 
 
@@ -16,7 +16,7 @@ def test_markdown_renderer_includes_transcript() -> None:
         provider=ProviderName.CHATGPT,
         external_session_id="session-1",
         title="Test Session",
-        category=SessionCategory.JOURNAL,
+        built_in_pile=BuiltInPileSlug.JOURNAL,
         custom_tags=["daily"],
         last_captured_at=datetime.now(timezone.utc),
     )
@@ -43,7 +43,7 @@ def test_markdown_renderer_includes_todo_update_link() -> None:
         provider=ProviderName.GEMINI,
         external_session_id="todo-session-1",
         title="Update shared tasks",
-        category=SessionCategory.TODO,
+        built_in_pile=BuiltInPileSlug.TODO,
         todo_summary="Added 'Buy milk' and marked 'File taxes' done.",
         last_captured_at=datetime.now(timezone.utc),
     )
@@ -69,7 +69,7 @@ def test_markdown_renderer_formats_idea_summary_for_humans() -> None:
         provider=ProviderName.GEMINI,
         external_session_id="idea-session-1",
         title="Idea Session",
-        category=SessionCategory.IDEAS,
+        built_in_pile=BuiltInPileSlug.IDEAS,
         idea_summary={
             "core_idea": "Turn AI chats into organized notes.",
             "pros": ["Private by default", "Searchable knowledge"],
@@ -94,7 +94,7 @@ def test_source_markdown_renderer_includes_raw_payloads_and_sync_captures() -> N
         provider=ProviderName.GEMINI,
         external_session_id="source-session-1",
         title="Source Session",
-        category=SessionCategory.FACTUAL,
+        built_in_pile=BuiltInPileSlug.FACTUAL,
         source_url="https://gemini.google.com/app/source-session-1",
         last_captured_at=datetime.now(timezone.utc),
     )
@@ -139,7 +139,7 @@ async def test_markdown_export_handles_mixed_naive_and_aware_session_timestamps(
             provider=ProviderName.GEMINI,
             external_session_id="aware-session",
             title="Aware Session",
-            category=SessionCategory.FACTUAL,
+            built_in_pile=BuiltInPileSlug.FACTUAL,
             source_url="https://gemini.google.com/app/aware-session",
             last_captured_at=datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc),
         )
@@ -147,7 +147,7 @@ async def test_markdown_export_handles_mixed_naive_and_aware_session_timestamps(
             provider=ProviderName.GEMINI,
             external_session_id="naive-session",
             title="Naive Session",
-            category=SessionCategory.FACTUAL,
+            built_in_pile=BuiltInPileSlug.FACTUAL,
             source_url="https://gemini.google.com/app/naive-session",
             last_captured_at=datetime(2026, 4, 2, 11, 0),
         )

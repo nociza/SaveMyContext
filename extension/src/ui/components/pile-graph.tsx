@@ -6,19 +6,19 @@ import noverlap from "graphology-layout-noverlap";
 import Sigma from "sigma";
 
 import { providerLabels } from "../../shared/explorer";
-import type { BackendCategoryGraph, BackendExplorerGraphEdge, BackendExplorerGraphNode, ProviderName, SessionCategoryName } from "../../shared/types";
+import type { BackendPileGraph, BackendExplorerGraphEdge, BackendExplorerGraphNode, ProviderName, BuiltInPileSlug } from "../../shared/types";
 import {
-  buildCategoryGraphClusters,
+  buildPileGraphClusters,
   clusterAccentForNode,
-  type CategoryGraphCluster,
+  type PileGraphCluster,
   type GraphGroupingMode
-} from "../lib/category-graph-insights";
+} from "../lib/pile-graph-insights";
 import { cn } from "../lib/utils";
 
-export type CategoryGraphDensity = "curated" | "complete";
-export type CategoryGraphFocusMode = "context" | "dim";
+export type PileGraphDensity = "curated" | "complete";
+export type PileGraphFocusMode = "context" | "dim";
 
-export type CategoryGraphSelection =
+export type PileGraphSelection =
   | {
       kind: "node";
       id: string;
@@ -94,13 +94,13 @@ function nodeScore(node: BackendExplorerGraphNode, degree: number, activeSession
 
 function fallbackClusterFor(
   node: BackendExplorerGraphNode,
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   groupingMode: GraphGroupingMode
-): CategoryGraphCluster {
+): PileGraphCluster {
   return {
     id: `fallback:${node.id}`,
     label: node.label,
-    accent: clusterAccentForNode(node, category, groupingMode),
+    accent: clusterAccentForNode(node, pile, groupingMode),
     mode: groupingMode,
     provider: groupingMode === "provider" ? node.provider ?? null : null,
     nodeIds: [node.id],
@@ -146,18 +146,18 @@ function addSafeEdge(
 }
 
 function buildSigmaGraph(
-  backendGraph: BackendCategoryGraph,
-  category: SessionCategoryName,
+  backendGraph: BackendPileGraph,
+  pile: BuiltInPileSlug,
   groupingMode: GraphGroupingMode,
   collapsedGroups: string[],
-  density: CategoryGraphDensity,
-  focusMode: CategoryGraphFocusMode,
+  density: PileGraphDensity,
+  focusMode: PileGraphFocusMode,
   focusSessionIds?: string[]
 ): GraphBuildResult {
   const activeSessions = focusSessionIds?.length ? new Set(focusSessionIds) : null;
   const contextOnly = Boolean(activeSessions && focusMode === "context");
   const collapsedSet = new Set(collapsedGroups);
-  const clusterLookup = buildCategoryGraphClusters(backendGraph, category, groupingMode);
+  const clusterLookup = buildPileGraphClusters(backendGraph, pile, groupingMode);
   const nodeById = new Map(backendGraph.nodes.map((node) => [node.id, node] as const));
   const degreeByNodeId = new Map<string, number>(backendGraph.nodes.map((node) => [node.id, node.degree ?? 0]));
 
@@ -189,7 +189,7 @@ function buildSigmaGraph(
     if (!scopedNodeIds.has(node.id)) {
       continue;
     }
-    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, category, groupingMode);
+    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, pile, groupingMode);
     const entry =
       clusterMap.get(cluster.id) ??
       (() => {
@@ -306,7 +306,7 @@ function buildSigmaGraph(
     if (!node || !scopedNodeIds.has(nodeId)) {
       return null;
     }
-    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, category, groupingMode);
+    const cluster = clusterLookup.byNodeId.get(node.id) ?? fallbackClusterFor(node, pile, groupingMode);
     if (collapsedSet.has(cluster.id)) {
       return cluster.id;
     }
@@ -436,9 +436,9 @@ function selectedNeighborSet(graph: Graph<SigmaNodeAttributes, SigmaEdgeAttribut
   return neighbors;
 }
 
-export function CategoryGraph({
+export function PileGraph({
   graph,
-  category,
+  pile,
   groupingMode,
   collapsedGroups,
   density,
@@ -448,15 +448,15 @@ export function CategoryGraph({
   onInspect,
   className
 }: {
-  graph: BackendCategoryGraph;
-  category: SessionCategoryName;
+  graph: BackendPileGraph;
+  pile: BuiltInPileSlug;
   groupingMode: GraphGroupingMode;
   collapsedGroups: string[];
-  density: CategoryGraphDensity;
-  focusMode: CategoryGraphFocusMode;
+  density: PileGraphDensity;
+  focusMode: PileGraphFocusMode;
   focusSessionIds?: string[];
   onFocus: (label: string, sessionIds: string[]) => void;
-  onInspect?: (selection: CategoryGraphSelection | null) => void;
+  onInspect?: (selection: PileGraphSelection | null) => void;
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -469,8 +469,8 @@ export function CategoryGraph({
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   const build = useMemo(
-    () => buildSigmaGraph(graph, category, groupingMode, collapsedGroups, density, focusMode, focusSessionIds),
-    [category, collapsedGroups, density, focusMode, focusSessionIds, graph, groupingMode]
+    () => buildSigmaGraph(graph, pile, groupingMode, collapsedGroups, density, focusMode, focusSessionIds),
+    [pile, collapsedGroups, density, focusMode, focusSessionIds, graph, groupingMode]
   );
 
   useEffect(() => {

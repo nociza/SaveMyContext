@@ -13,11 +13,13 @@ import {
 
 import { fetchDashboardSummary, fetchSessions } from "../background/backend";
 import {
-  categoryGlyphs,
-  categoryLabels,
-  categoryOrder,
-  categoryPageUrl,
-  categoryPalette,
+  displayPileLabel,
+  isBuiltInPileSlug,
+  pileGlyphs,
+  pileLabels,
+  pileOrder,
+  pilePageUrl,
+  pilePalette,
   notePageUrl,
   providerLabels,
   titleFromSession
@@ -27,7 +29,7 @@ import type {
   BackendDashboardSummary,
   BackendSessionListItem,
   ExtensionSettings,
-  SessionCategoryName,
+  BuiltInPileSlug,
   SourceCaptureResponse,
   SyncStatus
 } from "../shared/types";
@@ -45,14 +47,14 @@ import {
 import { sendRuntimeMessage, useExtensionBootstrap } from "../ui/lib/runtime";
 
 type DashboardRouteState = {
-  category?: SessionCategoryName | null;
+  pile?: BuiltInPileSlug | null;
   view?: "notes" | "processing" | null;
   focus?: "triplets" | null;
 };
 
 function dashboardUrl(state: DashboardRouteState = {}): string {
   const url = new URL(chrome.runtime.getURL("dashboard.html"));
-  if (state.category) url.searchParams.set("category", state.category);
+  if (state.pile) url.searchParams.set("pile", state.pile);
   if (state.view) url.searchParams.set("view", state.view);
   if (state.focus) url.searchParams.set("focus", state.focus);
   return url.toString();
@@ -63,14 +65,14 @@ function openDashboard(state: DashboardRouteState = {}): void {
   window.close();
 }
 
-function openCategory(category: SessionCategoryName): void {
-  void chrome.tabs.create({ url: categoryPageUrl({ category }) });
+function openPile(pile: BuiltInPileSlug): void {
+  void chrome.tabs.create({ url: pilePageUrl({ pile }) });
   window.close();
 }
 
 function openNote(session: BackendSessionListItem): void {
   void chrome.tabs.create({
-    url: notePageUrl({ id: session.id, category: session.category ?? "factual" })
+    url: notePageUrl({ id: session.id, pile: session.pile_slug ?? "factual" })
   });
   window.close();
 }
@@ -115,21 +117,21 @@ function PopupApp() {
   const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
   const runQueueState = status ? processingButtonState(status) : { disabled: true, label: "Run queue", title: "Loading" };
 
-  const categoryData = useMemo(() => {
-    const counts = new Map(summary?.categories.map((item) => [item.category, item.count] as const) ?? []);
-    return categoryOrder
-      .filter((category) => category !== "discarded")
-      .map((category) => ({
-        category,
-        label: categoryLabels[category],
-        count: counts.get(category) ?? 0,
-        accent: categoryPalette[category].accent
+  const pileData = useMemo(() => {
+    const counts = new Map(summary?.piles.map((item) => [item.pile_slug, item.count] as const) ?? []);
+    return pileOrder
+      .filter((pile) => pile !== "discarded")
+      .map((pile) => ({
+        pile,
+        label: pileLabels[pile],
+        count: counts.get(pile) ?? 0,
+        accent: pilePalette[pile].accent
       }));
   }, [summary]);
 
   const activeProvider = detectProviderFromUrl(activeTabInfo?.url ?? "");
   const isProviderTab = Boolean(activeProvider);
-  const primaryLabel = isProviderTab
+  const primaryLabel = isProviderTab && activeProvider
     ? `Capture this ${providerLabels[activeProvider]} chat`
     : "Save this page";
 
@@ -329,12 +331,12 @@ function PopupApp() {
       </div>
 
       <div className="mx-5 mb-3 grid grid-cols-2 gap-2">
-        {categoryData.map((item) => (
-          <button
-            key={item.category}
-            type="button"
-            data-testid={`popup-category-${item.category}`}
-            onClick={() => openCategory(item.category)}
+          {pileData.map((item) => (
+            <button
+              key={item.pile}
+              type="button"
+              data-testid={`popup-pile-${item.pile}`}
+              onClick={() => openPile(item.pile)}
             className="group relative flex items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2.5 text-left transition hover:-translate-y-px hover:border-[var(--color-line-strong)] hover:shadow-[0_8px_22px_-12px_rgba(15,27,44,0.18)]"
           >
             <div className="flex min-w-0 items-center gap-2.5">
@@ -346,7 +348,7 @@ function PopupApp() {
                   fontFamily: "var(--font-display)"
                 }}
               >
-                {categoryGlyphs[item.category]}
+                {pileGlyphs[item.pile]}
               </div>
               <div className="flex min-w-0 flex-col leading-none">
                 <span className="text-[13px] font-semibold text-[var(--color-ink)]">{item.label}</span>
@@ -373,8 +375,8 @@ function PopupApp() {
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5">
           {recentSessions.length ? (
             recentSessions.map((session) => {
-              const category = session.category ?? "factual";
-              const accent = categoryPalette[category].accent;
+              const pile = session.pile_slug ?? "factual";
+              const accent = isBuiltInPileSlug(pile) ? pilePalette[pile].accent : "var(--color-factual)";
               return (
                 <button
                   key={session.id}
@@ -388,7 +390,7 @@ function PopupApp() {
                       {titleFromSession(session)}
                     </span>
                     <span className="mt-0.5 block truncate text-[10.5px] text-[var(--color-ink-subtle)]">
-                      {categoryLabels[category]} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
+                      {displayPileLabel(pile)} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
                     </span>
                   </span>
                 </button>

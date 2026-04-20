@@ -1,16 +1,16 @@
-import { categoryPalette, providerColors, providerLabels } from "../../shared/explorer";
+import { pilePalette, providerColors, providerLabels } from "../../shared/explorer";
 import type {
-  BackendCategoryGraph,
+  BackendPileGraph,
   BackendExplorerGraphNode,
   BackendSessionListItem,
   ProviderName,
-  SessionCategoryName
+  BuiltInPileSlug
 } from "../../shared/types";
 
 export type GraphGroupingMode = "community" | "provider" | "kind";
 export type InsightTone = "neutral" | "info" | "warning" | "danger";
 
-export interface CategoryGraphCluster {
+export interface PileGraphCluster {
   id: string;
   label: string;
   accent: string;
@@ -23,7 +23,7 @@ export interface CategoryGraphCluster {
   noteCount: number;
 }
 
-export interface CategoryGraphDenseNode {
+export interface PileGraphDenseNode {
   id: string;
   label: string;
   accent: string;
@@ -36,14 +36,14 @@ export interface CategoryGraphDenseNode {
   lastUpdated?: string | null;
 }
 
-export interface CategoryGraphStoryline extends CategoryGraphDenseNode {
+export interface PileGraphStoryline extends PileGraphDenseNode {
   clusterId: string;
   clusterLabel: string;
   score: number;
   summary: string;
 }
 
-export interface CategoryGraphWarning {
+export interface PileGraphWarning {
   id: string;
   tone: InsightTone;
   label: string;
@@ -51,11 +51,11 @@ export interface CategoryGraphWarning {
   sessionIds?: string[];
 }
 
-export interface CategoryGraphInsights {
-  clusters: CategoryGraphCluster[];
-  denseNodes: CategoryGraphDenseNode[];
-  storylines: CategoryGraphStoryline[];
-  warnings: CategoryGraphWarning[];
+export interface PileGraphInsights {
+  clusters: PileGraphCluster[];
+  denseNodes: PileGraphDenseNode[];
+  storylines: PileGraphStoryline[];
+  warnings: PileGraphWarning[];
   graphSessionIds: string[];
   corroboratedNodes: number;
   singleSourceNodes: number;
@@ -101,7 +101,7 @@ function latestSessionTimestamp(sessionIds: string[], sessionTimestampById: Map<
   return latest;
 }
 
-export function clusterKeyForNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
+export function clusterKeyForPileNode(node: Pick<BackendExplorerGraphNode, "kind" | "provider">, groupingMode: GraphGroupingMode): string {
   if (groupingMode === "community") {
     return "community:unassigned";
   }
@@ -123,20 +123,20 @@ export function clusterLabelForNode(node: Pick<BackendExplorerGraphNode, "kind" 
 
 export function clusterAccentForNode(
   node: Pick<BackendExplorerGraphNode, "kind" | "provider">,
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   groupingMode: GraphGroupingMode
 ): string {
   if (groupingMode === "community") {
-    return categoryPalette[category].accent;
+    return pilePalette[pile].accent;
   }
   if (groupingMode === "provider" && node.provider) {
     return providerColors[node.provider];
   }
   const kind = node.kind?.trim();
   if (!kind) {
-    return categoryPalette[category].accent;
+    return pilePalette[pile].accent;
   }
-  return kindAccents[hashString(kind) % kindAccents.length] ?? categoryPalette[category].accent;
+  return kindAccents[hashString(kind) % kindAccents.length] ?? pilePalette[pile].accent;
 }
 
 type MutableCluster = {
@@ -150,12 +150,12 @@ type MutableCluster = {
   edgeCount: number;
 };
 
-export interface CategoryGraphClusterLookup {
-  clusters: CategoryGraphCluster[];
-  byNodeId: Map<string, CategoryGraphCluster>;
+export interface PileGraphClusterLookup {
+  clusters: PileGraphCluster[];
+  byNodeId: Map<string, PileGraphCluster>;
 }
 
-function buildAdjacency(graph: BackendCategoryGraph): Map<string, Map<string, number>> {
+function buildAdjacency(graph: BackendPileGraph): Map<string, Map<string, number>> {
   const adjacency = new Map<string, Map<string, number>>();
   for (const node of graph.nodes) {
     adjacency.set(node.id, new Map());
@@ -175,7 +175,7 @@ function buildAdjacency(graph: BackendCategoryGraph): Map<string, Map<string, nu
   return adjacency;
 }
 
-function detectCommunities(graph: BackendCategoryGraph): Map<string, string> {
+function detectCommunities(graph: BackendPileGraph): Map<string, string> {
   const adjacency = buildAdjacency(graph);
   const communities = new Map(graph.nodes.map((node) => [node.id, node.id] as const));
   const rankedNodes = [...graph.nodes].sort((left, right) => {
@@ -227,7 +227,7 @@ function nodeImportance(node: BackendExplorerGraphNode, adjacency: Map<string, M
   return degree * 5 + node.session_ids.length * 4 + Math.log(node.size + 1) * 6;
 }
 
-function backendCommunityMap(graph: BackendCategoryGraph): Map<string, string> | null {
+function backendCommunityMap(graph: BackendPileGraph): Map<string, string> | null {
   const values = graph.nodes
     .map((node) => node.community_id?.trim())
     .filter((value): value is string => Boolean(value));
@@ -237,11 +237,11 @@ function backendCommunityMap(graph: BackendCategoryGraph): Map<string, string> |
   return new Map(graph.nodes.map((node) => [node.id, node.community_id?.trim() || "community:peripheral"] as const));
 }
 
-export function buildCategoryGraphClusters(
-  graph: BackendCategoryGraph,
-  category: SessionCategoryName,
+export function buildPileGraphClusters(
+  graph: BackendPileGraph,
+  pile: BuiltInPileSlug,
   groupingMode: GraphGroupingMode
-): CategoryGraphClusterLookup {
+): PileGraphClusterLookup {
   const adjacency = buildAdjacency(graph);
   const backendCommunities = groupingMode === "community" ? backendCommunityMap(graph) : null;
   const communityByNodeId = groupingMode === "community" ? backendCommunities ?? detectCommunities(graph) : null;
@@ -263,7 +263,7 @@ export function buildCategoryGraphClusters(
     const id =
       groupingMode === "community"
         ? communityClusterId(node)
-        : clusterKeyForNode(node, groupingMode);
+        : clusterKeyForPileNode(node, groupingMode);
     const created =
       mutableClusters.get(id) ??
       (() => {
@@ -275,8 +275,8 @@ export function buildCategoryGraphClusters(
               : clusterLabelForNode(node, groupingMode),
           accent:
             groupingMode === "community"
-              ? communityAccents[mutableClusters.size % communityAccents.length] ?? categoryPalette[category].accent
-              : clusterAccentForNode(node, category, groupingMode),
+              ? communityAccents[mutableClusters.size % communityAccents.length] ?? pilePalette[pile].accent
+              : clusterAccentForNode(node, pile, groupingMode),
           mode: groupingMode,
           provider: groupingMode === "provider" ? node.provider ?? null : null,
           nodeIds: new Set<string>(),
@@ -325,7 +325,7 @@ export function buildCategoryGraphClusters(
     if (groupingMode !== "community") {
       continue;
     }
-    cluster.accent = communityAccents[index % communityAccents.length] ?? categoryPalette[category].accent;
+    cluster.accent = communityAccents[index % communityAccents.length] ?? pilePalette[pile].accent;
     if (cluster.id === "community:peripheral") {
       cluster.label = "Peripheral facts";
       continue;
@@ -362,12 +362,12 @@ export function buildCategoryGraphClusters(
   }));
 
   const clusterById = new Map(clusters.map((cluster) => [cluster.id, cluster] as const));
-  const byNodeId = new Map<string, CategoryGraphCluster>();
+  const byNodeId = new Map<string, PileGraphCluster>();
   for (const node of graph.nodes) {
     const clusterId =
       groupingMode === "community"
         ? communityClusterId(node)
-        : clusterKeyForNode(node, groupingMode);
+        : clusterKeyForPileNode(node, groupingMode);
     const cluster = clusterById.get(clusterId);
     if (cluster) {
       byNodeId.set(node.id, cluster);
@@ -377,12 +377,12 @@ export function buildCategoryGraphClusters(
   return { clusters, byNodeId };
 }
 
-export function buildCategoryGraphInsights(
-  graph: BackendCategoryGraph,
+export function buildPileGraphInsights(
+  graph: BackendPileGraph,
   sessions: BackendSessionListItem[],
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   groupingMode: GraphGroupingMode
-): CategoryGraphInsights {
+): PileGraphInsights {
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node] as const));
   const sessionTimestampById = new Map(sessions.map((session) => [session.id, session.updated_at] as const));
   const graphSessionIds = new Set<string>();
@@ -397,7 +397,7 @@ export function buildCategoryGraphInsights(
     }
   }
 
-  const clusterLookup = buildCategoryGraphClusters(graph, category, groupingMode);
+  const clusterLookup = buildPileGraphClusters(graph, pile, groupingMode);
 
   for (const edge of graph.edges) {
     const sourceNode = nodeById.get(edge.source);
@@ -433,7 +433,7 @@ export function buildCategoryGraphInsights(
       return {
         id: node.id,
         label: node.label,
-        accent: clusterLookup.byNodeId.get(node.id)?.accent ?? clusterAccentForNode(node, category, groupingMode),
+        accent: clusterLookup.byNodeId.get(node.id)?.accent ?? clusterAccentForNode(node, pile, groupingMode),
         kind: node.kind,
         provider: node.provider ?? null,
         degree: adjacency.get(node.id)?.size ?? 0,
@@ -453,7 +453,7 @@ export function buildCategoryGraphInsights(
   const storylineMap = new Map(clusters.map((cluster) => [cluster.id, cluster.label] as const));
   const storylines = graph.nodes
     .map((node) => {
-      const clusterId = clusterKeyForNode(node, groupingMode);
+      const clusterId = clusterKeyForPileNode(node, groupingMode);
       const cluster = clusterLookup.byNodeId.get(node.id);
       const degree = adjacency.get(node.id)?.size ?? 0;
       const noteCount = node.session_ids.length;
@@ -472,7 +472,7 @@ export function buildCategoryGraphInsights(
       return {
         id: node.id,
         label: node.label,
-        accent: cluster?.accent ?? clusterAccentForNode(node, category, groupingMode),
+        accent: cluster?.accent ?? clusterAccentForNode(node, pile, groupingMode),
         kind: node.kind,
         provider: node.provider ?? null,
         degree,
@@ -494,7 +494,7 @@ export function buildCategoryGraphInsights(
   const averageEdgeWeight = graph.edges.length ? graph.edges.reduce((sum, edge) => sum + edge.weight, 0) / graph.edges.length : 0;
   const averageNodesPerSession = sessions.length ? graph.nodes.length / sessions.length : 0;
 
-  const warnings: CategoryGraphWarning[] = [];
+  const warnings: PileGraphWarning[] = [];
 
   if (orphanNodes.length > 0) {
     warnings.push({

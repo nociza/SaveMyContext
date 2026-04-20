@@ -447,8 +447,8 @@ function PileCard({
 
           {discarded ? (
             <Field
-              label="Auto-discard categories"
-              hint="Comma- or newline-separated. The classifier sees these as descriptions of categories that should auto-route to Discarded."
+              label="Auto-discard pile hints"
+              hint="Comma- or newline-separated. The classifier treats these as descriptions of sessions that should auto-route to Discarded."
             >
               <textarea
                 value={autoDiscardCategories}

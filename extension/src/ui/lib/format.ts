@@ -183,7 +183,7 @@ export function nextActionText(
     return "Open a supported provider tab to start capturing context.";
   }
   if ((summary?.total_sessions ?? 0) > 0) {
-    return "Open a collection to inspect saved context.";
+    return "Open a pile to inspect saved context.";
   }
   return "Save the current page or visit a provider conversation.";
 }

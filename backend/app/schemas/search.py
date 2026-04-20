@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import SessionCategory, ProviderName
+from app.models.enums import ProviderName
 
 
 class SearchResult(BaseModel):
@@ -12,9 +12,9 @@ class SearchResult(BaseModel):
     session_id: str | None = None
     source_id: str | None = None
     entity_id: str | None = None
-    category: SessionCategory | None = None
+    pile_slug: str | None = None
     provider: ProviderName | None = None
-    user_categories: list[str] = Field(default_factory=list)
+    extra_piles: list[str] = Field(default_factory=list)
     markdown_path: str | None = None
 
 

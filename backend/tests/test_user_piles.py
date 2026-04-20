@@ -164,7 +164,7 @@ async def test_classifier_routes_into_user_defined_pile(tmp_path, monkeypatch) -
             payload = ingest.json()
             assert payload["pile_slug"] == "research"
             assert payload["is_discarded"] is False
-            assert payload["category"] is None
+            assert set(payload) >= {"session_id", "pile_slug", "is_discarded", "new_message_count", "processed"}
     finally:
         get_settings.cache_clear()
     await engine.dispose()
@@ -194,10 +194,10 @@ async def test_auto_discard_categories_route_session_to_discarded_via_classifier
 
     async def fake_generate_json(self, system_prompt, user_prompt, schema):  # type: ignore[no-untyped-def]
         from app.schemas.processing import ClassificationResult
-        from app.models.enums import SessionCategory as _SC
+        from app.models.enums import BuiltInPileSlug as _SC
 
         if "classify transcripts" in system_prompt.lower() or "classify" in system_prompt.lower():
-            return ClassificationResult(category=_SC.DISCARDED, reason="matched 'small talk'")
+            return ClassificationResult(pile=_SC.DISCARDED, reason="matched 'small talk'")
         # Fallback for any other LLM calls — should not be hit when discarding.
         raise RuntimeError("unexpected LLM call after discard")
 

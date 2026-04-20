@@ -6,20 +6,21 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import { fetchSessionNote } from "../background/backend";
 import {
-  categoryGlyphs,
-  categoryLabels,
-  categoryPageUrl,
-  categoryPalette,
+  displayPileLabel,
+  isBuiltInPileSlug,
+  pileGlyphs,
+  pilePageUrl,
+  pilePalette,
   formatCompactDate,
   formatLongDate,
-  parseCategory,
+  parsePile,
   parseProvider,
   parseSortMode,
   providerLabels,
   titleFromSession,
-  type CategorySortMode
+  type PileSortMode
 } from "../shared/explorer";
-import type { BackendSessionNoteRead, ExtensionSettings, ProviderName, SessionCategoryName } from "../shared/types";
+import type { BackendSessionNoteRead, ExtensionSettings, PileSlug, ProviderName } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Button } from "../ui/components/button";
 import { ScrollArea } from "../ui/components/scroll-area";
@@ -29,34 +30,34 @@ import { useExtensionBootstrap } from "../ui/lib/runtime";
 
 type NoteRouteState = {
   id: string | null;
-  category: SessionCategoryName | null;
+  pile: PileSlug | null;
   q: string;
   provider: ProviderName | null;
-  sort: CategorySortMode;
-  userCategory: string;
+  sort: PileSortMode;
+  extraPile: string;
 };
 
 function readRouteState(): NoteRouteState {
   const params = new URLSearchParams(window.location.search);
   return {
     id: params.get("id"),
-    category: params.get("category") ? parseCategory(params.get("category")) : null,
+    pile: params.get("pile")?.trim() ?? null,
     q: params.get("q")?.trim() ?? "",
     provider: parseProvider(params.get("provider")),
     sort: parseSortMode(params.get("sort")),
-    userCategory: params.get("userCategory")?.trim() ?? ""
+    extraPile: params.get("extraPile")?.trim() ?? ""
   };
 }
 
 function backUrl(route: NoteRouteState): string {
-  if (!route.category) return chrome.runtime.getURL("dashboard.html");
-  return categoryPageUrl({
-    category: route.category,
+  if (!route.pile || !isBuiltInPileSlug(route.pile)) return chrome.runtime.getURL("dashboard.html");
+  return pilePageUrl({
+    pile: route.pile,
     q: route.q,
     provider: route.provider,
     sort: route.sort,
     note: route.id,
-    userCategory: route.userCategory || null
+    extraPile: route.extraPile || null
   });
 }
 
@@ -72,8 +73,8 @@ function App() {
   });
 
   const note = noteQuery.data as BackendSessionNoteRead | undefined;
-  const category = note?.category ?? route.category ?? "factual";
-  const accent = categoryPalette[category].accent;
+  const pile = note?.pile_slug ?? route.pile ?? "factual";
+  const accent = isBuiltInPileSlug(pile) ? pilePalette[pile].accent : "var(--color-factual)";
 
   return (
     <div className="app-page app-page--reader">
@@ -102,8 +103,8 @@ function App() {
               className="inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em]"
               style={{ backgroundColor: `${accent}1a`, color: accent }}
             >
-              <span className="display-serif text-[13px] leading-none">{categoryGlyphs[category]}</span>
-              {categoryLabels[category]}
+              <span className="display-serif text-[13px] leading-none">{isBuiltInPileSlug(pile) ? pileGlyphs[pile] : "§"}</span>
+              {displayPileLabel(pile)}
             </span>
             {note ? (
               <span className="eyebrow">

@@ -139,7 +139,7 @@ class ExtensionBrowserProcessingService:
             session = await self.processor.apply_pipeline_result(
                 item.session_id,
                 SessionPipelineResult(
-                    category=item.category,
+                    pile=item.pile,
                     classification_reason=item.classification_reason,
                     journal=item.journal,
                     todo=item.todo,
@@ -152,7 +152,7 @@ class ExtensionBrowserProcessingService:
             results.append(
                 ProcessingCompleteResult(
                     session_id=session.id,
-                    category=session.category,
+                    pile_slug=session.pile.slug if session.pile else session.built_in_pile.value if session.built_in_pile else None,
                     markdown_path=session.markdown_path,
                     processed=session.last_processed_at is not None,
                 )
@@ -246,7 +246,7 @@ class ExtensionBrowserProcessingService:
                 ProcessingResultItem(
                     session_id=expected_ids[0],
                     task_key=expected_task_keys[0],
-                    category=single.category,
+                    pile=single.pile,
                     classification_reason=single.classification_reason,
                     journal=single.journal,
                     todo=single.todo,
@@ -282,7 +282,7 @@ class ExtensionBrowserProcessingService:
                 ProcessingResultItem(
                     session_id=resolved_id,
                     task_key=item.task_key or expected_task_keys[index],
-                    category=item.category,
+                    pile=item.pile,
                     classification_reason=item.classification_reason,
                     journal=item.journal,
                     todo=item.todo,

@@ -72,7 +72,7 @@ When no user piles exist, classification stays on the legacy four-bucket path so
 The discarded pile is the entry point for three routing paths:
 
 1. **Discard words** (extension-side). Default: `loom`, ON by default. Configure under Settings → Discard pile.
-2. **LLM auto-discard categories**. `PATCH /api/v1/piles/discarded` with `pipeline_config.auto_discard_categories = ["small talk", "test sessions"]`. The classifier prompt is augmented with these strings.
+2. **LLM auto-discard pile hints**. `PATCH /api/v1/piles/discarded` with `pipeline_config.auto_discard_categories = ["small talk", "test sessions"]` (legacy config key). The classifier prompt is augmented with these strings.
 3. **Manual discard**. `POST /api/v1/piles/discarded/sessions/{id}/discard`.
 
 Recovering: `POST /api/v1/piles/discarded/sessions/{id}/recover` clears the discard flag, re-runs the full classification pipeline, and moves the markdown file from `Discarded/{YYYY}/` into the appropriate pile folder. The dashboard's Discarded panel exposes this with a one-click button.

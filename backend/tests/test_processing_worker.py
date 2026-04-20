@@ -72,8 +72,8 @@ async def test_processing_worker_complete_applies_pipeline_result_batch_and_writ
                 [first_session.id, second_session.id],
                 (
                     '{"results":['
-                    '{"session_id":"%s","category":"journal","classification_reason":"Personal planning.","journal":{"entry":"Planned the next day.","action_items":["Review the release checklist"]},"factual_triplets":[],"idea":null},'
-                    '{"session_id":"%s","category":"factual","classification_reason":"Technical explanation.","journal":null,"factual_triplets":[{"subject":"FastAPI","predicate":"uses","object":"uvloop","confidence":0.92}],"idea":null}'
+                    '{"session_id":"%s","pile":"journal","classification_reason":"Personal planning.","journal":{"entry":"Planned the next day.","action_items":["Review the release checklist"]},"factual_triplets":[],"idea":null},'
+                    '{"session_id":"%s","pile":"factual","classification_reason":"Technical explanation.","journal":null,"factual_triplets":[{"subject":"FastAPI","predicate":"uses","object":"uvloop","confidence":0.92}],"idea":null}'
                     "]}"
                 )
                 % (first_session.id, second_session.id),
@@ -86,10 +86,10 @@ async def test_processing_worker_complete_applies_pipeline_result_batch_and_writ
             assert [item.session_id for item in result.results] == [first_session.id, second_session.id]
             assert refreshed_first is not None
             assert refreshed_second is not None
-            assert refreshed_first.category.value == "journal"
+            assert refreshed_first.built_in_pile.value == "journal"
             assert "Planned the next day." in (refreshed_first.journal_entry or "")
             assert refreshed_first.markdown_path is not None
-            assert refreshed_second.category.value == "factual"
+            assert refreshed_second.built_in_pile.value == "factual"
             assert refreshed_second.markdown_path is not None
     finally:
         get_settings.cache_clear()
@@ -147,7 +147,7 @@ async def test_processing_worker_complete_rejects_invalid_json_with_clear_error(
             with pytest.raises(ValueError, match="Could not parse the processing response as valid JSON"):
                 await worker.complete_task(
                     [stored_session.id],
-                    '{"category":"journal","classification_reason":"broken \\q"}',
+                    '{"pile":"journal","classification_reason":"broken \\q"}',
                 )
     finally:
         get_settings.cache_clear()
@@ -193,7 +193,7 @@ async def test_processing_worker_complete_accepts_task_key_reply_and_maps_to_exp
             worker = ExtensionBrowserProcessingService(session)
             result = await worker.complete_task(
                 [stored_session.id],
-                '{"results":[{"task_key":"task_1","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+                '{"results":[{"task_key":"task_1","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
             )
 
             assert result.processed_count == 1
@@ -242,7 +242,7 @@ async def test_processing_worker_complete_accepts_single_result_with_wrong_sessi
             worker = ExtensionBrowserProcessingService(session)
             result = await worker.complete_task(
                 [stored_session.id],
-                '{"results":[{"session_id":"made-up-id","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+                '{"results":[{"session_id":"made-up-id","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
             )
 
             assert result.processed_count == 1

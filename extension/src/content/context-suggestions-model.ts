@@ -185,7 +185,7 @@ function scoreSuggestion(
   contextTerms: string[],
   phrases: string[]
 ): number {
-  if (result.category === "journal") {
+  if (result.pile_slug === "journal") {
     return Number.NEGATIVE_INFINITY;
   }
   if (result.kind === "todo_list" && !taskContext(context)) {
@@ -213,16 +213,16 @@ function scoreSuggestion(
   if (result.kind === "entity") {
     score += 2;
   }
-  if (result.category === "factual") {
+  if (result.pile_slug === "factual") {
     score += 3;
   }
-  if (result.category === "ideas") {
+  if (result.pile_slug === "ideas") {
     score += 2;
   }
   if (result.kind === "source_capture") {
     score += 1;
   }
-  if (result.category === "todo") {
+  if (result.pile_slug === "todo") {
     score += taskContext(context) ? 1 : -2;
   }
 

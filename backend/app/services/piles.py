@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.models.enums import PileKind, SessionCategory
+from app.models.enums import PileKind, BuiltInPileSlug
 
 
 PILE_ATTRIBUTES: frozenset[str] = frozenset(
@@ -112,27 +112,27 @@ SLUG_BY_BUILT_IN_KIND: dict[PileKind, str] = {seed.kind: seed.slug for seed in D
 BUILT_IN_KIND_BY_SLUG: dict[str, PileKind] = {seed.slug: seed.kind for seed in DEFAULT_PILES}
 
 
-CATEGORY_TO_BUILT_IN_SLUG: dict[SessionCategory, str] = {
-    SessionCategory.JOURNAL: "journal",
-    SessionCategory.FACTUAL: "factual",
-    SessionCategory.IDEAS: "ideas",
-    SessionCategory.TODO: "todo",
-    SessionCategory.DISCARDED: "discarded",
+CATEGORY_TO_BUILT_IN_SLUG: dict[BuiltInPileSlug, str] = {
+    BuiltInPileSlug.JOURNAL: "journal",
+    BuiltInPileSlug.FACTUAL: "factual",
+    BuiltInPileSlug.IDEAS: "ideas",
+    BuiltInPileSlug.TODO: "todo",
+    BuiltInPileSlug.DISCARDED: "discarded",
 }
 
 
-BUILT_IN_SLUG_TO_CATEGORY: dict[str, SessionCategory] = {
+BUILT_IN_SLUG_TO_CATEGORY: dict[str, BuiltInPileSlug] = {
     slug: category for category, slug in CATEGORY_TO_BUILT_IN_SLUG.items()
 }
 
 
-def category_for_pile_slug(slug: str | None) -> SessionCategory | None:
+def category_for_pile_slug(slug: str | None) -> BuiltInPileSlug | None:
     if not slug:
         return None
     return BUILT_IN_SLUG_TO_CATEGORY.get(slug)
 
 
-def pile_slug_for_category(category: SessionCategory | None) -> str | None:
+def pile_slug_for_category(category: BuiltInPileSlug | None) -> str | None:
     if category is None:
         return None
     return CATEGORY_TO_BUILT_IN_SLUG.get(category)

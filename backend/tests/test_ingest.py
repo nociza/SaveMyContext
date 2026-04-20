@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import ChatMessage, ChatSession
 from app.models.base import Base
-from app.models.enums import MessageRole, ProviderName, SessionCategory
+from app.models.enums import MessageRole, ProviderName, BuiltInPileSlug
 from app.schemas.ingest import IngestDiffRequest, IngestMessage
 from app.core.config import get_settings
 from app.services.ingest import IngestService
@@ -293,7 +293,7 @@ async def test_ingest_writes_fact_triplets_into_session_markdown(tmp_path, monke
             markdown_path = Path(stored_session.markdown_path or "")
             markdown = markdown_path.read_text(encoding="utf-8")
 
-            assert stored_session.category == SessionCategory.FACTUAL
+            assert stored_session.built_in_pile == BuiltInPileSlug.FACTUAL
             assert any(triplet.subject == "FastAPI" and triplet.predicate == "uses" for triplet in stored_session.triplets)
             assert "## Fact Triplets" in markdown
             assert "- FastAPI | uses | uvloop" in markdown
@@ -481,9 +481,9 @@ async def test_ingest_browser_proxy_batches_when_experimental_browser_automation
             processing = ExtensionBrowserProcessingService(session)
             next_task = await processing.next_task()
 
-            assert first_session.category is None
+            assert first_session.built_in_pile is None
             assert first_session.last_processed_at is None
-            assert second_session.category is None
+            assert second_session.built_in_pile is None
             assert second_session.last_processed_at is None
             assert next_task.available is True
             assert next_task.task_count == 2
@@ -542,7 +542,7 @@ async def test_ingest_updates_shared_todo_list_and_versions_vault(tmp_path, monk
             todo_path = TodoListService(base_dir=service.exporter.base_dir).path
             todo_markdown = todo_path.read_text(encoding="utf-8")
 
-            assert stored_session.category == SessionCategory.TODO
+            assert stored_session.built_in_pile == BuiltInPileSlug.TODO
             assert stored_session.todo_summary is not None
             assert "buy milk" in stored_session.todo_summary.lower()
             assert "- [ ] buy milk" in todo_markdown

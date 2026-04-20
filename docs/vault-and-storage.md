@@ -62,7 +62,7 @@ SaveMyContext/
 - `Sources/`: raw provider payloads and raw source documents
 - `Graph/Entities/`: one note per extracted entity
 - `Graph/Indexes/`: entity and relationship indexes
-- `Dashboards/`: category indexes, graph index, captures index, home dashboard, and the shared to-do list
+- `Dashboards/`: pile indexes, graph index, captures index, home dashboard, and the shared to-do list
 - `README.md`: a human-facing vault summary
 - `AGENTS.md`: a machine-facing summary for tools that read the vault directly
 - `manifest.json`: a machine-readable snapshot of counts and entry points

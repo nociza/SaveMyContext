@@ -195,16 +195,16 @@ export interface BackendProcessingStatus {
   pending_count: number;
 }
 
-export type SessionCategoryName = "journal" | "factual" | "ideas" | "todo" | "discarded";
+export type BuiltInPileSlug = "journal" | "factual" | "ideas" | "todo" | "discarded";
 
 export type PileSlug = string;
 
-export interface DashboardCategoryCount {
-  category: SessionCategoryName;
+export interface DashboardPileCount {
+  pile_slug: BuiltInPileSlug;
   count: number;
 }
 
-export interface DashboardCustomCategoryCount {
+export interface DashboardExtraPileCount {
   name: string;
   count: number;
 }
@@ -216,8 +216,8 @@ export interface BackendDashboardSummary {
   total_sync_events: number;
   active_tokens: number;
   latest_sync_at?: string | null;
-  categories: DashboardCategoryCount[];
-  custom_categories: DashboardCustomCategoryCount[];
+  piles: DashboardPileCount[];
+  extra_piles: DashboardExtraPileCount[];
 }
 
 export interface BackendSystemStatus {
@@ -268,12 +268,11 @@ export interface BackendSessionListItem {
   provider: ProviderName;
   external_session_id: string;
   title?: string | null;
-  category?: SessionCategoryName | null;
   pile_slug?: string | null;
   is_discarded?: boolean;
   discarded_reason?: string | null;
   custom_tags: string[];
-  user_categories: string[];
+  extra_piles: string[];
   markdown_path?: string | null;
   share_post?: string | null;
   updated_at: string;
@@ -329,11 +328,11 @@ export interface BackendActivityBucket {
   count: number;
 }
 
-export interface BackendCategoryStats {
-  category: SessionCategoryName;
+export interface BackendPileStats {
+  pile_slug: BuiltInPileSlug;
   scope_kind: "default" | "custom";
   scope_label: string;
-  dominant_category: SessionCategoryName;
+  dominant_pile_slug: BuiltInPileSlug;
   total_sessions: number;
   total_messages: number;
   total_triplets: number;
@@ -344,7 +343,7 @@ export interface BackendCategoryStats {
   notes_with_idea_summary: number;
   notes_with_journal_entry: number;
   notes_with_todo_summary: number;
-  system_category_counts: DashboardCategoryCount[];
+  built_in_pile_counts: DashboardPileCount[];
   provider_counts: BackendProviderCount[];
   activity: BackendActivityBucket[];
   top_tags: BackendLabelCount[];
@@ -359,7 +358,7 @@ export interface BackendExplorerGraphNode {
   size: number;
   session_ids: string[];
   provider?: ProviderName | null;
-  category?: SessionCategoryName | null;
+  pile_slug?: string | null;
   updated_at?: string | null;
   note_path?: string | null;
   degree?: number;
@@ -394,11 +393,11 @@ export interface BackendExplorerGraphEvidence {
   snippet?: string | null;
 }
 
-export interface BackendCategoryGraph {
-  category: SessionCategoryName;
+export interface BackendPileGraph {
+  pile_slug: BuiltInPileSlug;
   scope_kind: "default" | "custom";
   scope_label: string;
-  dominant_category: SessionCategoryName;
+  dominant_pile_slug: BuiltInPileSlug;
   node_count: number;
   edge_count: number;
   nodes: BackendExplorerGraphNode[];
@@ -415,11 +414,11 @@ export interface BackendExplorerGraphPath {
   evidence_session_ids: string[];
 }
 
-export interface BackendCategoryGraphPath {
-  category: SessionCategoryName;
+export interface BackendPileGraphPath {
+  pile_slug: BuiltInPileSlug;
   scope_kind: "default" | "custom";
   scope_label: string;
-  dominant_category: SessionCategoryName;
+  dominant_pile_slug: BuiltInPileSlug;
   source: string;
   target: string;
   paths: BackendExplorerGraphPath[];
@@ -469,13 +468,13 @@ export interface BackendSearchResult {
   session_id?: string | null;
   source_id?: string | null;
   entity_id?: string | null;
-  category?: SessionCategoryName | null;
+  pile_slug?: string | null;
   provider?: ProviderName | null;
-  user_categories: string[];
+  extra_piles: string[];
   markdown_path?: string | null;
 }
 
-export interface BackendUserCategorySummary {
+export interface BackendExtraPileSummary {
   name: string;
   count: number;
 }
@@ -520,7 +519,7 @@ export interface ProcessingTaskResponse {
 
 export interface ProcessingCompleteResult {
   session_id: string;
-  category: SessionCategoryName;
+  pile_slug: string;
   markdown_path?: string;
   processed: boolean;
 }
@@ -754,7 +753,7 @@ export interface SourceCaptureResponse {
   captureKind?: SourceCaptureKind;
   saveMode?: SourceSaveMode;
   processed?: boolean;
-  category?: SessionCategoryName | null;
+  pile_slug?: string | null;
   markdownPath?: string | null;
   rawSourcePath?: string | null;
   error?: string;

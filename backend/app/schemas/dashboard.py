@@ -4,15 +4,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 
 
-class CategoryCount(BaseModel):
-    category: SessionCategory
+class PileCount(BaseModel):
+    pile_slug: BuiltInPileSlug
     count: int
 
 
-class CustomCategoryCount(BaseModel):
+class ExtraPileCount(BaseModel):
     name: str
     count: int
 
@@ -24,5 +24,5 @@ class DashboardSummary(BaseModel):
     total_sync_events: int
     active_tokens: int
     latest_sync_at: datetime | None
-    categories: list[CategoryCount]
-    custom_categories: list[CustomCategoryCount] = Field(default_factory=list)
+    piles: list[PileCount]
+    extra_piles: list[ExtraPileCount] = Field(default_factory=list)

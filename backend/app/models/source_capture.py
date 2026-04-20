@@ -8,7 +8,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 
 
 class SourceCapture(TimestampMixin, Base):
@@ -26,8 +26,9 @@ class SourceCapture(TimestampMixin, Base):
     cleaned_markdown: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
     classification_reason: Mapped[str | None] = mapped_column(Text)
-    category: Mapped[SessionCategory | None] = mapped_column(
-        SAEnum(SessionCategory, native_enum=False),
+    built_in_pile: Mapped[BuiltInPileSlug | None] = mapped_column(
+        "category",
+        SAEnum(BuiltInPileSlug, native_enum=False),
         index=True,
     )
     pile_id: Mapped[str | None] = mapped_column(
@@ -41,3 +42,11 @@ class SourceCapture(TimestampMixin, Base):
     raw_payload: Mapped[dict[str, Any] | list[Any] | None] = mapped_column(JSON)
 
     pile = relationship("Pile", lazy="joined")
+
+    @property
+    def category(self) -> BuiltInPileSlug | None:
+        return self.built_in_pile
+
+    @category.setter
+    def category(self, value: BuiltInPileSlug | None) -> None:
+        self.built_in_pile = value

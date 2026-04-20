@@ -10,7 +10,7 @@ from app.api.routes_dashboard import router as dashboard_router
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.models.base import Base
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 from app.services.source_capture import SourceCaptureEnrichment, SourceCaptureProcessor
 
 
@@ -82,7 +82,7 @@ async def test_capture_route_saves_ai_enriched_page_capture(tmp_path, monkeypatc
     async def fake_enrich(self, payload):  # type: ignore[no-untyped-def]
         return SourceCaptureEnrichment(
             title="Reference architecture note",
-            category=SessionCategory.FACTUAL,
+            pile=BuiltInPileSlug.FACTUAL,
             classification_reason="A factual reference page about distributed systems.",
             summary="Captures the main architecture constraints and design choices.",
             cleaned_markdown="# Reference architecture\n\n- Durable queues\n- Backpressure\n- Idempotent workers",
@@ -116,7 +116,7 @@ async def test_capture_route_saves_ai_enriched_page_capture(tmp_path, monkeypatc
         assert response.status_code == 202
         payload = response.json()
         assert payload["processed"] is True
-        assert payload["category"] == "factual"
+        assert payload["pile_slug"] == "factual"
         markdown_path = tmp_path / "markdown" / "SaveMyContext" / "Captures"
         assert any(markdown_path.glob("page--reference-architecture-note-*.md"))
         note_path = next(markdown_path.glob("page--reference-architecture-note-*.md"))

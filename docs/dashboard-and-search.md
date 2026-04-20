@@ -12,7 +12,7 @@ The popup is the fastest control surface. It shows:
 
 - backend connection status
 - the latest synced session
-- corpus mix by category
+- corpus mix by pile
 - history sync status
 - processing status
 - provider drift alerts when a provider site changes in a way that affects capture
@@ -39,7 +39,7 @@ Use this for the high-level snapshot:
 - graph node count
 - recent activity
 - provider mix
-- category breakdown
+- pile breakdown
 
 ### Knowledge
 
@@ -62,9 +62,9 @@ Use this to inspect storage and pipeline health:
 - sync timing
 - processing mode
 
-## Category workspaces
+## Pile workspaces
 
-Each category has its own workspace page. These are especially useful once your archive grows.
+Each pile has its own workspace page. These are especially useful once your archive grows.
 
 ### Atlas
 
@@ -97,14 +97,14 @@ Search can return four kinds of results:
 - `source_capture`: a saved page or saved selection
 - `todo_list`: the shared to-do file
 
-Search results include enough metadata to help you decide what to open next, including category, provider, and note path when available.
+Search results include enough metadata to help you decide what to open next, including pile, provider, and note path when available.
 
 ## When to use which tool
 
 - Use the popup when you want a quick save or a status check.
 - Use quick search when you are already on a web page and want to pull saved context into the current task.
 - Use the dashboard when you want to understand the archive as a whole.
-- Use category workspaces when you already know the kind of material you want to explore.
+- Use pile workspaces when you already know the kind of material you want to explore.
 
 ## Read next
 

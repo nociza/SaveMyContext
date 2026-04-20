@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
-from app.models import ChatSession, ProviderName, SessionCategory
+from app.models import ChatSession, Pile, ProviderName, BuiltInPileSlug
 from app.schemas.explorer import SessionNoteRead
 from app.schemas.session import (
     SessionListItem,
     SessionRead,
-    SessionUserCategoriesUpdate,
-    UserCategorySummary,
+    SessionExtraPilesUpdate,
+    ExtraPileSummary,
     build_session_list_item,
     build_session_read,
 )
 from app.services.explorer import read_session_markdown, session_related_entities, session_word_count
-from app.services.user_categories import has_user_category, merge_user_categories, summarize_user_categories
+from app.services.extra_piles import has_extra_pile, merge_extra_piles, summarize_extra_piles
+from app.services.piles import category_for_pile_slug
 
 
 router = APIRouter()
@@ -40,20 +41,28 @@ async def _load_session(db: AsyncSession, session_id: str) -> ChatSession | None
 @router.get("/sessions", response_model=list[SessionListItem])
 async def list_sessions(
     provider: ProviderName | None = Query(default=None),
-    category: SessionCategory | None = Query(default=None),
-    user_category: str | None = Query(default=None),
+    pile: str | None = Query(default=None),
+    category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
+    extra_pile: str | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[SessionListItem]:
     statement = select(ChatSession).order_by(ChatSession.updated_at.desc())
     if provider:
         statement = statement.where(ChatSession.provider == provider)
-    if category:
-        statement = statement.where(ChatSession.category == category)
+    target_pile = pile.strip() if pile else category.value if category else None
+    if target_pile:
+        fallback_pile = category_for_pile_slug(target_pile)
+        statement = statement.where(
+            or_(
+                ChatSession.pile.has(Pile.slug == target_pile),
+                and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+            )
+        )
     result = await db.execute(statement)
     sessions = result.scalars().all()
-    if user_category:
-        sessions = [session for session in sessions if has_user_category(session.custom_tags, user_category)]
+    if extra_pile:
+        sessions = [session for session in sessions if has_extra_pile(session.custom_tags, extra_pile)]
     return [build_session_list_item(session) for session in sessions]
 
 
@@ -88,33 +97,43 @@ async def get_session_note(
     )
 
 
-@router.get("/user-categories", response_model=list[UserCategorySummary])
-async def list_user_categories(
+@router.get("/extra-piles", response_model=list[ExtraPileSummary])
+@router.get("/user-categories", response_model=list[ExtraPileSummary], include_in_schema=False)
+async def list_extra_piles(
     provider: ProviderName | None = Query(default=None),
-    category: SessionCategory | None = Query(default=None),
+    pile: str | None = Query(default=None),
+    category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> list[UserCategorySummary]:
+) -> list[ExtraPileSummary]:
     statement = select(ChatSession.custom_tags).order_by(ChatSession.updated_at.desc())
     if provider:
         statement = statement.where(ChatSession.provider == provider)
-    if category:
-        statement = statement.where(ChatSession.category == category)
+    target_pile = pile.strip() if pile else category.value if category else None
+    if target_pile:
+        fallback_pile = category_for_pile_slug(target_pile)
+        statement = statement.where(
+            or_(
+                ChatSession.pile.has(Pile.slug == target_pile),
+                and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+            )
+        )
     tag_sets = list((await db.execute(statement)).scalars().all())
-    return [UserCategorySummary(name=name, count=count) for name, count in summarize_user_categories(tag_sets)]
+    return [ExtraPileSummary(name=name, count=count) for name, count in summarize_extra_piles(tag_sets)]
 
 
-@router.put("/sessions/{session_id}/user-categories", response_model=SessionListItem)
-async def update_session_user_categories(
+@router.put("/sessions/{session_id}/extra-piles", response_model=SessionListItem)
+@router.put("/sessions/{session_id}/user-categories", response_model=SessionListItem, include_in_schema=False)
+async def update_session_extra_piles(
     session_id: str,
-    payload: SessionUserCategoriesUpdate,
+    payload: SessionExtraPilesUpdate,
     _: AuthContext = Depends(require_scope("ingest")),
     db: AsyncSession = Depends(get_db_session),
 ) -> SessionListItem:
     session = await _load_session(db, session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
-    session.custom_tags = merge_user_categories(session.custom_tags, payload.user_categories)
+    session.custom_tags = merge_extra_piles(session.custom_tags, payload.extra_piles)
     await db.commit()
     refreshed = await _load_session(db, session_id)
     if refreshed is None:
@@ -129,7 +148,7 @@ async def journal_view(
 ) -> list[SessionListItem]:
     result = await db.execute(
         select(ChatSession)
-        .where(ChatSession.category == SessionCategory.JOURNAL)
+        .where(ChatSession.built_in_pile == BuiltInPileSlug.JOURNAL)
         .order_by(ChatSession.updated_at.desc())
     )
     return [build_session_list_item(session) for session in result.scalars().all()]
@@ -142,7 +161,7 @@ async def factual_view(
 ) -> list[SessionListItem]:
     result = await db.execute(
         select(ChatSession)
-        .where(ChatSession.category == SessionCategory.FACTUAL)
+        .where(ChatSession.built_in_pile == BuiltInPileSlug.FACTUAL)
         .order_by(ChatSession.updated_at.desc())
     )
     return [build_session_list_item(session) for session in result.scalars().all()]
@@ -155,7 +174,7 @@ async def ideas_view(
 ) -> list[SessionListItem]:
     result = await db.execute(
         select(ChatSession)
-        .where(ChatSession.category == SessionCategory.IDEAS)
+        .where(ChatSession.built_in_pile == BuiltInPileSlug.IDEAS)
         .order_by(ChatSession.updated_at.desc())
     )
     return [build_session_list_item(session) for session in result.scalars().all()]
@@ -168,7 +187,7 @@ async def todo_view(
 ) -> list[SessionListItem]:
     result = await db.execute(
         select(ChatSession)
-        .where(ChatSession.category == SessionCategory.TODO)
+        .where(ChatSession.built_in_pile == BuiltInPileSlug.TODO)
         .order_by(ChatSession.updated_at.desc())
     )
     return [build_session_list_item(session) for session in result.scalars().all()]

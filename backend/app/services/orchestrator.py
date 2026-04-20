@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.models import ChatMessage
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 from app.prompts import BUILT_IN_PILE_RULES
 from app.schemas.processing import (
     ClassificationResult,
@@ -98,8 +98,8 @@ class ProcessingOrchestrator:
         if cleaned_discard:
             joined = "; ".join(f"'{item}'" for item in cleaned_discard)
             discard_addendum_block = (
-                "\nIf the transcript clearly fits one of the user's auto-discard categories "
-                f"({joined}), return category='discarded' with a short reason naming the matching category. "
+                "\nIf the transcript clearly fits one of the user's auto-discard pile hints "
+                f"({joined}), return pile='discarded' with a short reason naming the matching pile hint. "
                 "Otherwise, never use 'discarded'."
             )
 
@@ -117,16 +117,16 @@ class ProcessingOrchestrator:
                 user_prompt=prompt.user_prompt,
                 schema=ClassificationResult,
             )
-            if classification.category == SessionCategory.DISCARDED:
+            if classification.pile == BuiltInPileSlug.DISCARDED:
                 if cleaned_discard:
                     return classification
                 # If auto-discard isn't configured, ignore the model's discard label.
                 return heuristic_classification(messages)
             if is_explicit_todo_request(messages):
-                if classification.category == SessionCategory.TODO:
+                if classification.pile == BuiltInPileSlug.TODO:
                     return classification
                 return heuristic_classification(messages)
-            if classification.category == SessionCategory.TODO:
+            if classification.pile == BuiltInPileSlug.TODO:
                 return heuristic_classification(messages)
             return classification
         except Exception:
@@ -159,7 +159,7 @@ class ProcessingOrchestrator:
         if cleaned_discard:
             joined = "; ".join(f"'{item}'" for item in cleaned_discard)
             discard_addendum_block = (
-                f"\nIf the transcript clearly fits an auto-discard category ({joined}), pick the 'discarded' pile."
+                f"\nIf the transcript clearly fits an auto-discard pile hint ({joined}), pick the 'discarded' pile."
             )
 
         valid_slugs = {slug for slug, _ in candidates}

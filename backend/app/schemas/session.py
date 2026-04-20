@@ -5,8 +5,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enums import MessageRole, ProviderName, SessionCategory
-from app.services.user_categories import RESERVED_CATEGORY_NAMES, extract_user_categories, normalize_user_category_name, visible_custom_tags
+from app.models.enums import MessageRole, ProviderName
+from app.services.extra_piles import RESERVED_PILE_NAMES, extract_extra_piles, normalize_extra_pile_name, visible_custom_tags
+from app.services.piles import pile_slug_for_category
 
 
 class MessageRead(BaseModel):
@@ -41,12 +42,11 @@ class SessionListItem(BaseModel):
     provider: ProviderName
     external_session_id: str
     title: str | None
-    category: SessionCategory | None
     pile_slug: str | None = None
     is_discarded: bool = False
     discarded_reason: str | None = None
     custom_tags: list[str] = Field(default_factory=list)
-    user_categories: list[str] = Field(default_factory=list)
+    extra_piles: list[str] = Field(default_factory=list)
     markdown_path: str | None
     share_post: str | None
     updated_at: datetime
@@ -66,24 +66,24 @@ class SessionRead(SessionListItem):
     triplets: list[TripletRead]
 
 
-class SessionUserCategoriesUpdate(BaseModel):
-    user_categories: list[str] = Field(default_factory=list)
+class SessionExtraPilesUpdate(BaseModel):
+    extra_piles: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def normalize_categories(self) -> "SessionUserCategoriesUpdate":
+    def normalize_categories(self) -> "SessionExtraPilesUpdate":
         normalized: dict[str, str] = {}
-        for raw in self.user_categories:
-            cleaned = normalize_user_category_name(raw)
+        for raw in self.extra_piles:
+            cleaned = normalize_extra_pile_name(raw)
             if not cleaned:
                 continue
-            if cleaned.casefold() in RESERVED_CATEGORY_NAMES:
-                raise ValueError(f"'{cleaned}' is reserved for the default system categories.")
+            if cleaned.casefold() in RESERVED_PILE_NAMES:
+                raise ValueError(f"'{cleaned}' is reserved for the built-in piles.")
             normalized[cleaned.casefold()] = cleaned
-        self.user_categories = sorted(normalized.values(), key=str.casefold)
+        self.extra_piles = sorted(normalized.values(), key=str.casefold)
         return self
 
 
-class UserCategorySummary(BaseModel):
+class ExtraPileSummary(BaseModel):
     name: str
     count: int
 
@@ -94,12 +94,11 @@ def build_session_list_item(session) -> SessionListItem:  # type: ignore[no-unty
         provider=session.provider,
         external_session_id=session.external_session_id,
         title=session.title,
-        category=session.category,
-        pile_slug=session.pile.slug if session.pile else None,
+        pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
         is_discarded=session.is_discarded,
         discarded_reason=session.discarded_reason,
         custom_tags=visible_custom_tags(session.custom_tags),
-        user_categories=extract_user_categories(session.custom_tags),
+        extra_piles=extract_extra_piles(session.custom_tags),
         markdown_path=session.markdown_path,
         share_post=session.share_post,
         updated_at=session.updated_at,

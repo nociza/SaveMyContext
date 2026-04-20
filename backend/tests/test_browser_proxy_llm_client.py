@@ -47,7 +47,7 @@ async def test_browser_proxy_llm_client_reuses_dedicated_session_state(tmp_path:
     fake_browser = FakeBrowserProxyService(
         [
             make_completion(
-                '{"category":"journal","reason":"Personal planning and reflection."}',
+                '{"pile":"journal","reason":"Personal planning and reflection."}',
                 "https://gemini.google.com/app/c_processing-thread",
             ),
             make_completion(
@@ -63,7 +63,7 @@ async def test_browser_proxy_llm_client_reuses_dedicated_session_state(tmp_path:
     client = BrowserProxyClient(fake_browser, settings=settings)  # type: ignore[arg-type]
 
     classification = await client.generate_json(
-        system_prompt="Return category and reason.",
+        system_prompt="Return pile and reason.",
         user_prompt="USER: Plan tomorrow and reflect on today.",
         schema=ClassificationResult,
     )
@@ -73,7 +73,7 @@ async def test_browser_proxy_llm_client_reuses_dedicated_session_state(tmp_path:
         schema=JournalResult,
     )
 
-    assert classification.category.value == "journal"
+    assert classification.pile.value == "journal"
     assert journal.entry == "Captured the user context."
     assert fake_browser.calls[0]["provider_session_url"] is None
     assert fake_browser.calls[1]["provider_session_url"] == "https://gemini.google.com/app/c_processing-thread"

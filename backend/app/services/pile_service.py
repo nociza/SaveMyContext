@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Pile
-from app.models.enums import PileKind, SessionCategory
+from app.models.enums import PileKind, BuiltInPileSlug
 from app.services.piles import (
     BUILT_IN_KIND_BY_SLUG,
     BUILT_IN_SLUG_TO_CATEGORY,
@@ -66,14 +66,14 @@ class PileService:
         piles = await self.slug_map(slugs)
         return {slug: pile.id for slug, pile in piles.items()}
 
-    async def resolve_pile_for_category(self, category: SessionCategory | None) -> Pile | None:
-        slug = CATEGORY_TO_BUILT_IN_SLUG.get(category) if category else None
+    async def resolve_pile_for_built_in_pile(self, built_in_pile: BuiltInPileSlug | None) -> Pile | None:
+        slug = CATEGORY_TO_BUILT_IN_SLUG.get(built_in_pile) if built_in_pile else None
         if not slug:
             return None
         return await self.get_by_slug(slug)
 
     @staticmethod
-    def category_for_pile(pile: Pile | None) -> SessionCategory | None:
+    def built_in_pile_for_pile(pile: Pile | None) -> BuiltInPileSlug | None:
         if pile is None:
             return None
         return BUILT_IN_SLUG_TO_CATEGORY.get(pile.slug)

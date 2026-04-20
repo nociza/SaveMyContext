@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.enums import MessageRole, ProviderName, SessionCategory
+from app.models.enums import MessageRole, ProviderName
 
 
 class IngestMessage(BaseModel):
@@ -47,7 +47,6 @@ class IngestDiffRequest(BaseModel):
 
 class IngestResponse(BaseModel):
     session_id: str
-    category: SessionCategory | None = None
     pile_slug: str | None = None
     is_discarded: bool = False
     new_message_count: int

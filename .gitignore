@@ -16,3 +16,4 @@ extension/.vite/
 extension/playwright-report/
 extension/test-results/
 .pnpm-store/
+.playwright*/

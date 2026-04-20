@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.models import ChatSession, ProviderName, SessionCategory
+from app.models import ChatSession, ProviderName, BuiltInPileSlug
 from app.schemas.explorer import (
     ActivityBucket,
-    CategoryGraph,
-    CategoryGraphPath,
-    CategorySystemCount,
-    CategoryStats,
+    BuiltInPileCount,
+    PileGraph,
+    PileGraphPath,
+    PileStats,
     ExplorerGraphEvidence,
     ExplorerGraphEdge,
     ExplorerGraphNode,
@@ -28,7 +28,7 @@ from app.schemas.explorer import (
     ProviderCount,
 )
 from app.services.graph import entity_id, entity_note_path
-from app.services.user_categories import has_user_category, summarize_user_categories, visible_custom_tags
+from app.services.extra_piles import has_extra_pile, summarize_extra_piles, visible_custom_tags
 
 
 STOPWORDS = {
@@ -228,11 +228,11 @@ class ExplorerService:
 
     async def category_stats(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryStats:
+    ) -> PileStats:
         sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
         return self._build_stats("default", category.value, sessions, fallback_category=category)
 
@@ -242,17 +242,17 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryStats:
-        sessions = await self._sessions_for_user_category(name, session_ids=session_ids, provider=provider)
+    ) -> PileStats:
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
         return self._build_stats("custom", name, sessions, fallback_category=self._dominant_category(sessions))
 
     async def category_graph(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryGraph:
+    ) -> PileGraph:
         sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
         return self._build_graph("default", category.value, sessions, fallback_category=category)
 
@@ -262,19 +262,19 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryGraph:
-        sessions = await self._sessions_for_user_category(name, session_ids=session_ids, provider=provider)
+    ) -> PileGraph:
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
         return self._build_graph("custom", name, sessions, fallback_category=self._dominant_category(sessions))
 
     async def category_graph_path(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         *,
         source: str,
         target: str,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryGraphPath:
+    ) -> PileGraphPath:
         sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
         return self._build_graph_path("default", category.value, sessions, source=source, target=target, fallback_category=category)
 
@@ -286,8 +286,8 @@ class ExplorerService:
         target: str,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
-    ) -> CategoryGraphPath:
-        sessions = await self._sessions_for_user_category(name, session_ids=session_ids, provider=provider)
+    ) -> PileGraphPath:
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
         return self._build_graph_path(
             "custom",
             name,
@@ -299,7 +299,7 @@ class ExplorerService:
 
     async def _sessions(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
@@ -310,7 +310,7 @@ class ExplorerService:
                 selectinload(ChatSession.messages),
                 selectinload(ChatSession.triplets),
             )
-            .where(ChatSession.category == category)
+            .where(ChatSession.built_in_pile == category)
             .order_by(ChatSession.updated_at.desc())
         )
         if session_ids:
@@ -321,7 +321,7 @@ class ExplorerService:
         result = await self.db.execute(statement)
         return list(result.scalars().unique().all())
 
-    async def _sessions_for_user_category(
+    async def _sessions_for_extra_pile(
         self,
         name: str,
         *,
@@ -343,10 +343,10 @@ class ExplorerService:
 
         result = await self.db.execute(statement)
         sessions = list(result.scalars().unique().all())
-        return [session for session in sessions if has_user_category(session.custom_tags, name)]
+        return [session for session in sessions if has_extra_pile(session.custom_tags, name)]
 
-    def user_category_summaries(self, sessions: list[ChatSession]) -> list[tuple[str, int]]:
-        return summarize_user_categories([session.custom_tags for session in sessions])
+    def extra_pile_summaries(self, sessions: list[ChatSession]) -> list[tuple[str, int]]:
+        return summarize_extra_piles([session.custom_tags for session in sessions])
 
     def _build_stats(
         self,
@@ -354,8 +354,8 @@ class ExplorerService:
         scope_label: str,
         sessions: list[ChatSession],
         *,
-        fallback_category: SessionCategory | None,
-    ) -> CategoryStats:
+        fallback_category: BuiltInPileSlug | None,
+    ) -> PileStats:
         dominant_category = self._dominant_category(sessions, fallback=fallback_category)
         total_sessions = len(sessions)
         total_messages = sum(len(session.messages) for session in sessions)
@@ -366,10 +366,10 @@ class ExplorerService:
             ProviderCount(provider=provider, count=count)
             for provider, count in sorted(Counter(session.provider for session in sessions).items(), key=lambda item: item[0].value)
         ]
-        system_category_counts = [
-            CategorySystemCount(category=category, count=count)
-            for category, count in sorted(
-                Counter(session.category for session in sessions if session.category is not None).items(),
+        built_in_pile_counts = [
+            BuiltInPileCount(pile_slug=pile, count=count)
+            for pile, count in sorted(
+                Counter(session.built_in_pile for session in sessions if session.built_in_pile is not None).items(),
                 key=lambda item: item[0].value,
             )
         ]
@@ -398,11 +398,11 @@ class ExplorerService:
         avg_messages_per_session = (total_messages / total_sessions) if total_sessions else 0.0
         avg_triplets_per_session = (total_triplets / total_sessions) if total_sessions else 0.0
 
-        return CategoryStats(
-            category=dominant_category,
+        return PileStats(
+            pile_slug=dominant_category,
             scope_kind="custom" if scope_kind == "custom" else "default",
             scope_label=scope_label,
-            dominant_category=dominant_category,
+            dominant_pile_slug=dominant_category,
             total_sessions=total_sessions,
             total_messages=total_messages,
             total_triplets=total_triplets,
@@ -413,7 +413,7 @@ class ExplorerService:
             notes_with_idea_summary=sum(1 for session in sessions if session.idea_summary),
             notes_with_journal_entry=sum(1 for session in sessions if (session.journal_entry or "").strip()),
             notes_with_todo_summary=sum(1 for session in sessions if (session.todo_summary or "").strip()),
-            system_category_counts=system_category_counts,
+            built_in_pile_counts=built_in_pile_counts,
             provider_counts=provider_counts,
             activity=activity,
             top_tags=top_tags,
@@ -427,21 +427,21 @@ class ExplorerService:
         scope_label: str,
         sessions: list[ChatSession],
         *,
-        fallback_category: SessionCategory | None,
-    ) -> CategoryGraph:
+        fallback_category: BuiltInPileSlug | None,
+    ) -> PileGraph:
         dominant_category = self._dominant_category(sessions, fallback=fallback_category)
-        if dominant_category == SessionCategory.FACTUAL and all((session.category == SessionCategory.FACTUAL) for session in sessions):
+        if dominant_category == BuiltInPileSlug.FACTUAL and all((session.built_in_pile == BuiltInPileSlug.FACTUAL) for session in sessions):
             nodes, edges = self._factual_graph(dominant_category, sessions)
         else:
             nodes, edges = self._similarity_graph(dominant_category, sessions)
 
         self._enrich_graph(nodes, edges)
 
-        return CategoryGraph(
-            category=dominant_category,
+        return PileGraph(
+            pile_slug=dominant_category,
             scope_kind="custom" if scope_kind == "custom" else "default",
             scope_label=scope_label,
-            dominant_category=dominant_category,
+            dominant_pile_slug=dominant_category,
             node_count=len(nodes),
             edge_count=len(edges),
             nodes=nodes,
@@ -456,8 +456,8 @@ class ExplorerService:
         *,
         source: str,
         target: str,
-        fallback_category: SessionCategory | None,
-    ) -> CategoryGraphPath:
+        fallback_category: BuiltInPileSlug | None,
+    ) -> PileGraphPath:
         graph = self._build_graph(scope_kind, scope_label, sessions, fallback_category=fallback_category)
         node_by_id = {node.id: node for node in graph.nodes}
         edge_by_id = {edge.id: edge for edge in graph.edges}
@@ -518,11 +518,11 @@ class ExplorerService:
                         ),
                     )
 
-        return CategoryGraphPath(
-            category=graph.category,
+        return PileGraphPath(
+            pile_slug=graph.pile_slug,
             scope_kind=graph.scope_kind,
             scope_label=graph.scope_label,
-            dominant_category=graph.dominant_category,
+            dominant_pile_slug=graph.dominant_pile_slug,
             source=source,
             target=target,
             paths=paths,
@@ -626,12 +626,12 @@ class ExplorerService:
         self,
         sessions: list[ChatSession],
         *,
-        fallback: SessionCategory | None = None,
-    ) -> SessionCategory:
-        counts = Counter(session.category for session in sessions if session.category is not None)
+        fallback: BuiltInPileSlug | None = None,
+    ) -> BuiltInPileSlug:
+        counts = Counter(session.built_in_pile for session in sessions if session.built_in_pile is not None)
         if counts:
             return counts.most_common(1)[0][0]
-        return fallback or SessionCategory.FACTUAL
+        return fallback or BuiltInPileSlug.FACTUAL
 
     def _activity_buckets(
         self,
@@ -658,7 +658,7 @@ class ExplorerService:
 
     def _factual_graph(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         sessions: list[ChatSession],
     ) -> tuple[list[ExplorerGraphNode], list[ExplorerGraphEdge]]:
         node_sessions: dict[str, set[str]] = defaultdict(set)
@@ -700,7 +700,7 @@ class ExplorerService:
                 kind="entity",
                 size=degree,
                 session_ids=sorted(node_sessions[node_id]),
-                category=category,
+                pile_slug=category,
                 note_path=entity_note_path(node_labels[node_id]),
                 evidence_count=len(node_evidence[node_id]),
                 evidence=node_evidence[node_id][:5],
@@ -730,7 +730,7 @@ class ExplorerService:
 
     def _similarity_graph(
         self,
-        category: SessionCategory,
+        category: BuiltInPileSlug,
         sessions: list[ChatSession],
     ) -> tuple[list[ExplorerGraphNode], list[ExplorerGraphEdge]]:
         tokens_by_session = {session.id: _tokenize_text(_session_text(session)) for session in sessions}
@@ -744,7 +744,7 @@ class ExplorerService:
                 size=max(len(session.messages), 1),
                 session_ids=[session.id],
                 provider=session.provider,
-                category=category,
+                pile_slug=category,
                 updated_at=session.updated_at,
                 note_path=session.markdown_path,
                 evidence_count=1,

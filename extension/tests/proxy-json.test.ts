@@ -9,32 +9,32 @@ import {
 
 describe("proxy-json", () => {
   it("extracts the first balanced JSON object from surrounding text", () => {
-    const value = 'Here is the result:\n```json\n{"category":"journal","journal":{"entry":"hello"}}\n```\nDone.';
+    const value = 'Here is the result:\n```json\n{"pile":"journal","journal":{"entry":"hello"}}\n```\nDone.';
 
-    expect(extractFirstBalancedJsonObject(value)).toBe('{"category":"journal","journal":{"entry":"hello"}}');
+    expect(extractFirstBalancedJsonObject(value)).toBe('{"pile":"journal","journal":{"entry":"hello"}}');
   });
 
   it("handles escaped quotes and nested objects", () => {
     const value =
-      '{"category":"journal","classification_reason":"He said \\"ship it\\".","journal":{"entry":"nested","action_items":["one"]},"factual_triplets":[],"idea":null}';
+      '{"pile":"journal","classification_reason":"He said \\"ship it\\".","journal":{"entry":"nested","action_items":["one"]},"factual_triplets":[],"idea":null}';
 
     expect(extractFirstBalancedJsonObject(value)).toBe(value);
   });
 
   it("returns null for truncated JSON", () => {
-    const value = '{"category":"journal","journal":{"entry":"unfinished"}';
+    const value = '{"pile":"journal","journal":{"entry":"unfinished"}';
 
     expect(extractFirstBalancedJsonObject(value)).toBeNull();
   });
 
   it("builds a repair prompt with the backend error and previous response", () => {
-    const prompt = buildProcessingRepairPrompt('{"category":"journal"', "Could not parse JSON", [
+    const prompt = buildProcessingRepairPrompt('{"pile":"journal"', "Could not parse JSON", [
       { sessionId: "session-a", taskKey: "task_1" },
       { sessionId: "session-b", taskKey: "task_2" }
     ]);
 
     expect(prompt).toContain("Could not parse JSON");
-    expect(prompt).toContain('{"category":"journal"');
+    expect(prompt).toContain('{"pile":"journal"');
     expect(prompt).toContain("return exactly one valid JSON object");
     expect(prompt).toContain("Return compact minified JSON only.");
     expect(prompt).toContain("Expected task_keys: task_1, task_2");
@@ -42,7 +42,7 @@ describe("proxy-json", () => {
 
   it("normalizes a valid batched processing response to canonical JSON", () => {
     const normalized = normalizeProcessingResponseJson(
-      '```json\n{"results":[{"session_id":"session-a","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}\n```',
+      '```json\n{"results":[{"session_id":"session-a","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}\n```',
       ["session-a"]
     );
 
@@ -55,7 +55,7 @@ describe("proxy-json", () => {
 
   it("rejects truncated processing JSON before it reaches the backend", () => {
     const normalized = normalizeProcessingResponseJson(
-      '{"results":[{"session_id":"session-a","category":"journal","classification_reason":"unterminated',
+      '{"results":[{"session_id":"session-a","pile":"journal","classification_reason":"unterminated',
       ["session-a"]
     );
 
@@ -68,7 +68,7 @@ describe("proxy-json", () => {
 
   it("rejects multi-session batched responses that do not include the expected session ids", () => {
     const normalized = normalizeProcessingResponseJson(
-      '{"results":[{"session_id":"wrong-session","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+      '{"results":[{"session_id":"wrong-session","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
       [
         { sessionId: "session-a", taskKey: "task_1" },
         { sessionId: "session-b", taskKey: "task_2" }
@@ -83,7 +83,7 @@ describe("proxy-json", () => {
 
   it("maps task_key replies back to the expected session ids", () => {
     const normalized = normalizeProcessingResponseJson(
-      '{"results":[{"task_key":"task_1","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+      '{"results":[{"task_key":"task_1","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
       [{ sessionId: "session-a", taskKey: "task_1" }]
     );
 
@@ -96,7 +96,7 @@ describe("proxy-json", () => {
 
   it("coerces a single-result reply onto the expected session id", () => {
     const normalized = normalizeProcessingResponseJson(
-      '{"results":[{"session_id":"made-up-id","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+      '{"results":[{"session_id":"made-up-id","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
       [{ sessionId: "session-a", taskKey: "task_1" }]
     );
 
@@ -108,7 +108,7 @@ describe("proxy-json", () => {
 
   it("extracts a recoverable subset when a batched reply omits one task", () => {
     const normalized = normalizePartialProcessingResponseJson(
-      '{"results":[{"task_key":"task_1","category":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+      '{"results":[{"task_key":"task_1","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
       [
         { sessionId: "session-a", taskKey: "task_1" },
         { sessionId: "session-b", taskKey: "task_2" }

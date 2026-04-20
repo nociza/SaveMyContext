@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enums import ProviderName, SessionCategory
+from app.models.enums import ProviderName, BuiltInPileSlug
 from app.schemas.processing import IdeaResult, JournalResult, TodoResult, TripletResult
 
 
 class SessionPipelineResult(BaseModel):
-    category: SessionCategory
+    model_config = ConfigDict(populate_by_name=True)
+
+    pile: BuiltInPileSlug = Field(validation_alias=AliasChoices("pile", "category"))
     classification_reason: str = Field(min_length=1)
     journal: JournalResult | None = None
     todo: TodoResult | None = None
@@ -16,21 +18,25 @@ class SessionPipelineResult(BaseModel):
 
     @model_validator(mode="after")
     def validate_category_payload(self) -> "SessionPipelineResult":
-        if self.category == SessionCategory.JOURNAL and self.journal is None:
-            raise ValueError("journal is required when category='journal'.")
-        if self.category == SessionCategory.TODO and self.todo is None:
-            raise ValueError("todo is required when category='todo'.")
-        if self.category == SessionCategory.IDEAS and self.idea is None:
-            raise ValueError("idea is required when category='ideas'.")
-        if self.category != SessionCategory.JOURNAL and self.journal is not None:
-            raise ValueError("journal must be null unless category='journal'.")
-        if self.category != SessionCategory.TODO and self.todo is not None:
-            raise ValueError("todo must be null unless category='todo'.")
-        if self.category != SessionCategory.IDEAS and self.idea is not None:
-            raise ValueError("idea must be null unless category='ideas'.")
-        if self.category != SessionCategory.FACTUAL and self.factual_triplets:
-            raise ValueError("factual_triplets must be empty unless category='factual'.")
+        if self.pile == BuiltInPileSlug.JOURNAL and self.journal is None:
+            raise ValueError("journal is required when pile='journal'.")
+        if self.pile == BuiltInPileSlug.TODO and self.todo is None:
+            raise ValueError("todo is required when pile='todo'.")
+        if self.pile == BuiltInPileSlug.IDEAS and self.idea is None:
+            raise ValueError("idea is required when pile='ideas'.")
+        if self.pile != BuiltInPileSlug.JOURNAL and self.journal is not None:
+            raise ValueError("journal must be null unless pile='journal'.")
+        if self.pile != BuiltInPileSlug.TODO and self.todo is not None:
+            raise ValueError("todo must be null unless pile='todo'.")
+        if self.pile != BuiltInPileSlug.IDEAS and self.idea is not None:
+            raise ValueError("idea must be null unless pile='ideas'.")
+        if self.pile != BuiltInPileSlug.FACTUAL and self.factual_triplets:
+            raise ValueError("factual_triplets must be empty unless pile='factual'.")
         return self
+
+    @property
+    def category(self) -> BuiltInPileSlug:
+        return self.pile
 
 
 class ProcessingTaskItem(BaseModel):
@@ -103,7 +109,7 @@ class ProcessingCompleteRequest(BaseModel):
 
 class ProcessingCompleteResult(BaseModel):
     session_id: str
-    category: SessionCategory
+    pile_slug: str | None = None
     markdown_path: str | None = None
     processed: bool
 

@@ -57,7 +57,7 @@ But richer outputs such as idea summaries, factual triplets, and cleaner source 
 
 SaveMyContext only updates `To-Do List.md` for explicit shared-list editing requests.
 
-If a conversation is general planning, reflection, or scheduling, it will stay in `journal` or another category instead of changing the shared list.
+If a conversation is general planning, reflection, or scheduling, it will stay in `journal` or another pile instead of changing the shared list.
 
 ## Quick search opens, but nothing inserts
 
@@ -99,7 +99,7 @@ Revisit the provider and let history sync run again. SaveMyContext now treats fu
 
 - popup: connection state, history sync, processing state
 - settings page: backend validation, provider drift alert, knowledge path state
-- dashboard: system status, graph counts, category breakdown
+- dashboard: system status, graph counts, pile breakdown
 - vault: source documents in `Sources/` when you need the raw material
 
 ## Read next

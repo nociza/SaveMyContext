@@ -154,8 +154,8 @@ function App() {
               Prompts
             </h1>
             <p className="mt-2 max-w-[68ch] text-[14px] leading-relaxed text-[var(--color-ink-soft)]">
-              Global templates shape the built-in pipelines. Category and pile instructions tune how each pile gets
-              routed and processed. Saving changes requires an admin token.
+              Global templates shape the built-in pipelines. Pile instructions tune how each pile gets routed and
+              processed. Saving changes requires an admin token.
             </p>
           </div>
         </div>
@@ -239,7 +239,7 @@ function App() {
       <section>
         <div className="mb-4">
           <p className="eyebrow">Per pile</p>
-          <h2 className="display-serif text-[22px] font-semibold text-[var(--color-ink)]">Category instructions</h2>
+          <h2 className="display-serif text-[22px] font-semibold text-[var(--color-ink)]">Pile instructions</h2>
           <p className="mt-1 text-[14px] text-[var(--color-ink-soft)]">
             Use pile descriptions to steer routing. Use pipeline instructions to nudge the extraction step for that
             specific pile only.
@@ -495,8 +495,8 @@ function PilePromptCard({
       {pile.slug === "discarded" ? (
         <div className="mt-4">
           <Field
-            label="Auto-discard categories"
-            hint="Comma- or newline-separated categories that should route into Discarded."
+            label="Auto-discard pile hints"
+            hint="Comma- or newline-separated descriptions that should route into Discarded."
           >
             <textarea
               value={discardCategories}

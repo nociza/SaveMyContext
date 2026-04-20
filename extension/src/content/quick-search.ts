@@ -332,7 +332,7 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
 
       const badges = document.createElement("div");
       badges.className = "badges";
-      for (const label of [resultKindLabel(result), result.provider, result.category].filter(Boolean)) {
+      for (const label of [resultKindLabel(result), result.provider, result.pile_slug].filter(Boolean)) {
         const badge = document.createElement("span");
         badge.className = "badge";
         badge.textContent = String(label);

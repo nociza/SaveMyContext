@@ -1,8 +1,8 @@
-import type { BackendSessionListItem, ProviderName, SessionCategoryName } from "./types";
+import type { BackendSessionListItem, BuiltInPileSlug, PileSlug, ProviderName } from "./types";
 
-export const categoryOrder: SessionCategoryName[] = ["factual", "ideas", "journal", "todo", "discarded"];
+export const pileOrder: BuiltInPileSlug[] = ["factual", "ideas", "journal", "todo", "discarded"];
 
-export const categoryLabels: Record<SessionCategoryName, string> = {
+export const pileLabels: Record<BuiltInPileSlug, string> = {
   factual: "Factual",
   ideas: "Ideas",
   journal: "Journal",
@@ -10,7 +10,7 @@ export const categoryLabels: Record<SessionCategoryName, string> = {
   discarded: "Discarded"
 };
 
-export const categoryDescriptions: Record<SessionCategoryName, string> = {
+export const pileDescriptions: Record<BuiltInPileSlug, string> = {
   factual: "Verified notes, extracted facts, and the knowledge graph.",
   ideas: "Concepts, proposals, and next-step thinking.",
   journal: "Daily reflections, summaries, and action items.",
@@ -18,7 +18,7 @@ export const categoryDescriptions: Record<SessionCategoryName, string> = {
   discarded: "Captured but shelved. Not summarized, not on the dashboard, but recoverable."
 };
 
-export const categoryPalette: Record<SessionCategoryName, { accent: string; soft: string; ink: string }> = {
+export const pilePalette: Record<BuiltInPileSlug, { accent: string; soft: string; ink: string }> = {
   factual: { accent: "#0f8a84", soft: "#e2f1ef", ink: "#076b66" },
   ideas: { accent: "#d18425", soft: "#faecd4", ink: "#8a561a" },
   journal: { accent: "#4968ab", soft: "#e3ebf8", ink: "#2f4a85" },
@@ -26,7 +26,7 @@ export const categoryPalette: Record<SessionCategoryName, { accent: string; soft
   discarded: { accent: "#736e63", soft: "#ebe7df", ink: "#4a463e" }
 };
 
-export const categoryGlyphs: Record<SessionCategoryName, string> = {
+export const pileGlyphs: Record<BuiltInPileSlug, string> = {
   factual: "§",
   ideas: "✦",
   journal: "¶",
@@ -46,25 +46,36 @@ export const providerColors: Record<ProviderName, string> = {
   grok: "#4968ab"
 };
 
-export type CategorySortMode = "recent" | "title";
-export type CategoryWorkspaceView = "atlas" | "story" | "ops";
+export type PileSortMode = "recent" | "title";
+export type PileWorkspaceView = "atlas" | "story" | "ops";
 
 export function titleFromSession(session: Pick<BackendSessionListItem, "title" | "provider" | "external_session_id">): string {
   return session.title?.trim() || `${providerLabels[session.provider]} · ${session.external_session_id}`;
 }
 
-export function categoryPageUrl(state: {
-  category: SessionCategoryName;
+export function isBuiltInPileSlug(value?: string | null): value is BuiltInPileSlug {
+  return Boolean(value) && pileOrder.includes(value as BuiltInPileSlug);
+}
+
+export function displayPileLabel(value?: string | null, fallback = "Unknown pile"): string {
+  if (isBuiltInPileSlug(value)) {
+    return pileLabels[value];
+  }
+  return value?.trim() || fallback;
+}
+
+export function pilePageUrl(state: {
+  pile: BuiltInPileSlug;
   q?: string;
   provider?: ProviderName | null;
-  sort?: CategorySortMode | null;
-  view?: CategoryWorkspaceView | null;
+  sort?: PileSortMode | null;
+  view?: PileWorkspaceView | null;
   bucket?: string | null;
   note?: string | null;
-  userCategory?: string | null;
+  extraPile?: string | null;
 }): string {
-  const url = new URL(chrome.runtime.getURL("category.html"));
-  url.searchParams.set("category", state.category);
+  const url = new URL(chrome.runtime.getURL("pile.html"));
+  url.searchParams.set("pile", state.pile);
   if (state.q?.trim()) {
     url.searchParams.set("q", state.q.trim());
   }
@@ -83,24 +94,24 @@ export function categoryPageUrl(state: {
   if (state.note) {
     url.searchParams.set("note", state.note);
   }
-  if (state.userCategory?.trim()) {
-    url.searchParams.set("userCategory", state.userCategory.trim());
+  if (state.extraPile?.trim()) {
+    url.searchParams.set("extraPile", state.extraPile.trim());
   }
   return url.toString();
 }
 
 export function notePageUrl(state: {
   id: string;
-  category?: SessionCategoryName | null;
+  pile?: PileSlug | null;
   q?: string;
   provider?: ProviderName | null;
-  sort?: CategorySortMode | null;
-  userCategory?: string | null;
+  sort?: PileSortMode | null;
+  extraPile?: string | null;
 }): string {
   const url = new URL(chrome.runtime.getURL("note.html"));
   url.searchParams.set("id", state.id);
-  if (state.category) {
-    url.searchParams.set("category", state.category);
+  if (state.pile) {
+    url.searchParams.set("pile", state.pile);
   }
   if (state.q?.trim()) {
     url.searchParams.set("q", state.q.trim());
@@ -111,8 +122,8 @@ export function notePageUrl(state: {
   if (state.sort && state.sort !== "recent") {
     url.searchParams.set("sort", state.sort);
   }
-  if (state.userCategory?.trim()) {
-    url.searchParams.set("userCategory", state.userCategory.trim());
+  if (state.extraPile?.trim()) {
+    url.searchParams.set("extraPile", state.extraPile.trim());
   }
   return url.toString();
 }
@@ -144,9 +155,9 @@ export function formatLongDate(value?: string | null, fallback = "No data"): str
   return date.toLocaleString();
 }
 
-export function parseCategory(value: string | null): SessionCategoryName {
-  if (value && categoryOrder.includes(value as SessionCategoryName)) {
-    return value as SessionCategoryName;
+export function parsePile(value: string | null): BuiltInPileSlug {
+  if (value && pileOrder.includes(value as BuiltInPileSlug)) {
+    return value as BuiltInPileSlug;
   }
   return "factual";
 }
@@ -155,10 +166,10 @@ export function parseProvider(value: string | null): ProviderName | null {
   return value === "chatgpt" || value === "gemini" || value === "grok" ? value : null;
 }
 
-export function parseSortMode(value: string | null): CategorySortMode {
+export function parseSortMode(value: string | null): PileSortMode {
   return value === "title" ? "title" : "recent";
 }
 
-export function parseCategoryWorkspaceView(value: string | null): CategoryWorkspaceView {
+export function parsePileWorkspaceView(value: string | null): PileWorkspaceView {
   return value === "story" || value === "ops" ? value : "atlas";
 }

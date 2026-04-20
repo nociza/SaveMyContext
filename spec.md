@@ -34,7 +34,7 @@ The backend doesn't just store data; it actively reads and organizes it using LL
 
 ### 4. The Pile Model
 
-Each category is a **pile** — a first-class record (table `piles`) with a slug, a name, a `folder_label`, and a list of `attributes` that drive how the LLM pipeline processes the session.
+Each built-in pile is a **pile** — a first-class record (table `piles`) with a slug, a name, a `folder_label`, and a list of `attributes` that drive how the LLM pipeline processes the session.
 
 * **Built-in piles** (seeded on first run, cannot be deleted):
     * `journal` — chronological + summary + queryable Q&A
@@ -70,7 +70,7 @@ Discards are a first-class concern: items are still captured (so you can recover
 Three independent paths route a session to the `Discarded` pile:
 
 1. **Discard words** (extension-side, default ON, default word `loom`). When the opening user request matches a discard word, the extension still ingests the session but tags the payload with `route_to_discard=true`. The backend short-circuits classification and stores the session under `Discarded/{YYYY}/...md`.
-2. **LLM auto-discard categories**. The discarded pile's `pipeline_config.auto_discard_categories` is a list of natural-language category strings (e.g. `["small talk", "test sessions"]`). The classifier prompt is augmented with these so the LLM can choose to route the session to discarded.
+2. **LLM auto-discard pile hints**. The discarded pile's `pipeline_config.auto_discard_categories` is a list of natural-language pile-hint strings (e.g. `["small talk", "test sessions"]`). The classifier prompt is augmented with these so the LLM can choose to route the session to discarded.
 3. **Manual discard**. `POST /api/v1/piles/discarded/sessions/{id}/discard` moves any session into the discarded pile.
 
 Recovery: `POST /api/v1/piles/discarded/sessions/{id}/recover` clears the discard flag and re-runs the full classification pipeline. The corresponding markdown is moved out of `Discarded/` into the new pile's folder.

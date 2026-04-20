@@ -16,7 +16,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         background: resolve(rootDir, "src/background/index.ts"),
-        category: resolve(rootDir, "category.html"),
+        category: resolve(rootDir, "pile.html"),
         dashboard: resolve(rootDir, "dashboard.html"),
         note: resolve(rootDir, "note.html"),
         options: resolve(rootDir, "options.html"),

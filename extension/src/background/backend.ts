@@ -1,8 +1,8 @@
 import type {
   BackendCapabilities,
-  BackendCategoryGraph,
-  BackendCategoryGraphPath,
-  BackendCategoryStats,
+  BackendPileGraph,
+  BackendPileGraphPath,
+  BackendPileStats,
   ConnectionRedeemResponse,
   BackendDashboardSummary,
   BackendDiscardedSessionsResponse,
@@ -22,12 +22,12 @@ import type {
   BackendTodoListRead,
   BackendTodoListUpdate,
   ParsedConnectionBundle,
-  BackendUserCategorySummary,
+  BackendExtraPileSummary,
   ExtensionSettings,
   ProcessingCompleteResponse,
   ProcessingTaskResponse,
   ProviderName,
-  SessionCategoryName,
+  BuiltInPileSlug,
   SourceCapturePayload,
   SourceCaptureResponse
 } from "../shared/types";
@@ -495,8 +495,8 @@ export async function fetchSessions(
   settings: ExtensionSettings,
   filters?: {
     provider?: ProviderName;
-    category?: string;
-    userCategory?: string;
+    pile?: string;
+    extraPile?: string;
   },
   capabilities?: BackendCapabilities
 ): Promise<BackendSessionListItem[]> {
@@ -504,11 +504,11 @@ export async function fetchSessions(
   if (filters?.provider) {
     search.set("provider", filters.provider);
   }
-  if (filters?.category) {
-    search.set("category", filters.category);
+  if (filters?.pile) {
+    search.set("pile", filters.pile);
   }
-  if (filters?.userCategory) {
-    search.set("user_category", filters.userCategory);
+  if (filters?.extraPile) {
+    search.set("extra_pile", filters.extraPile);
   }
   const query = search.toString();
   return fetchBackendJson<BackendSessionListItem[]>(settings, `/sessions${query ? `?${query}` : ""}`, capabilities);
@@ -530,15 +530,15 @@ export async function fetchSessionNote(
   return fetchBackendJson<BackendSessionNoteRead>(settings, `/notes/${encodeURIComponent(sessionId)}`, capabilities);
 }
 
-export async function fetchCategoryStats(
+export async function fetchPileStats(
   settings: ExtensionSettings,
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   filters?: {
     provider?: ProviderName;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryStats> {
+): Promise<BackendPileStats> {
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -547,14 +547,14 @@ export async function fetchCategoryStats(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendCategoryStats>(
+  return fetchBackendJson<BackendPileStats>(
     settings,
-    `/categories/${encodeURIComponent(category)}/stats${query ? `?${query}` : ""}`,
+    `/piles/${encodeURIComponent(pile)}/stats${query ? `?${query}` : ""}`,
     capabilities
   );
 }
 
-export async function fetchCustomCategoryStats(
+export async function fetchCustomPileStats(
   settings: ExtensionSettings,
   name: string,
   filters?: {
@@ -562,7 +562,7 @@ export async function fetchCustomCategoryStats(
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryStats> {
+): Promise<BackendPileStats> {
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -571,22 +571,22 @@ export async function fetchCustomCategoryStats(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendCategoryStats>(
+  return fetchBackendJson<BackendPileStats>(
     settings,
-    `/custom-categories/${encodeURIComponent(name)}/stats${query ? `?${query}` : ""}`,
+    `/extra-piles/${encodeURIComponent(name)}/stats${query ? `?${query}` : ""}`,
     capabilities
   );
 }
 
-export async function fetchCategoryGraph(
+export async function fetchPileGraph(
   settings: ExtensionSettings,
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   filters?: {
     provider?: ProviderName;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryGraph> {
+): Promise<BackendPileGraph> {
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -595,14 +595,14 @@ export async function fetchCategoryGraph(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendCategoryGraph>(
+  return fetchBackendJson<BackendPileGraph>(
     settings,
-    `/categories/${encodeURIComponent(category)}/graph${query ? `?${query}` : ""}`,
+    `/piles/${encodeURIComponent(pile)}/graph${query ? `?${query}` : ""}`,
     capabilities
   );
 }
 
-export async function fetchCustomCategoryGraph(
+export async function fetchCustomPileGraph(
   settings: ExtensionSettings,
   name: string,
   filters?: {
@@ -610,7 +610,7 @@ export async function fetchCustomCategoryGraph(
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryGraph> {
+): Promise<BackendPileGraph> {
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -619,16 +619,16 @@ export async function fetchCustomCategoryGraph(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendCategoryGraph>(
+  return fetchBackendJson<BackendPileGraph>(
     settings,
-    `/custom-categories/${encodeURIComponent(name)}/graph${query ? `?${query}` : ""}`,
+    `/extra-piles/${encodeURIComponent(name)}/graph${query ? `?${query}` : ""}`,
     capabilities
   );
 }
 
-export async function fetchCategoryGraphPath(
+export async function fetchPileGraphPath(
   settings: ExtensionSettings,
-  category: SessionCategoryName,
+  pile: BuiltInPileSlug,
   source: string,
   target: string,
   filters?: {
@@ -636,7 +636,7 @@ export async function fetchCategoryGraphPath(
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryGraphPath> {
+): Promise<BackendPileGraphPath> {
   const search = new URLSearchParams({ source, target });
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -644,14 +644,14 @@ export async function fetchCategoryGraphPath(
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
   }
-  return fetchBackendJson<BackendCategoryGraphPath>(
+  return fetchBackendJson<BackendPileGraphPath>(
     settings,
-    `/categories/${encodeURIComponent(category)}/graph/path?${search.toString()}`,
+    `/piles/${encodeURIComponent(pile)}/graph/path?${search.toString()}`,
     capabilities
   );
 }
 
-export async function fetchCustomCategoryGraphPath(
+export async function fetchCustomPileGraphPath(
   settings: ExtensionSettings,
   name: string,
   source: string,
@@ -661,7 +661,7 @@ export async function fetchCustomCategoryGraphPath(
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
-): Promise<BackendCategoryGraphPath> {
+): Promise<BackendPileGraphPath> {
   const search = new URLSearchParams({ source, target });
   if (filters?.provider) {
     search.set("provider", filters.provider);
@@ -669,9 +669,9 @@ export async function fetchCustomCategoryGraphPath(
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
   }
-  return fetchBackendJson<BackendCategoryGraphPath>(
+  return fetchBackendJson<BackendPileGraphPath>(
     settings,
-    `/custom-categories/${encodeURIComponent(name)}/graph/path?${search.toString()}`,
+    `/extra-piles/${encodeURIComponent(name)}/graph/path?${search.toString()}`,
     capabilities
   );
 }
@@ -681,9 +681,9 @@ export async function fetchExplorerSearch(
   query: string,
   options?: {
     limit?: number;
-    category?: SessionCategoryName;
+    pile?: string;
     provider?: ProviderName;
-    userCategory?: string;
+    extraPile?: string;
     kinds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -692,14 +692,14 @@ export async function fetchExplorerSearch(
     q: query.trim(),
     limit: String(options?.limit ?? 25)
   });
-  if (options?.category) {
-    search.set("category", options.category);
+  if (options?.pile) {
+    search.set("pile", options.pile);
   }
   if (options?.provider) {
     search.set("provider", options.provider);
   }
-  if (options?.userCategory) {
-    search.set("user_category", options.userCategory);
+  if (options?.extraPile) {
+    search.set("extra_pile", options.extraPile);
   }
   for (const kind of options?.kinds ?? []) {
     search.append("kind", kind);
@@ -707,45 +707,45 @@ export async function fetchExplorerSearch(
   return fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities);
 }
 
-export async function fetchUserCategories(
+export async function fetchExtraPiles(
   settings: ExtensionSettings,
   filters?: {
     provider?: ProviderName;
-    category?: SessionCategoryName;
+    pile?: string;
   },
   capabilities?: BackendCapabilities
-): Promise<BackendUserCategorySummary[]> {
+): Promise<BackendExtraPileSummary[]> {
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
   }
-  if (filters?.category) {
-    search.set("category", filters.category);
+  if (filters?.pile) {
+    search.set("pile", filters.pile);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendUserCategorySummary[]>(
+  return fetchBackendJson<BackendExtraPileSummary[]>(
     settings,
-    `/user-categories${query ? `?${query}` : ""}`,
+    `/extra-piles${query ? `?${query}` : ""}`,
     capabilities
   );
 }
 
-export async function updateSessionUserCategories(
+export async function updateSessionExtraPiles(
   settings: ExtensionSettings,
   sessionId: string,
-  userCategories: string[],
+  extraPiles: string[],
   capabilities?: BackendCapabilities
 ): Promise<BackendSessionListItem> {
-  const response = await fetch(backendApiUrl(settings, `/sessions/${encodeURIComponent(sessionId)}/user-categories`, capabilities), {
+  const response = await fetch(backendApiUrl(settings, `/sessions/${encodeURIComponent(sessionId)}/extra-piles`, capabilities), {
     method: "PUT",
     headers: buildBackendHeaders(settings),
     body: JSON.stringify({
-      user_categories: userCategories
+      extra_piles: extraPiles
     })
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Session categories update failed with ${response.status}: ${details.slice(0, 300)}`);
+    throw new Error(`Session extra piles update failed with ${response.status}: ${details.slice(0, 300)}`);
   }
   return (await response.json()) as BackendSessionListItem;
 }
@@ -823,7 +823,7 @@ export async function saveSourceCaptureToBackend(
     capture_kind: "selection" | "page";
     save_mode: "raw" | "ai";
     processed: boolean;
-    category?: "journal" | "factual" | "ideas" | "todo" | null;
+    pile_slug?: string | null;
     markdown_path?: string | null;
     raw_source_path?: string | null;
   };
@@ -834,7 +834,7 @@ export async function saveSourceCaptureToBackend(
     captureKind: saved.capture_kind,
     saveMode: saved.save_mode,
     processed: saved.processed,
-    category: saved.category ?? null,
+    pile_slug: saved.pile_slug ?? null,
     markdownPath: saved.markdown_path ?? null,
     rawSourcePath: saved.raw_source_path ?? null
   };

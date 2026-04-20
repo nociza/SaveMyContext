@@ -33,19 +33,21 @@ import {
   recoverDiscardedSession
 } from "../background/backend";
 import {
-  categoryDescriptions,
-  categoryGlyphs,
-  categoryLabels,
-  categoryOrder,
-  categoryPageUrl,
-  categoryPalette,
+  displayPileLabel,
+  isBuiltInPileSlug,
+  pileDescriptions,
+  pileGlyphs,
+  pileLabels,
+  pileOrder,
+  pilePageUrl,
+  pilePalette,
   titleFromSession
 } from "../shared/explorer";
 import type {
   BackendSessionListItem,
   ExtensionSettings,
   ProviderName,
-  SessionCategoryName
+  BuiltInPileSlug
 } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Button } from "../ui/components/button";
@@ -64,8 +66,8 @@ import {
 import { sendRuntimeMessage, useExtensionBootstrap } from "../ui/lib/runtime";
 import type { SourceCaptureResponse } from "../shared/types";
 
-function openCategory(category: SessionCategoryName): void {
-  window.location.href = categoryPageUrl({ category });
+function openPile(pile: BuiltInPileSlug): void {
+  window.location.href = pilePageUrl({ pile });
 }
 
 function sessionActivity(sessions: BackendSessionListItem[]): Array<{ day: string; sessions: number }> {
@@ -183,16 +185,16 @@ function App() {
     return labels.size;
   }, [nodes]);
 
-  const categoryData = useMemo(() => {
-    const counts = new Map(summary?.categories.map((item) => [item.category, item.count] as const) ?? []);
-    return categoryOrder
-      .filter((category) => category !== "discarded")
-      .map((category) => ({
-        category,
-        label: categoryLabels[category],
-        count: counts.get(category) ?? 0,
-        accent: categoryPalette[category].accent,
-        description: categoryDescriptions[category]
+  const pileData = useMemo(() => {
+    const counts = new Map(summary?.piles.map((item) => [item.pile_slug, item.count] as const) ?? []);
+    return pileOrder
+      .filter((pile) => pile !== "discarded")
+      .map((pile) => ({
+        pile,
+        label: pileLabels[pile],
+        count: counts.get(pile) ?? 0,
+        accent: pilePalette[pile].accent,
+        description: pileDescriptions[pile]
       }));
   }, [summary]);
 
@@ -406,20 +408,20 @@ function App() {
           <div>
             <div className="eyebrow">Collections</div>
             <h2 className="display-serif mt-1 text-[24px] font-semibold text-[var(--color-ink)]">
-              Four shelves for every capture
+              Four built-in piles for every capture
             </h2>
           </div>
-          <div id="category-total-label" className="text-sm text-[var(--color-ink-subtle)]">
+          <div id="pile-total-label" className="text-sm text-[var(--color-ink-subtle)]">
             {formatNumber(totalSessions)} indexed sessions
           </div>
         </div>
 
-        <div id="category-list" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {categoryData.map((item) => (
+        <div id="pile-list" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {pileData.map((item) => (
             <button
-              key={item.category}
+              key={item.pile}
               type="button"
-              onClick={() => openCategory(item.category)}
+              onClick={() => openPile(item.pile)}
               className="group relative overflow-hidden rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-5 text-left transition hover:-translate-y-0.5 hover:border-[var(--color-line-strong)] hover:shadow-[0_14px_32px_-18px_rgba(15,27,44,0.22)]"
             >
               <div
@@ -431,7 +433,7 @@ function App() {
                   className="flex h-10 w-10 items-center justify-center rounded-[8px]"
                   style={{ backgroundColor: `${item.accent}1a`, color: item.accent }}
                 >
-                  <span className="display-serif text-[19px] leading-none">{categoryGlyphs[item.category]}</span>
+                  <span className="display-serif text-[19px] leading-none">{pileGlyphs[item.pile]}</span>
                 </div>
                 <span
                   className="display-serif text-[28px] font-semibold tabular-nums"
@@ -447,7 +449,7 @@ function App() {
                 </p>
               </div>
               <div className="mt-4 flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.1em]" style={{ color: item.accent }}>
-                Open shelf
+                Open pile
                 <ArrowRight className="h-3 w-3" />
               </div>
             </button>
@@ -602,7 +604,7 @@ function App() {
                 <span id="metric-edges">{formatNumber(edges.length)}</span> edges
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => openCategory("factual")}>
+            <Button variant="ghost" size="sm" onClick={() => openPile("factual")}>
               Atlas
               <ArrowRight className="h-3.5 w-3.5" />
             </Button>
@@ -655,13 +657,13 @@ function App() {
 
           <div className="mt-4 space-y-2">
             {recentSessions.map((session) => {
-              const category = (session.category ?? "factual") as SessionCategoryName;
-              const accent = categoryPalette[category].accent;
+              const pile = session.pile_slug ?? "factual";
+              const accent = isBuiltInPileSlug(pile) ? pilePalette[pile].accent : "var(--color-factual)";
               return (
                 <button
                   key={session.id}
                   type="button"
-                  onClick={() => openCategory(category)}
+                  onClick={() => (isBuiltInPileSlug(pile) ? openPile(pile) : undefined)}
                   className="group flex w-full items-center gap-3 rounded-[8px] px-2 py-2 text-left transition hover:bg-[var(--color-paper-sunken)]"
                 >
                   <span className="h-8 w-1 shrink-0 rounded-full" style={{ backgroundColor: accent }} />
@@ -670,7 +672,7 @@ function App() {
                       {titleFromSession(session)}
                     </span>
                     <span className="mt-0.5 block truncate text-[11.5px] text-[var(--color-ink-subtle)]">
-                      {categoryLabels[category]} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
+                      {displayPileLabel(pile)} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
                     </span>
                   </span>
                   <ArrowRight className="h-3.5 w-3.5 text-[var(--color-ink-subtle)] opacity-0 transition group-hover:opacity-100" />
@@ -769,8 +771,8 @@ function App() {
               </div>
             </div>
           </div>
-          <Button variant="secondary" size="sm" className="mt-5 w-full justify-center" onClick={() => openCategory("todo")}>
-            Open To-Do shelf
+          <Button variant="secondary" size="sm" className="mt-5 w-full justify-center" onClick={() => openPile("todo")}>
+            Open To-Do pile
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
 

@@ -8,10 +8,10 @@ from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
 from app.core.config import get_settings
 from app.core.version import get_app_version
-from app.models import APIToken, ChatMessage, ChatSession, FactTriplet, ProviderName, SessionCategory, SyncEvent
+from app.models import APIToken, ChatMessage, ChatSession, FactTriplet, ProviderName, BuiltInPileSlug, SyncEvent
 from app.models.base import utcnow
-from app.schemas.dashboard import CategoryCount, CustomCategoryCount, DashboardSummary
-from app.schemas.explorer import CategoryGraph, CategoryGraphPath, CategoryStats
+from app.schemas.dashboard import DashboardSummary, ExtraPileCount, PileCount
+from app.schemas.explorer import PileGraph, PileGraphPath, PileStats
 from app.schemas.graph import GraphEdge, GraphNode
 from app.schemas.search import SearchResponse
 from app.schemas.system import StorageSettingsResponse, StorageSettingsUpdate, SystemStatus
@@ -21,7 +21,7 @@ from app.services.graph import GraphService
 from app.services.search import SearchService
 from app.services.storage_config import StorageConfigService
 from app.services.todo import TodoListService
-from app.services.user_categories import summarize_user_categories
+from app.services.extra_piles import summarize_extra_piles
 
 
 router = APIRouter()
@@ -46,19 +46,19 @@ async def dashboard_summary(
         select(func.max(ChatSession.last_captured_at)).where(ChatSession.is_discarded.is_(False))
     )
 
-    category_rows = (
+    pile_rows = (
         await db.execute(
-            select(ChatSession.category, func.count(ChatSession.id))
-            .where(ChatSession.category.is_not(None))
+            select(ChatSession.built_in_pile, func.count(ChatSession.id))
+            .where(ChatSession.built_in_pile.is_not(None))
             .where(ChatSession.is_discarded.is_(False))
-            .group_by(ChatSession.category)
+            .group_by(ChatSession.built_in_pile)
         )
     ).all()
 
-    categories = [
-        CategoryCount(category=category, count=count)
-        for category, count in category_rows
-        if category in {SessionCategory.JOURNAL, SessionCategory.FACTUAL, SessionCategory.IDEAS, SessionCategory.TODO}
+    piles = [
+        PileCount(pile_slug=pile, count=count)
+        for pile, count in pile_rows
+        if pile in {BuiltInPileSlug.JOURNAL, BuiltInPileSlug.FACTUAL, BuiltInPileSlug.IDEAS, BuiltInPileSlug.TODO}
     ]
     session_tags = (
         await db.execute(
@@ -72,8 +72,8 @@ async def dashboard_summary(
         total_sync_events=total_sync_events,
         active_tokens=active_tokens,
         latest_sync_at=latest_sync_at,
-        categories=categories,
-        custom_categories=[CustomCategoryCount(name=name, count=count) for name, count in summarize_user_categories(session_tags)],
+        piles=piles,
+        extra_piles=[ExtraPileCount(name=name, count=count) for name, count in summarize_extra_piles(session_tags)],
     )
 
 
@@ -81,9 +81,10 @@ async def dashboard_summary(
 async def search(
     q: str = Query(min_length=2),
     limit: int = Query(default=25, ge=1, le=100),
-    category: SessionCategory | None = Query(default=None),
+    pile: str | None = Query(default=None),
+    category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
     provider: ProviderName | None = Query(default=None),
-    user_category: str | None = Query(default=None),
+    extra_pile: str | None = Query(default=None),
     kind: list[str] | None = Query(default=None),
     include_discarded: bool = Query(default=False),
     _: AuthContext = Depends(require_scope("read")),
@@ -92,46 +93,46 @@ async def search(
     return await SearchService(db).search(
         q,
         limit=limit,
-        category=category,
+        pile=pile or (category.value if category else None),
         provider=provider,
-        user_category=user_category,
+        extra_pile=extra_pile,
         kinds=set(kind) if kind else None,
-        include_discarded=include_discarded or category == SessionCategory.DISCARDED,
+        include_discarded=include_discarded or pile == BuiltInPileSlug.DISCARDED.value or category == BuiltInPileSlug.DISCARDED,
     )
 
 
-@router.get("/categories/{category}/stats", response_model=CategoryStats)
+@router.get("/categories/{category}/stats", response_model=PileStats)
 async def category_stats(
-    category: SessionCategory,
+    category: BuiltInPileSlug,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryStats:
+) -> PileStats:
     return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider)
 
 
-@router.get("/categories/{category}/graph", response_model=CategoryGraph)
+@router.get("/categories/{category}/graph", response_model=PileGraph)
 async def category_graph(
-    category: SessionCategory,
+    category: BuiltInPileSlug,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryGraph:
+) -> PileGraph:
     return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
 
 
-@router.get("/categories/{category}/graph/path", response_model=CategoryGraphPath)
+@router.get("/categories/{category}/graph/path", response_model=PileGraphPath)
 async def category_graph_path(
-    category: SessionCategory,
+    category: BuiltInPileSlug,
     source: str = Query(min_length=1),
     target: str = Query(min_length=1),
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryGraphPath:
+) -> PileGraphPath:
     return await ExplorerService(db).category_graph_path(
         category,
         source=source,
@@ -141,30 +142,33 @@ async def category_graph_path(
     )
 
 
-@router.get("/custom-categories/{name}/stats", response_model=CategoryStats)
-async def custom_category_stats(
+@router.get("/extra-piles/{name}/stats", response_model=PileStats)
+@router.get("/custom-categories/{name}/stats", response_model=PileStats, include_in_schema=False)
+async def extra_pile_stats(
     name: str,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryStats:
+) -> PileStats:
     return await ExplorerService(db).custom_category_stats(name, session_ids=session_id, provider=provider)
 
 
-@router.get("/custom-categories/{name}/graph", response_model=CategoryGraph)
-async def custom_category_graph(
+@router.get("/extra-piles/{name}/graph", response_model=PileGraph)
+@router.get("/custom-categories/{name}/graph", response_model=PileGraph, include_in_schema=False)
+async def extra_pile_graph(
     name: str,
     provider: ProviderName | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryGraph:
+) -> PileGraph:
     return await ExplorerService(db).custom_category_graph(name, session_ids=session_id, provider=provider)
 
 
-@router.get("/custom-categories/{name}/graph/path", response_model=CategoryGraphPath)
-async def custom_category_graph_path(
+@router.get("/extra-piles/{name}/graph/path", response_model=PileGraphPath)
+@router.get("/custom-categories/{name}/graph/path", response_model=PileGraphPath, include_in_schema=False)
+async def extra_pile_graph_path(
     name: str,
     source: str = Query(min_length=1),
     target: str = Query(min_length=1),
@@ -172,7 +176,7 @@ async def custom_category_graph_path(
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
-) -> CategoryGraphPath:
+) -> PileGraphPath:
     return await ExplorerService(db).custom_category_graph_path(
         name,
         source=source,

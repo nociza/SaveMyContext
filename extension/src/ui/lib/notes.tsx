@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { categoryLabels, formatCompactDate, providerLabels, titleFromSession } from "../../shared/explorer";
+import { displayPileLabel, formatCompactDate, isBuiltInPileSlug, providerLabels, titleFromSession } from "../../shared/explorer";
 import type { BackendSessionNoteRead } from "../../shared/types";
 import { IdeaFlow, type IdeaFlowData, type IdeaFlowOrigin } from "../components/idea-flow";
 
@@ -118,19 +118,21 @@ export function NoteOverview({
   const ideaSummary = note.idea_summary ?? {};
   const journal = splitJournalEntry(note.journal_entry);
   const transcript = compact ? note.messages.slice(0, 4) : note.messages.slice(0, 6);
+  const pile = note.pile_slug ?? "factual";
+  const builtInPile = isBuiltInPileSlug(pile) ? pile : null;
 
   return (
     <div className="space-y-4">
       {compact ? (
         <NoteSection title="Session">
           <p>
-            {titleFromSession(note)} · {providerLabels[note.provider]} · {categoryLabels[note.category ?? "factual"]} ·{" "}
+            {titleFromSession(note)} · {providerLabels[note.provider]} · {displayPileLabel(pile)} ·{" "}
             {formatCompactDate(note.updated_at)}
           </p>
         </NoteSection>
       ) : null}
 
-      {note.category === "factual" ? (
+      {builtInPile === "factual" ? (
         <>
           {note.classification_reason ? (
             <NoteSection title="Classification">
@@ -159,7 +161,7 @@ export function NoteOverview({
         </>
       ) : null}
 
-      {note.category === "ideas" ? (
+      {builtInPile === "ideas" ? (
         <>
           {ideaFlowHasStructure(ideaSummary) ? (
             <NoteSection title="Idea Flow">
@@ -208,7 +210,7 @@ export function NoteOverview({
         </>
       ) : null}
 
-      {note.category === "journal" ? (
+      {builtInPile === "journal" ? (
         <>
           {journal.body ? (
             <NoteSection title="Journal Entry">
@@ -223,13 +225,13 @@ export function NoteOverview({
         </>
       ) : null}
 
-      {note.category === "todo" && note.todo_summary ? (
+      {builtInPile === "todo" && note.todo_summary ? (
         <NoteSection title="To-Do Update">
           <p>{note.todo_summary}</p>
         </NoteSection>
       ) : null}
 
-      {note.share_post && (!compact || note.category !== "ideas") ? (
+      {note.share_post && (!compact || builtInPile !== "ideas") ? (
         <NoteSection title="Share Post">
           <p>{note.share_post}</p>
         </NoteSection>

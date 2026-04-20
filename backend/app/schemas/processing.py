@@ -1,13 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app.models.enums import SessionCategory
+from app.models.enums import BuiltInPileSlug
 
 
 class ClassificationResult(BaseModel):
-    category: SessionCategory
+    model_config = ConfigDict(populate_by_name=True)
+
+    pile: BuiltInPileSlug = Field(validation_alias=AliasChoices("pile", "category"))
     reason: str = Field(min_length=1)
+
+    @property
+    def category(self) -> BuiltInPileSlug:
+        return self.pile
 
 
 class PileClassificationResult(BaseModel):

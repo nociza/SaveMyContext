@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 
-from app.models import ChatMessage, MessageRole, SessionCategory
+from app.models import ChatMessage, MessageRole, BuiltInPileSlug
 from app.schemas.processing import ClassificationResult, IdeaResult, JournalResult, TripletResult
 from app.services.text import compact_lines, normalize_whitespace, take_sentences, truncate_text
 
@@ -131,31 +131,31 @@ def heuristic_classification(messages: list[ChatMessage]) -> ClassificationResul
     explicit_todo_request = is_explicit_todo_request(messages)
     scores = Counter(
         {
-            SessionCategory.JOURNAL: sum(term in lowered for term in JOURNAL_TERMS) + user_text.lower().count(" i "),
-            SessionCategory.TODO: (4 if explicit_todo_request else 0) + sum(term in lowered for term in TODO_TERMS),
-            SessionCategory.IDEAS: sum(term in lowered for term in IDEA_TERMS),
-            SessionCategory.FACTUAL: sum(term in lowered for term in FACTUAL_TERMS),
+            BuiltInPileSlug.JOURNAL: sum(term in lowered for term in JOURNAL_TERMS) + user_text.lower().count(" i "),
+            BuiltInPileSlug.TODO: (4 if explicit_todo_request else 0) + sum(term in lowered for term in TODO_TERMS),
+            BuiltInPileSlug.IDEAS: sum(term in lowered for term in IDEA_TERMS),
+            BuiltInPileSlug.FACTUAL: sum(term in lowered for term in FACTUAL_TERMS),
         }
     )
 
     if "what if" in lowered or "brainstorm" in lowered:
-        scores[SessionCategory.IDEAS] += 2
+        scores[BuiltInPileSlug.IDEAS] += 2
     if any(word in lowered for word in ("today", "tomorrow", "my day", "i feel", "i'm feeling")):
-        scores[SessionCategory.JOURNAL] += 2
+        scores[BuiltInPileSlug.JOURNAL] += 2
     if "```" in transcript or any(word in lowered for word in ("stack trace", "exception", "endpoint")):
-        scores[SessionCategory.FACTUAL] += 2
+        scores[BuiltInPileSlug.FACTUAL] += 2
 
-    category = max(scores, key=scores.get)
-    if scores[category] == 0:
-        category = SessionCategory.FACTUAL
+    built_in_pile = max(scores, key=scores.get)
+    if scores[built_in_pile] == 0:
+        built_in_pile = BuiltInPileSlug.FACTUAL
 
     reason = {
-        SessionCategory.JOURNAL: "Heuristic classifier detected personal context, reflection, or task-planning language.",
-        SessionCategory.TODO: "Heuristic classifier detected explicit requests to update or manage the shared to-do list.",
-        SessionCategory.FACTUAL: "Heuristic classifier detected explanatory, technical, or objective language.",
-        SessionCategory.IDEAS: "Heuristic classifier detected ideation, brainstorming, or concept-development language.",
-    }[category]
-    return ClassificationResult(category=category, reason=reason)
+        BuiltInPileSlug.JOURNAL: "Heuristic classifier detected personal context, reflection, or task-planning language.",
+        BuiltInPileSlug.TODO: "Heuristic classifier detected explicit requests to update or manage the shared to-do list.",
+        BuiltInPileSlug.FACTUAL: "Heuristic classifier detected explanatory, technical, or objective language.",
+        BuiltInPileSlug.IDEAS: "Heuristic classifier detected ideation, brainstorming, or concept-development language.",
+    }[built_in_pile]
+    return ClassificationResult(pile=built_in_pile, reason=reason)
 
 
 def extract_action_items(messages: list[ChatMessage]) -> list[str]:

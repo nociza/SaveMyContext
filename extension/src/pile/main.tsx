@@ -5,42 +5,43 @@ import * as Tabs from "@radix-ui/react-tabs";
 import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, Search, Sparkles, Workflow } from "lucide-react";
 
 import {
-  fetchCategoryGraph,
-  fetchCategoryGraphPath,
-  fetchCategoryStats,
-  fetchCustomCategoryGraph,
-  fetchCustomCategoryGraphPath,
-  fetchCustomCategoryStats,
+  fetchPileGraph,
+  fetchPileGraphPath,
+  fetchPileStats,
+  fetchCustomPileGraph,
+  fetchCustomPileGraphPath,
+  fetchCustomPileStats,
   fetchExplorerSearch,
   fetchSessionNote,
   fetchSessions,
   fetchTodoList,
-  fetchUserCategories,
-  updateSessionUserCategories,
+  fetchExtraPiles,
+  updateSessionExtraPiles,
   updateTodoList
 } from "../background/backend";
 import {
-  categoryGlyphs,
-  categoryLabels,
-  categoryOrder,
-  categoryPalette,
+  displayPileLabel,
+  pileGlyphs,
+  pileLabels,
+  pileOrder,
+  pilePalette,
   formatCompactDate,
   formatLongDate,
   notePageUrl,
-  parseCategory,
-  parseCategoryWorkspaceView,
+  parsePile,
+  parsePileWorkspaceView,
   parseProvider,
   parseSortMode,
   providerColors,
   providerLabels,
   titleFromSession,
-  type CategorySortMode,
-  type CategoryWorkspaceView
+  type PileSortMode,
+  type PileWorkspaceView
 } from "../shared/explorer";
 import type {
-  BackendCategoryGraph,
-  BackendCategoryGraphPath,
-  BackendCategoryStats,
+  BackendPileGraph,
+  BackendPileGraphPath,
+  BackendPileStats,
   BackendExplorerGraphEvidence,
   BackendExplorerGraphNode,
   BackendExplorerGraphPath,
@@ -48,33 +49,33 @@ import type {
   BackendSessionListItem,
   BackendSessionNoteRead,
   BackendTodoItem,
-  BackendUserCategorySummary,
+  BackendExtraPileSummary,
   ExtensionSettings,
   ProviderName,
-  SessionCategoryName
+  BuiltInPileSlug
 } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
-import { CategoryGraph, type CategoryGraphDensity, type CategoryGraphFocusMode, type CategoryGraphSelection } from "../ui/components/category-graph";
+import { PileGraph, type PileGraphDensity, type PileGraphFocusMode, type PileGraphSelection } from "../ui/components/pile-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
 import { TodoWorkspace } from "../ui/components/todo-workspace";
 import { formatNumber, formatPercent } from "../ui/lib/format";
 import { MarkdownView, NoteOverview, TranscriptView } from "../ui/lib/notes";
-import { buildCategoryGraphInsights, type GraphGroupingMode } from "../ui/lib/category-graph-insights";
+import { buildPileGraphInsights, type GraphGroupingMode } from "../ui/lib/pile-graph-insights";
 import { useDebouncedValue, useExtensionBootstrap } from "../ui/lib/runtime";
 
 type RouteState = {
-  category: SessionCategoryName;
+  pile: BuiltInPileSlug;
   q: string;
   provider: ProviderName | null;
-  sort: CategorySortMode;
-  view: CategoryWorkspaceView;
+  sort: PileSortMode;
+  view: PileWorkspaceView;
   bucket: string | null;
   note: string | null;
-  userCategory: string | null;
+  extraPile: string | null;
 };
 
 type GraphFocus = {
@@ -85,20 +86,20 @@ type GraphFocus = {
 function readRouteState(): RouteState {
   const params = new URLSearchParams(window.location.search);
   return {
-    category: parseCategory(params.get("category")),
+    pile: parsePile(params.get("pile")),
     q: params.get("q")?.trim() ?? "",
     provider: parseProvider(params.get("provider")),
     sort: parseSortMode(params.get("sort")),
-    view: parseCategoryWorkspaceView(params.get("view")),
+    view: parsePileWorkspaceView(params.get("view")),
     bucket: params.get("bucket")?.trim() ?? null,
     note: params.get("note"),
-    userCategory: params.get("userCategory")?.trim() ?? null
+    extraPile: params.get("extraPile")?.trim() ?? null
   };
 }
 
 function writeRouteState(state: RouteState, push = true): void {
   const url = new URL(window.location.href);
-  url.searchParams.set("category", state.category);
+  url.searchParams.set("pile", state.pile);
   if (state.q.trim()) {
     url.searchParams.set("q", state.q.trim());
   } else {
@@ -129,10 +130,10 @@ function writeRouteState(state: RouteState, push = true): void {
   } else {
     url.searchParams.delete("note");
   }
-  if (state.userCategory?.trim()) {
-    url.searchParams.set("userCategory", state.userCategory.trim());
+  if (state.extraPile?.trim()) {
+    url.searchParams.set("extraPile", state.extraPile.trim());
   } else {
-    url.searchParams.delete("userCategory");
+    url.searchParams.delete("extraPile");
   }
 
   if (push) {
@@ -142,12 +143,12 @@ function writeRouteState(state: RouteState, push = true): void {
   }
 }
 
-function createEmptyStats(category: SessionCategoryName): BackendCategoryStats {
+function createEmptyStats(pile: BuiltInPileSlug): BackendPileStats {
   return {
-    category,
+    pile_slug: pile,
     scope_kind: "default",
-    scope_label: categoryLabels[category],
-    dominant_category: category,
+    scope_label: pileLabels[pile],
+    dominant_pile_slug: pile,
     total_sessions: 0,
     total_messages: 0,
     total_triplets: 0,
@@ -158,7 +159,7 @@ function createEmptyStats(category: SessionCategoryName): BackendCategoryStats {
     notes_with_idea_summary: 0,
     notes_with_journal_entry: 0,
     notes_with_todo_summary: 0,
-    system_category_counts: [{ category, count: 0 }],
+    built_in_pile_counts: [{ pile_slug: pile, count: 0 }],
     provider_counts: [],
     activity: [],
     top_tags: [],
@@ -167,12 +168,12 @@ function createEmptyStats(category: SessionCategoryName): BackendCategoryStats {
   };
 }
 
-function createEmptyGraph(category: SessionCategoryName): BackendCategoryGraph {
+function createEmptyGraph(pile: BuiltInPileSlug): BackendPileGraph {
   return {
-    category,
+    pile_slug: pile,
     scope_kind: "default",
-    scope_label: categoryLabels[category],
-    dominant_category: category,
+    scope_label: pileLabels[pile],
+    dominant_pile_slug: pile,
     node_count: 0,
     edge_count: 0,
     nodes: [],
@@ -180,7 +181,7 @@ function createEmptyGraph(category: SessionCategoryName): BackendCategoryGraph {
   };
 }
 
-function sortSessions(items: BackendSessionListItem[], sortMode: CategorySortMode): BackendSessionListItem[] {
+function sortSessions(items: BackendSessionListItem[], sortMode: PileSortMode): BackendSessionListItem[] {
   const sorted = [...items];
   if (sortMode === "title") {
     sorted.sort((left, right) => titleFromSession(left).localeCompare(titleFromSession(right)));
@@ -205,11 +206,11 @@ function searchMatchMap(search: BackendSearchResponse | undefined): Map<string, 
   return matches;
 }
 
-function signalGroups(stats: BackendCategoryStats): {
+function signalGroups(stats: BackendPileStats): {
   primary: Array<{ label: string; count: number }>;
   secondary: Array<{ label: string; count: number }>;
 } {
-  if (stats.category === "factual") {
+  if (stats.pile_slug === "factual") {
     return {
       primary: stats.top_entities,
       secondary: stats.top_predicates
@@ -220,11 +221,11 @@ function signalGroups(stats: BackendCategoryStats): {
     primary: stats.top_tags,
     secondary: [
       {
-        label: stats.category === "ideas" ? "Summaries" : stats.category === "journal" ? "Entries" : "Task updates",
+        label: stats.pile_slug === "ideas" ? "Summaries" : stats.pile_slug === "journal" ? "Entries" : "Task updates",
         count:
-          stats.category === "ideas"
+          stats.pile_slug === "ideas"
             ? stats.notes_with_idea_summary
-            : stats.category === "journal"
+            : stats.pile_slug === "journal"
               ? stats.notes_with_journal_entry
               : stats.notes_with_todo_summary
       },
@@ -236,7 +237,7 @@ function signalGroups(stats: BackendCategoryStats): {
 function sessionPreviewText(
   session: BackendSessionListItem,
   match: { snippet: string; kind: string } | undefined,
-  category: SessionCategoryName
+  pile: string
 ): string {
   if (match?.snippet) {
     return match.snippet;
@@ -244,7 +245,7 @@ function sessionPreviewText(
   if (session.share_post) {
     return session.share_post;
   }
-  if (category === "todo") {
+  if (pile === "todo") {
     return "Open this saved update to see how the shared checklist changed.";
   }
   return "Open to inspect this note.";
@@ -293,19 +294,19 @@ function noteListMeta(
   total: number,
   visible: number,
   focus: GraphFocus | null,
-  displayCategory: SessionCategoryName
+  displayPile: BuiltInPileSlug
 ): string {
   const providerText = route.provider ? ` in ${providerLabels[route.provider]}` : "";
   const bucketText = route.bucket ? ` · ${formatBucketLabel(route.bucket)}` : "";
-  const userCategoryText = route.userCategory ? ` · custom category ${route.userCategory}` : "";
-  const collectionLabel = displayCategory === "todo" ? "update notes" : "notes";
+  const extraPileText = route.extraPile ? ` · extra pile ${route.extraPile}` : "";
+  const noteLabel = displayPile === "todo" ? "update notes" : "notes";
   if (focus) {
-    return `${formatNumber(visible)} ${collectionLabel} linked to ${focus.label}${bucketText}${userCategoryText}`;
+    return `${formatNumber(visible)} ${noteLabel} linked to ${focus.label}${bucketText}${extraPileText}`;
   }
   if (route.q) {
-    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} ${collectionLabel}${providerText}${bucketText}${userCategoryText}`;
+    return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} ${noteLabel}${providerText}${bucketText}${extraPileText}`;
   }
-  return `${formatNumber(total)} ${collectionLabel} in view${providerText}${bucketText}${userCategoryText}`;
+  return `${formatNumber(total)} ${noteLabel} in view${providerText}${bucketText}${extraPileText}`;
 }
 
 function graphNodeOptionScore(node: BackendExplorerGraphNode): number {
@@ -316,7 +317,7 @@ function evidenceKey(evidence: BackendExplorerGraphEvidence): string {
   return [evidence.triplet_id, evidence.session_id, evidence.predicate, evidence.snippet].filter(Boolean).join(":");
 }
 
-function evidenceForSelection(graph: BackendCategoryGraph, selection: CategoryGraphSelection | null): BackendExplorerGraphEvidence[] {
+function evidenceForSelection(graph: BackendPileGraph, selection: PileGraphSelection | null): BackendExplorerGraphEvidence[] {
   if (!selection) {
     return [];
   }
@@ -348,8 +349,8 @@ function GraphEvidencePanel({
   selection,
   onClear
 }: {
-  graph: BackendCategoryGraph;
-  selection: CategoryGraphSelection | null;
+  graph: BackendPileGraph;
+  selection: PileGraphSelection | null;
   onClear: () => void;
 }) {
   const selectedNode = selection?.kind === "node" ? graph.nodes.find((node) => node.id === selection.id) ?? null : null;
@@ -422,7 +423,7 @@ function GraphPathPanel({
   nodes: BackendExplorerGraphNode[];
   sourceId: string | null;
   targetId: string | null;
-  path: BackendCategoryGraphPath | null;
+  path: BackendPileGraphPath | null;
   loading: boolean;
   error: Error | null;
   onSourceChange: (nodeId: string) => void;
@@ -495,12 +496,12 @@ function App() {
   const { settings, status, loading, error } = useExtensionBootstrap();
   const [route, setRoute] = useState<RouteState>(readRouteState);
   const [graphFocus, setGraphFocus] = useState<GraphFocus | null>(null);
-  const [graphInspect, setGraphInspect] = useState<CategoryGraphSelection | null>(null);
+  const [graphInspect, setGraphInspect] = useState<PileGraphSelection | null>(null);
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
   const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("community");
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
-  const [graphDensity, setGraphDensity] = useState<CategoryGraphDensity>("curated");
-  const [graphFocusMode, setGraphFocusMode] = useState<CategoryGraphFocusMode>("context");
+  const [graphDensity, setGraphDensity] = useState<PileGraphDensity>("curated");
+  const [graphFocusMode, setGraphFocusMode] = useState<PileGraphFocusMode>("context");
   const [graphProviderFilter, setGraphProviderFilter] = useState<ReadonlySet<ProviderName>>(() => new Set());
   const [graphKindFilter, setGraphKindFilter] = useState<ReadonlySet<string>>(() => new Set());
   const [pathSourceId, setPathSourceId] = useState<string | null>(null);
@@ -508,10 +509,10 @@ function App() {
   const [todoDraft, setTodoDraft] = useState("");
   const [todoActionError, setTodoActionError] = useState<string | null>(null);
   const [todoSavingSummary, setTodoSavingSummary] = useState<string | null>(null);
-  const [userCategoryDraft, setUserCategoryDraft] = useState("");
-  const [userCategoryError, setUserCategoryError] = useState<string | null>(null);
+  const [extraPileDraft, setExtraPileDraft] = useState("");
+  const [extraPileError, setExtraPileError] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(route.q);
-  const isCustomScope = Boolean(route.userCategory);
+  const isCustomScope = Boolean(route.extraPile);
 
   useEffect(() => {
     const handlePopState = (): void => {
@@ -535,46 +536,46 @@ function App() {
   }
 
   const sessionsQuery = useQuery({
-    queryKey: ["category-sessions", settings?.backendUrl, settings?.backendToken, route.category, route.provider, route.userCategory],
+    queryKey: ["pile-sessions", settings?.backendUrl, settings?.backendToken, route.pile, route.provider, route.extraPile],
     queryFn: () =>
       fetchSessions(
         settings as ExtensionSettings,
-        route.provider || route.userCategory
+        route.provider || route.extraPile
           ? {
-              category: isCustomScope ? undefined : route.category,
+              pile: isCustomScope ? undefined : route.pile,
               provider: route.provider ?? undefined,
-              userCategory: route.userCategory ?? undefined
+              extraPile: route.extraPile ?? undefined
             }
-          : { category: route.category }
+          : { pile: route.pile }
       ),
     enabled: Boolean(settings && !status?.backendValidationError)
   });
 
-  const userCategoriesQuery = useQuery({
-    queryKey: ["session-user-categories", settings?.backendUrl, settings?.backendToken, route.provider, isCustomScope ? null : route.category],
+  const extraPilesQuery = useQuery({
+    queryKey: ["session-extra-piles", settings?.backendUrl, settings?.backendToken, route.provider, isCustomScope ? null : route.pile],
     queryFn: () =>
-      fetchUserCategories(settings as ExtensionSettings, {
+      fetchExtraPiles(settings as ExtensionSettings, {
         provider: route.provider ?? undefined,
-        category: isCustomScope ? undefined : route.category
+        pile: isCustomScope ? undefined : route.pile
       }),
     enabled: Boolean(settings && !status?.backendValidationError)
   });
 
   const searchQuery = useQuery({
     queryKey: [
-      "category-search",
+      "pile-search",
       settings?.backendUrl,
       settings?.backendToken,
-      route.category,
+      route.pile,
       route.provider,
-      route.userCategory,
+      route.extraPile,
       debouncedQuery
     ],
     queryFn: () =>
       fetchExplorerSearch(settings as ExtensionSettings, debouncedQuery, {
-        category: isCustomScope ? undefined : route.category,
+        pile: isCustomScope ? undefined : route.pile,
         provider: route.provider ?? undefined,
-        userCategory: route.userCategory ?? undefined,
+        extraPile: route.extraPile ?? undefined,
         limit: 80
       }),
     enabled: Boolean(settings && !status?.backendValidationError && debouncedQuery.trim())
@@ -609,19 +610,19 @@ function App() {
 
   const statsQuery = useQuery({
     queryKey: [
-      "category-stats",
+      "pile-stats",
       settings?.backendUrl,
       settings?.backendToken,
-      route.category,
+      route.pile,
       route.provider,
-      route.userCategory,
+      route.extraPile,
       scopedSessionIds?.join("|") ?? "*"
     ],
     queryFn: () =>
       isCustomScope
-        ? fetchCustomCategoryStats(
+        ? fetchCustomPileStats(
             settings as ExtensionSettings,
-            route.userCategory as string,
+            route.extraPile as string,
             route.provider || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
@@ -629,9 +630,9 @@ function App() {
                 }
               : undefined
           )
-        : fetchCategoryStats(
+        : fetchPileStats(
             settings as ExtensionSettings,
-            route.category,
+            route.pile,
             route.provider || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
@@ -644,19 +645,19 @@ function App() {
 
   const graphQuery = useQuery({
     queryKey: [
-      "category-graph",
+      "pile-graph",
       settings?.backendUrl,
       settings?.backendToken,
-      route.category,
+      route.pile,
       route.provider,
-      route.userCategory,
+      route.extraPile,
       scopedSessionIds?.join("|") ?? "*"
     ],
     queryFn: () =>
       isCustomScope
-        ? fetchCustomCategoryGraph(
+        ? fetchCustomPileGraph(
             settings as ExtensionSettings,
-            route.userCategory as string,
+            route.extraPile as string,
             route.provider || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
@@ -664,9 +665,9 @@ function App() {
                 }
               : undefined
           )
-        : fetchCategoryGraph(
+        : fetchPileGraph(
             settings as ExtensionSettings,
-            route.category,
+            route.pile,
             route.provider || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
@@ -700,28 +701,28 @@ function App() {
   const selectedSession = noteListItems.find((session) => session.id === selectedSessionId) ?? null;
 
   const noteQuery = useQuery({
-    queryKey: ["category-note", settings?.backendUrl, settings?.backendToken, selectedSessionId],
+    queryKey: ["pile-note", settings?.backendUrl, settings?.backendToken, selectedSessionId],
     queryFn: () => fetchSessionNote(settings as ExtensionSettings, selectedSessionId as string),
     enabled: Boolean(settings && !status?.backendValidationError && selectedSessionId)
   });
 
   const todoQuery = useQuery({
-    queryKey: ["category-todo", settings?.backendUrl, settings?.backendToken],
+    queryKey: ["pile-todo", settings?.backendUrl, settings?.backendToken],
     queryFn: () => fetchTodoList(settings as ExtensionSettings),
-    enabled: Boolean(settings && !status?.backendValidationError && !isCustomScope && route.category === "todo")
+    enabled: Boolean(settings && !status?.backendValidationError && !isCustomScope && route.pile === "todo")
   });
 
   const stats =
     (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
-      ? createEmptyStats(route.category)
-      : statsQuery.data ?? createEmptyStats(route.category);
+      ? createEmptyStats(route.pile)
+      : statsQuery.data ?? createEmptyStats(route.pile);
   const graph =
     (scopedSessionIds && !visibleSessions.length) || (debouncedQuery.trim() && !visibleSessions.length)
-      ? createEmptyGraph(route.category)
-      : graphQuery.data ?? createEmptyGraph(route.category);
-  const todo = !isCustomScope && route.category === "todo" ? todoQuery.data ?? null : null;
-  const activeDisplayCategory = graph.dominant_category ?? stats.dominant_category ?? route.category;
-  const userCategories = userCategoriesQuery.data ?? [];
+      ? createEmptyGraph(route.pile)
+      : graphQuery.data ?? createEmptyGraph(route.pile);
+  const todo = !isCustomScope && route.pile === "todo" ? todoQuery.data ?? null : null;
+  const activeDisplayCategory = graph.dominant_pile_slug ?? stats.dominant_pile_slug ?? route.pile;
+  const extraPiles = extraPilesQuery.data ?? [];
 
   const signals = signalGroups(stats);
   const providerPie = stats.provider_counts.map((item) => ({
@@ -762,7 +763,7 @@ function App() {
     return { ...graph, nodes, edges, node_count: nodes.length, edge_count: edges.length };
   }, [graph, graphProviderFilter, graphKindFilter]);
   const graphInsights = useMemo(
-    () => buildCategoryGraphInsights(filteredGraph, visibleSessions, activeDisplayCategory, groupingMode),
+    () => buildPileGraphInsights(filteredGraph, visibleSessions, activeDisplayCategory, groupingMode),
     [activeDisplayCategory, filteredGraph, groupingMode, visibleSessions]
   );
   const graphNodeOptions = useMemo(
@@ -781,28 +782,28 @@ function App() {
     : undefined;
   const pathQuery = useQuery({
     queryKey: [
-      "category-graph-path",
+      "pile-graph-path",
       settings?.backendUrl,
       settings?.backendToken,
-      route.category,
+      route.pile,
       route.provider,
-      route.userCategory,
+      route.extraPile,
       scopedSessionIds?.join("|") ?? "*",
       pathSourceId,
       pathTargetId
     ],
     queryFn: () =>
       isCustomScope
-        ? fetchCustomCategoryGraphPath(
+        ? fetchCustomPileGraphPath(
             settings as ExtensionSettings,
-            route.userCategory as string,
+            route.extraPile as string,
             pathSourceId as string,
             pathTargetId as string,
             pathFilterOptions
           )
-        : fetchCategoryGraphPath(
+        : fetchPileGraphPath(
             settings as ExtensionSettings,
-            route.category,
+            route.pile,
             pathSourceId as string,
             pathTargetId as string,
             pathFilterOptions
@@ -817,8 +818,8 @@ function App() {
     )
   });
   const scopePills = [
-    { key: "category", label: isCustomScope ? "Default base" : "Category", value: categoryLabels[activeDisplayCategory] },
-    route.userCategory ? { key: "user-category", label: "Custom", value: route.userCategory } : null,
+    { key: "pile", label: isCustomScope ? "Default pile" : "Pile", value: pileLabels[activeDisplayCategory] },
+    route.extraPile ? { key: "extra-pile", label: "Extra pile", value: route.extraPile } : null,
     route.provider ? { key: "provider", label: "Provider", value: providerLabels[route.provider] } : null,
     route.q ? { key: "query", label: "Query", value: route.q } : null,
     route.bucket ? { key: "bucket", label: "Time", value: formatBucketLabel(route.bucket) } : null,
@@ -826,7 +827,7 @@ function App() {
   ].filter((item): item is { key: string; label: string; value: string } => Boolean(item));
   const scopeSummary = scopePills.length
     ? scopePills.map((pill) => `${pill.label}: ${pill.value}`).join(" · ")
-    : "Whole shelf";
+    : "Whole pile";
   const providerFilterValue =
     graphProviderFilter.size === 0
       ? "__all__"
@@ -894,21 +895,21 @@ function App() {
     }
   }, [graphNodeOptions, pathSourceId, pathTargetId]);
 
-  function handleCategorySwitch(category: SessionCategoryName): void {
+  function handlePileSwitch(pile: BuiltInPileSlug): void {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ category, note: null, bucket: null, view: "atlas", userCategory: null }, true);
+    updateRoute({ pile, note: null, bucket: null, view: "atlas", extraPile: null }, true);
   }
 
-  function handleUserCategorySwitch(name: string): void {
+  function handleExtraPileSwitch(name: string): void {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ userCategory: name, note: null, bucket: null, view: "atlas" }, true);
+    updateRoute({ extraPile: name, note: null, bucket: null, view: "atlas" }, true);
   }
 
-  function activateFocus(label: string, sessionIds: string[], nextView?: CategoryWorkspaceView): void {
+  function activateFocus(label: string, sessionIds: string[], nextView?: PileWorkspaceView): void {
     setGraphInspect(null);
     setGraphFocus({ label, sessionIds });
     const nextId = visibleSessions.find((item) => sessionIds.includes(item.id))?.id ?? sessionIds[0] ?? null;
@@ -929,7 +930,7 @@ function App() {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, note: null, view: "atlas", userCategory: null }, true);
+    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, note: null, view: "atlas", extraPile: null }, true);
   }
 
   function handlePathFocus(path: BackendExplorerGraphPath): void {
@@ -948,7 +949,7 @@ function App() {
     {
       value: "atlas" as const,
       label: "Atlas",
-      accent: categoryPalette[activeDisplayCategory].accent,
+      accent: pilePalette[activeDisplayCategory].accent,
       icon: BrainCircuit,
       metric: `${formatNumber(filteredGraph.node_count)} nodes`,
       detail: `${formatNumber(filteredGraph.edge_count)} links`
@@ -972,7 +973,7 @@ function App() {
   ];
 
   async function persistTodoItems(nextItems: BackendTodoItem[], summary: string): Promise<void> {
-    if (!settings || route.category !== "todo") {
+    if (!settings || route.pile !== "todo") {
       return;
     }
 
@@ -1011,43 +1012,43 @@ function App() {
     await persistTodoItems(nextItems, done ? `Check off: ${item.text}` : `Reopen: ${item.text}`);
   }
 
-  async function updateSelectedSessionUserCategories(nextCategories: string[]): Promise<void> {
+  async function updateSelectedSessionExtraPiles(nextPiles: string[]): Promise<void> {
     if (!settings || !selectedSession) {
       return;
     }
 
-    setUserCategoryError(null);
+    setExtraPileError(null);
     try {
-      await updateSessionUserCategories(settings as ExtensionSettings, selectedSession.id, nextCategories);
-      setUserCategoryDraft("");
-      await Promise.all([sessionsQuery.refetch(), noteQuery.refetch(), userCategoriesQuery.refetch()]);
+      await updateSessionExtraPiles(settings as ExtensionSettings, selectedSession.id, nextPiles);
+      setExtraPileDraft("");
+      await Promise.all([sessionsQuery.refetch(), noteQuery.refetch(), extraPilesQuery.refetch()]);
     } catch (categoryError) {
-      setUserCategoryError(categoryError instanceof Error ? categoryError.message : "Could not update custom categories.");
+      setExtraPileError(categoryError instanceof Error ? categoryError.message : "Could not update extra piles.");
     }
   }
 
-  async function handleAddUserCategory(name: string): Promise<void> {
+  async function handleAddExtraPile(name: string): Promise<void> {
     const cleaned = name.trim();
     if (!cleaned || !selectedSession) {
       return;
     }
-    const nextCategories = Array.from(new Set([...(selectedSession.user_categories ?? []), cleaned]));
-    await updateSelectedSessionUserCategories(nextCategories);
-    handleUserCategorySwitch(cleaned);
+    const nextPiles = Array.from(new Set([...(selectedSession.extra_piles ?? []), cleaned]));
+    await updateSelectedSessionExtraPiles(nextPiles);
+    handleExtraPileSwitch(cleaned);
   }
 
-  async function handleRemoveUserCategory(name: string): Promise<void> {
+  async function handleRemoveExtraPile(name: string): Promise<void> {
     if (!selectedSession) {
       return;
     }
-    const nextCategories = (selectedSession.user_categories ?? []).filter((value) => value !== name);
-    await updateSelectedSessionUserCategories(nextCategories);
-    if (route.userCategory === name) {
-      updateRoute({ userCategory: null }, true);
+    const nextPiles = (selectedSession.extra_piles ?? []).filter((value) => value !== name);
+    await updateSelectedSessionExtraPiles(nextPiles);
+    if (route.extraPile === name) {
+      updateRoute({ extraPile: null }, true);
     }
   }
 
-  const isTodoWorkspace = !isCustomScope && route.category === "todo";
+  const isTodoWorkspace = !isCustomScope && route.pile === "todo";
   const workspaceTitle = isTodoWorkspace
     ? "Shared list workspace"
     : activeDisplayCategory === "factual"
@@ -1056,7 +1057,7 @@ function App() {
   const workspaceDescription = isTodoWorkspace
     ? "Check tasks off, review git-backed list history, and keep note evidence close to the shared checklist."
     : isCustomScope
-      ? "This view follows one user-defined category while preserving the underlying note and graph structure."
+      ? "This view follows one extra pile while preserving the underlying note and graph structure."
       : "Start with the atlas. Storylines and graph ops are supporting views.";
 
   const headerMetrics =
@@ -1095,16 +1096,16 @@ function App() {
             <span
               className="display-serif flex h-8 w-8 items-center justify-center rounded-[8px] text-[15px]"
               style={{
-                backgroundColor: `${categoryPalette[activeDisplayCategory].accent}1a`,
-                color: categoryPalette[activeDisplayCategory].accent
+                backgroundColor: `${pilePalette[activeDisplayCategory].accent}1a`,
+                color: pilePalette[activeDisplayCategory].accent
               }}
             >
-              {isCustomScope ? "⌘" : (categoryGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
+              {isCustomScope ? "⌘" : (pileGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
             </span>
             <div className="min-w-0">
-              <div className="eyebrow text-[10px]">{isCustomScope ? "Custom shelf" : "Shelf"}</div>
+              <div className="eyebrow text-[10px]">{isCustomScope ? "Extra pile" : "Pile"}</div>
               <CardTitle className="display-serif truncate text-[19px] font-semibold leading-tight">
-                {isCustomScope ? route.userCategory : categoryLabels[route.category]}
+                {isCustomScope ? route.extraPile : pileLabels[route.pile]}
               </CardTitle>
             </div>
           </div>
@@ -1132,19 +1133,19 @@ function App() {
             <CardHeader className="gap-2">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Explorer</div>
-                <CardTitle className="mt-0.5 text-base">Collections</CardTitle>
+                <CardTitle className="mt-0.5 text-base">Piles</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="mt-2 space-y-2.5">
               <div className="grid gap-0.5">
-                {categoryOrder.map((category) => {
-                  const active = !isCustomScope && route.category === category;
-                  const accent = categoryPalette[category].accent;
+                {pileOrder.map((pile) => {
+                  const active = !isCustomScope && route.pile === pile;
+                  const accent = pilePalette[pile].accent;
                   return (
                     <button
-                      key={category}
+                      key={pile}
                       type="button"
-                      onClick={() => handleCategorySwitch(category)}
+                      onClick={() => handlePileSwitch(pile)}
                       className={`group flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-left transition ${
                         active
                           ? "bg-[var(--color-ink)] text-white"
@@ -1158,9 +1159,9 @@ function App() {
                           color: active ? "#ffffff" : accent
                         }}
                       >
-                        {categoryGlyphs[category]}
+                        {pileGlyphs[pile]}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{categoryLabels[category]}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{pileLabels[pile]}</span>
                     </button>
                   );
                 })}
@@ -1168,52 +1169,52 @@ function App() {
 
               <div className="space-y-1.5 border-t border-[var(--color-line)] pt-2.5">
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Extra piles</div>
                 </div>
 
                 <Select
-                  value={route.userCategory ?? "__default__"}
+                  value={route.extraPile ?? "__default__"}
                   onValueChange={(value) => {
                     setGraphFocus(null);
                     setGraphInspect(null);
                     setCollapsedGroups([]);
                     if (value === "__default__") {
-                      updateRoute({ userCategory: null, note: null, bucket: null, view: "atlas" }, true);
+                      updateRoute({ extraPile: null, note: null, bucket: null, view: "atlas" }, true);
                     } else {
-                      handleUserCategorySwitch(value);
+                      handleExtraPileSwitch(value);
                     }
                   }}
-                  disabled={!userCategories.length}
+                  disabled={!extraPiles.length}
                 >
                   <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="Custom category" />
+                    <SelectValue placeholder="Extra pile" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__default__" className="py-1.5 text-xs">Default category</SelectItem>
-                    {userCategories.map((item) => (
+                    <SelectItem value="__default__" className="py-1.5 text-xs">Default pile</SelectItem>
+                    {extraPiles.map((item) => (
                       <SelectItem key={item.name} value={item.name} className="py-1.5 text-xs">
                         {item.name} · {formatNumber(item.count)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {!userCategories.length ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Assign a note to create one.</p> : null}
+                {!extraPiles.length ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Assign a note to create one.</p> : null}
 
                 <form
                   className="flex gap-1.5"
                   onSubmit={(event) => {
                     event.preventDefault();
-                    void handleAddUserCategory(userCategoryDraft);
+                    void handleAddExtraPile(extraPileDraft);
                   }}
                 >
                   <input
                     type="text"
-                    value={userCategoryDraft}
-                    onChange={(event) => setUserCategoryDraft(event.target.value)}
-                    placeholder={selectedSession ? "New category" : "Select a note first"}
+                    value={extraPileDraft}
+                    onChange={(event) => setExtraPileDraft(event.target.value)}
+                    placeholder={selectedSession ? "New extra pile" : "Select a note first"}
                     className="h-8 min-w-0 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 text-xs outline-none transition focus:border-[var(--color-line-strong)]"
                   />
-                  <Button type="submit" size="sm" variant="secondary" className="h-8 shrink-0 px-2 text-xs" disabled={!selectedSession || !userCategoryDraft.trim()}>
+                  <Button type="submit" size="sm" variant="secondary" className="h-8 shrink-0 px-2 text-xs" disabled={!selectedSession || !extraPileDraft.trim()}>
                     Add
                   </Button>
                 </form>
@@ -1288,7 +1289,7 @@ function App() {
                   </div>
 
                   <div>
-                    <Select value={route.sort} onValueChange={(value) => updateRoute({ sort: value as CategorySortMode }, true)}>
+                    <Select value={route.sort} onValueChange={(value) => updateRoute({ sort: value as PileSortMode }, true)}>
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue />
                       </SelectTrigger>
@@ -1371,7 +1372,7 @@ function App() {
                   onToggleTask={(item, done) => void handleTodoToggle(item, done)}
                 />
               ) : (
-                <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as CategoryWorkspaceView }, true)}>
+                <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as PileWorkspaceView }, true)}>
                 <Tabs.Content value="atlas" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
                     <div className="workspace-control-bar">
@@ -1467,7 +1468,7 @@ function App() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__all__" className="py-1.5 text-xs">
-                                All {categoryLabels[activeDisplayCategory].toLowerCase()}
+                                All {pileLabels[activeDisplayCategory].toLowerCase()}
                               </SelectItem>
                               {kindFilterValue === "__mixed__" ? (
                                 <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed types</SelectItem>
@@ -1530,9 +1531,9 @@ function App() {
 
                     <div className="grid min-h-0 gap-2 xl:grid-cols-[minmax(0,1fr)_264px]">
                       <div className="flex min-h-0 flex-col">
-                        <CategoryGraph
+                        <PileGraph
                           graph={filteredGraph}
-                          category={activeDisplayCategory}
+                          pile={activeDisplayCategory}
                           groupingMode={groupingMode}
                           collapsedGroups={collapsedGroups}
                           density={graphDensity}
@@ -1743,7 +1744,7 @@ function App() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__all__" className="py-1.5 text-xs">
-                                All {categoryLabels[activeDisplayCategory].toLowerCase()}
+                                All {pileLabels[activeDisplayCategory].toLowerCase()}
                               </SelectItem>
                               {kindFilterValue === "__mixed__" ? (
                                 <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed types</SelectItem>
@@ -1947,7 +1948,7 @@ function App() {
                             className="h-full rounded-full"
                             style={{
                               width: `${(bucket.count / maxActivityBucketCount) * 100}%`,
-                              backgroundColor: active ? "#ffffff" : categoryPalette[activeDisplayCategory].accent
+                              backgroundColor: active ? "#ffffff" : pilePalette[activeDisplayCategory].accent
                             }}
                           />
                         </div>
@@ -1964,7 +1965,7 @@ function App() {
                 <div className="min-w-0">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Results</div>
                   <CardTitle className="mt-0.5 text-base">
-                    {!isCustomScope && route.category === "todo" ? "Change log notes" : isCustomScope ? "Notes in custom category" : "Notes in scope"}
+                    {!isCustomScope && route.pile === "todo" ? "Change log notes" : isCustomScope ? "Notes in extra pile" : "Notes in scope"}
                   </CardTitle>
                 </div>
                 <div className="max-w-[30ch] text-left text-xs leading-5 text-[var(--color-ink-soft)] sm:text-right">
@@ -1992,14 +1993,14 @@ function App() {
                               <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
                             </span>
                           </div>
-                          {(session.user_categories ?? []).length ? (
+                          {(session.extra_piles ?? []).length ? (
                             <div className="mb-1.5 flex flex-wrap gap-1">
-                              {(session.user_categories ?? []).slice(0, 3).map((category) => (
+                              {(session.extra_piles ?? []).slice(0, 3).map((pile) => (
                                 <span
-                                  key={category}
+                                  key={pile}
                                   className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
                                 >
-                                  {category}
+                                  {pile}
                                 </span>
                               ))}
                             </div>
@@ -2008,7 +2009,7 @@ function App() {
                             {formatCompactDate(session.updated_at)}
                           </div>
                           <p className={isActive ? "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-white/80" : "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-[var(--color-ink-soft)]"}>
-                            {sessionPreviewText(session, match, session.category ?? activeDisplayCategory)}
+                            {sessionPreviewText(session, match, session.pile_slug ?? activeDisplayCategory)}
                           </p>
                         </button>
                       );
@@ -2028,7 +2029,7 @@ function App() {
                     {noteQuery.data
                       ? [
                           providerLabels[noteQuery.data.provider],
-                          categoryLabels[noteQuery.data.category ?? route.category],
+                          displayPileLabel(noteQuery.data.pile_slug ?? route.pile),
                           formatLongDate(noteQuery.data.updated_at),
                           `${formatNumber(noteQuery.data.word_count)} words`
                         ].join(" · ")
@@ -2037,20 +2038,20 @@ function App() {
                   {selectedSession ? (
                     <div className="mt-4 space-y-3 xl:hidden">
                       <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Custom categories</div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Extra piles</div>
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {(selectedSession.user_categories ?? []).map((category) => (
+                          {(selectedSession.extra_piles ?? []).map((pile) => (
                             <button
-                              key={category}
+                              key={pile}
                               type="button"
-                              onClick={() => void handleRemoveUserCategory(category)}
+                              onClick={() => void handleRemoveExtraPile(pile)}
                               className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1 text-xs text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-sunken)]"
                             >
-                              {category} ×
+                              {pile} ×
                             </button>
                           ))}
-                          {!(selectedSession.user_categories ?? []).length ? (
-                            <span className="text-sm text-[var(--color-ink-soft)]">No custom categories assigned yet.</span>
+                          {!(selectedSession.extra_piles ?? []).length ? (
+                            <span className="text-sm text-[var(--color-ink-soft)]">No extra piles assigned yet.</span>
                           ) : null}
                         </div>
                       </div>
@@ -2058,18 +2059,18 @@ function App() {
                         className="flex flex-col gap-2 sm:flex-row"
                         onSubmit={(event) => {
                           event.preventDefault();
-                          void handleAddUserCategory(userCategoryDraft);
+                          void handleAddExtraPile(extraPileDraft);
                         }}
                       >
                         <input
                           type="text"
-                          value={userCategoryDraft}
-                          onChange={(event) => setUserCategoryDraft(event.target.value)}
-                          placeholder="Add this note to a custom category"
+                          value={extraPileDraft}
+                          onChange={(event) => setExtraPileDraft(event.target.value)}
+                          placeholder="Add this note to an extra pile"
                           className="h-10 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
                         />
-                        <Button type="submit" size="sm" variant="secondary" disabled={!userCategoryDraft.trim()}>
-                          Add category
+                        <Button type="submit" size="sm" variant="secondary" disabled={!extraPileDraft.trim()}>
+                          Add pile
                         </Button>
                       </form>
                     </div>
@@ -2084,11 +2085,11 @@ function App() {
                       onClick={() => {
                         window.location.href = notePageUrl({
                           id: selectedSession.id,
-                          category: route.category,
+                          pile: selectedSession.pile_slug ?? route.pile,
                           q: route.q,
                           provider: route.provider,
                           sort: route.sort,
-                          userCategory: route.userCategory
+                          extraPile: route.extraPile
                         });
                       }}
                     >
@@ -2104,8 +2105,8 @@ function App() {
                 </div>
               </CardHeader>
               <CardContent className="mt-2">
-                {userCategoryError ? (
-                  <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{userCategoryError}</div>
+                {extraPileError ? (
+                  <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{extraPileError}</div>
                 ) : null}
                 {selectedSession && noteQuery.isLoading ? (
                   <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content…</div>
@@ -2157,7 +2158,7 @@ function App() {
       graphQuery.error ||
       noteQuery.error ||
       todoQuery.error ||
-      userCategoriesQuery.error ||
+      extraPilesQuery.error ||
       status?.backendValidationError ? (
         <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {status?.backendValidationError ||
@@ -2168,8 +2169,8 @@ function App() {
             (graphQuery.error instanceof Error && graphQuery.error.message) ||
             (noteQuery.error instanceof Error && noteQuery.error.message) ||
             (todoQuery.error instanceof Error && todoQuery.error.message) ||
-            (userCategoriesQuery.error instanceof Error && userCategoriesQuery.error.message) ||
-            "Could not load the category explorer."}
+            (extraPilesQuery.error instanceof Error && extraPilesQuery.error.message) ||
+            "Could not load the pile explorer."}
         </div>
       ) : null}
     </div>

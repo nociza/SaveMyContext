@@ -72,7 +72,7 @@ The rule check looks at the first one or two user messages, with a focus on the 
 
 ## How conversations are organized
 
-Each synced conversation is classified into one of four categories:
+Each synced conversation is classified into one of four built-in piles:
 
 - `journal`: reflections, planning, and personal context
 - `factual`: coding, research, explanations, and objective question answering

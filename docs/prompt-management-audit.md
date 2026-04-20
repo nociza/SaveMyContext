@@ -19,7 +19,7 @@ The prompt surface is not fully scattered, but it is not centralized either.
 - `backend/app/services/processing_worker.py` contains the browser-worker batch prompt inline.
 - `backend/app/services/llm/browser_proxy_client.py` wraps every task in its own transport-specific prompt shell and repair prompt.
 - `backend/app/services/openai_proxy.py` owns a separate browser proxy preamble.
-- `extension/src/piles/main.tsx` exposes only a narrow prompt editing surface through `custom_prompt_addendum` and discard-category text fields.
+- `extension/src/piles/main.tsx` exposes only a narrow prompt editing surface through `custom_prompt_addendum` and discard-pile-hint text fields.
 
 The good part is that the transport boundary is already fairly clean: backend callers mostly rely on `LLMClient.generate_json(...)`, which means model swapping is easier than prompt swapping. The weak part is prompt ownership: prompt text still lives beside orchestration logic, which makes iteration, review, and user customization harder than it should be.
 
@@ -70,7 +70,7 @@ The backend is mostly understandable, but prompt and orchestration responsibilit
 
 - `backend/app/services/orchestrator.py` is already large enough that classification policy, prompt text, and post-validation are competing in one file.
 - `extension/src/piles/main.tsx` is large but still coherent.
-- `extension/src/category/main.tsx` is very large and likely wants splitting by workspace/view model/component boundary.
+- `extension/src/pile/main.tsx` is very large and likely wants splitting by workspace/view model/component boundary.
 
 ### Are the file structure well organized?
 
@@ -112,4 +112,3 @@ That same split should be applied to the processing flows next.
 1. Keep the search agent read-only. Search does not need filesystem write tools.
 2. Keep tool wrappers narrow and typed. Avoid handing the agent unrestricted shell execution.
 3. Make every prompt override observable in logs and easy to roll back.
-

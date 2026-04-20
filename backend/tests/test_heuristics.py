@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models import MessageRole, SessionCategory
+from app.models import MessageRole, BuiltInPileSlug
 import pytest
 
 from app.schemas.processing import ClassificationResult
@@ -28,7 +28,7 @@ def test_classifies_journal_like_conversation() -> None:
     ]
 
     result = heuristic_classification(messages)  # type: ignore[arg-type]
-    assert result.category == SessionCategory.JOURNAL
+    assert result.pile == BuiltInPileSlug.JOURNAL
 
 
 def test_extracts_triplets_from_factual_text() -> None:
@@ -47,7 +47,7 @@ def test_classifies_todo_like_conversation() -> None:
     ]
 
     result = heuristic_classification(messages)  # type: ignore[arg-type]
-    assert result.category == SessionCategory.TODO
+    assert result.pile == BuiltInPileSlug.TODO
     assert is_explicit_todo_request(messages) is True
 
 
@@ -75,14 +75,14 @@ async def test_orchestrator_rejects_llm_todo_result_without_explicit_shared_list
 
     class StubClient:
         async def generate_json(self, **kwargs) -> ClassificationResult:
-            return ClassificationResult(category=SessionCategory.TODO, reason="Wrongly treated reminders as a todo list.")
+            return ClassificationResult(pile=BuiltInPileSlug.TODO, reason="Wrongly treated reminders as a todo list.")
 
     orchestrator = ProcessingOrchestrator()
     orchestrator.client = StubClient()  # type: ignore[assignment]
 
     result = await orchestrator.classify(messages)  # type: ignore[arg-type]
 
-    assert result.category == SessionCategory.JOURNAL
+    assert result.pile == BuiltInPileSlug.JOURNAL
 
 
 def test_does_not_extract_triplet_from_question_prompt() -> None:
