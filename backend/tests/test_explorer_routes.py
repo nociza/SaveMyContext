@@ -46,6 +46,12 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 markdown_path=str(factual_note_path),
                 source_url="https://example.com/sqlite",
                 classification_reason="Grounded factual note.",
+                pile_outputs={
+                    "factual": {
+                        "summary": "SQLite keeps local note search queryable.",
+                        "keywords": ["sqlite", "search", "local notes"],
+                    }
+                },
                 share_post="SQLite helps keep note search local.",
                 custom_tags=["savemycontext", "database", "search"],
                 last_captured_at=datetime(2026, 4, 15, 20, 0, tzinfo=timezone.utc),
@@ -59,9 +65,18 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 source_url="https://example.com/badge",
                 idea_summary={
                     "core_idea": "Build a workflow badge for the agent.",
+                    "thread_hint": "Agent workflow surfaces",
                     "pros": ["Clear workflow signal"],
                     "cons": ["Needs governance"],
                     "next_steps": ["Prototype the workflow graph"],
+                    "related_facts": ["SQLite"],
+                    "attributed_ideas": [
+                        {
+                            "idea": "A badge can signal workflow state.",
+                            "attributed_to": "User",
+                            "stance": "proposes",
+                        }
+                    ],
                 },
                 share_post="A workflow badge could travel with the agent.",
                 last_captured_at=datetime(2026, 4, 14, 18, 0, tzinfo=timezone.utc),
@@ -75,14 +90,39 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 source_url="https://example.com/workflow-graph",
                 idea_summary={
                     "core_idea": "Use a graph to connect capability pages and workflow notes.",
+                    "thread_hint": "Agent workflow surfaces",
                     "pros": ["Makes workflow relationships visible"],
                     "cons": ["Adds visual complexity"],
                     "next_steps": ["Link workflow terms across notes"],
+                    "builds_on": ["workflow badge"],
+                    "counters": ["flat checklist"],
                 },
                 last_captured_at=datetime(2026, 4, 13, 18, 0, tzinfo=timezone.utc),
                 updated_at=datetime(2026, 4, 13, 18, 0, tzinfo=timezone.utc),
             )
-            session.add_all([factual_session, idea_session_one, idea_session_two])
+            journal_session = ChatSession(
+                provider=ProviderName.CHATGPT,
+                external_session_id="session-journal",
+                title="Walk with Maya",
+                built_in_pile=BuiltInPileSlug.JOURNAL,
+                source_url="https://example.com/walk",
+                journal_entry="Walked from Ferry Building to North Beach with Maya.",
+                pile_outputs={
+                    "journal": {
+                        "entry": "Walked from Ferry Building to North Beach with Maya.",
+                        "occurred_on": "2026-04-12",
+                        "people": ["Maya"],
+                        "entities": ["Ferry Building"],
+                        "activities": ["walk"],
+                        "locations": ["Ferry Building", "North Beach"],
+                        "travel_path": ["Ferry Building", "North Beach"],
+                        "mood": "grounded",
+                    }
+                },
+                last_captured_at=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc),
+            )
+            session.add_all([factual_session, idea_session_one, idea_session_two, journal_session])
             await session.flush()
             session.add_all(
                 [
@@ -133,11 +173,14 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
             stats_response = await client.get("/api/v1/categories/factual/stats")
             graph_response = await client.get("/api/v1/categories/factual/graph")
+            factual_views_response = await client.get("/api/v1/categories/factual/views")
             path_response = await client.get(
                 "/api/v1/categories/factual/graph/path",
                 params={"source": entity_id("Search"), "target": entity_id("notes")},
             )
             ideas_graph_response = await client.get("/api/v1/categories/ideas/graph")
+            ideas_views_response = await client.get("/api/v1/categories/ideas/views")
+            journal_views_response = await client.get("/api/v1/categories/journal/views")
             search_response = await client.get(
                 "/api/v1/search",
                 params={"q": "workflow", "pile": "ideas", "provider": "gemini"},
@@ -162,6 +205,12 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
         assert sqlite_node["evidence"][0]["snippet"] == "SQLite | stores | notes"
         assert any(edge["label"] == "stores" and edge["evidence_count"] >= 1 for edge in graph_payload["edges"])
 
+        assert factual_views_response.status_code == 200
+        factual_views_payload = factual_views_response.json()
+        assert factual_views_payload["factual"]["backlog"][0]["summary"] == "SQLite keeps local note search queryable."
+        assert "sqlite" in factual_views_payload["factual"]["backlog"][0]["keywords"]
+        assert any(link["pile_slug"] == "ideas" for link in factual_views_payload["factual"]["backlog"][0]["linked_from"])
+
         assert path_response.status_code == 200
         path_payload = path_response.json()
         assert path_payload["source"] == entity_id("Search")
@@ -174,6 +223,18 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
         assert ideas_graph_payload["pile_slug"] == "ideas"
         assert all(node["kind"] == "session" for node in ideas_graph_payload["nodes"])
         assert ideas_graph_payload["edge_count"] >= 1
+
+        assert ideas_views_response.status_code == 200
+        ideas_views_payload = ideas_views_response.json()
+        assert ideas_views_payload["ideas"]["threads"][0]["label"] == "Agent workflow surfaces"
+        assert ideas_views_payload["ideas"]["contributors"][0]["label"] == "User"
+        assert any(edge["relation"] == "builds_on" for edge in ideas_views_payload["ideas"]["edges"])
+
+        assert journal_views_response.status_code == 200
+        journal_views_payload = journal_views_response.json()
+        assert journal_views_payload["journal"]["timeline"][0]["occurred_on"] == "2026-04-12"
+        assert journal_views_payload["journal"]["people"][0]["label"] == "Maya"
+        assert journal_views_payload["journal"]["locations"][0]["label"] in {"Ferry Building", "North Beach"}
 
         assert search_response.status_code == 200
         search_payload = search_response.json()

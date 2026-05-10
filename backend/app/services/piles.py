@@ -42,8 +42,8 @@ DEFAULT_PILES: tuple[PileSeed, ...] = (
         slug="journal",
         name="Journal",
         description=(
-            "Personal context, day-to-day planning, reminders, prioritization, and reflection. "
-            "Stored chronologically with action items extracted from the conversation."
+            "Personal day-to-day progression, relationships, places, activities, travel, and reflection. "
+            "Rendered as timeline, location, relationship, and mentioned-item views."
         ),
         kind=PileKind.BUILT_IN_JOURNAL,
         folder_label="Journal",
@@ -54,8 +54,8 @@ DEFAULT_PILES: tuple[PileSeed, ...] = (
         slug="factual",
         name="Factual",
         description=(
-            "Coding, research, explanation, and objective Q&A. Triplets are extracted into the "
-            "shared knowledge graph alongside a short summary."
+            "Coding, research, explanation, and objective Q&A. Stored as a lightweight dated backlog "
+            "with queryable entities and links back from ideas, journal entries, and other piles."
         ),
         kind=PileKind.BUILT_IN_FACTUAL,
         folder_label="Factual",
@@ -66,8 +66,8 @@ DEFAULT_PILES: tuple[PileSeed, ...] = (
         slug="ideas",
         name="Ideas",
         description=(
-            "Brainstorming, creative exploration, and original concepts. Produces a structured "
-            "summary, alternate phrasings of the core idea, and a shareable post."
+            "Brainstorming, creative exploration, and original concepts. Preserves attributed claims, "
+            "reasoning steps, and whether ideas build on, validate, or counter each other."
         ),
         kind=PileKind.BUILT_IN_IDEAS,
         folder_label="Ideas",
@@ -78,12 +78,12 @@ DEFAULT_PILES: tuple[PileSeed, ...] = (
         slug="todo",
         name="Todo",
         description=(
-            "Explicit edits to the shared to-do list. The to-do pile updates Dashboards/To-Do List.md "
-            "with importance, deadline, and completion attributes."
+            "Explicit edits to the shared to-do list. The to-do pile keeps a plain Active/Done checklist "
+            "without graph structure or scheduling clutter."
         ),
         kind=PileKind.BUILT_IN_TODO,
         folder_label="Todo",
-        attributes=("chronological", "importance", "deadline", "completion"),
+        attributes=("chronological", "completion"),
         sort_order=40,
     ),
     PileSeed(

@@ -186,7 +186,7 @@ function App() {
   }, [nodes]);
 
   const pileData = useMemo(() => {
-    const counts = new Map(summary?.piles.map((item) => [item.pile_slug, item.count] as const) ?? []);
+    const counts = new Map((summary?.piles ?? []).map((item) => [item.pile_slug, item.count] as const));
     return pileOrder
       .filter((pile) => pile !== "discarded")
       .map((pile) => ({

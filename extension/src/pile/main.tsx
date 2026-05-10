@@ -2,15 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, Search, Sparkles, Workflow } from "lucide-react";
+import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, GitBranch, ListChecks, MapPin, Search, Sparkles, Tags, Users, Workflow } from "lucide-react";
 
 import {
   fetchPileGraph,
   fetchPileGraphPath,
   fetchPileStats,
+  fetchPileViews,
   fetchCustomPileGraph,
   fetchCustomPileGraphPath,
   fetchCustomPileStats,
+  fetchCustomPileViews,
   fetchExplorerSearch,
   fetchSessionNote,
   fetchSessions,
@@ -42,6 +44,7 @@ import type {
   BackendPileGraph,
   BackendPileGraphPath,
   BackendPileStats,
+  BackendPileViews,
   BackendExplorerGraphEvidence,
   BackendExplorerGraphNode,
   BackendExplorerGraphPath,
@@ -58,6 +61,7 @@ import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
+import { CategoryWorkspace } from "../ui/components/category-workspaces";
 import { PileGraph, type PileGraphDensity, type PileGraphFocusMode, type PileGraphSelection } from "../ui/components/pile-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
@@ -513,6 +517,7 @@ function App() {
   const [extraPileError, setExtraPileError] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(route.q);
   const isCustomScope = Boolean(route.extraPile);
+  const usesCategoryWorkspace = !isCustomScope && route.pile !== "todo" && route.pile !== "discarded";
 
   useEffect(() => {
     const handlePopState = (): void => {
@@ -675,7 +680,42 @@ function App() {
                 }
               : undefined
           ),
-    enabled: Boolean(settings && !status?.backendValidationError && (!scopedSessionIds || scopedSessionIds.length > 0))
+    enabled: Boolean(settings && !status?.backendValidationError && !usesCategoryWorkspace && (!scopedSessionIds || scopedSessionIds.length > 0))
+  });
+
+  const categoryViewsQuery = useQuery<BackendPileViews>({
+    queryKey: [
+      "pile-views",
+      settings?.backendUrl,
+      settings?.backendToken,
+      route.pile,
+      route.provider,
+      route.extraPile,
+      scopedSessionIds?.join("|") ?? "*"
+    ],
+    queryFn: () =>
+      isCustomScope
+        ? fetchCustomPileViews(
+            settings as ExtensionSettings,
+            route.extraPile as string,
+            route.provider || scopedSessionIds
+              ? {
+                  provider: route.provider ?? undefined,
+                  sessionIds: scopedSessionIds
+                }
+              : undefined
+          )
+        : fetchPileViews(
+            settings as ExtensionSettings,
+            route.pile,
+            route.provider || scopedSessionIds
+              ? {
+                  provider: route.provider ?? undefined,
+                  sessionIds: scopedSessionIds
+                }
+              : undefined
+          ),
+    enabled: Boolean(settings && !status?.backendValidationError && usesCategoryWorkspace && (!scopedSessionIds || scopedSessionIds.length > 0))
   });
 
   const noteListItems = useMemo(() => {
@@ -811,6 +851,7 @@ function App() {
     enabled: Boolean(
       settings &&
         !status?.backendValidationError &&
+        !usesCategoryWorkspace &&
         pathSourceId &&
         pathTargetId &&
         pathSourceId !== pathTargetId &&
@@ -945,32 +986,113 @@ function App() {
     activateFocus(`Path: ${labels.join(" -> ")}`, sessionIds, "atlas");
   }
 
-  const workspaceCards = [
-    {
-      value: "atlas" as const,
-      label: "Atlas",
-      accent: pilePalette[activeDisplayCategory].accent,
-      icon: BrainCircuit,
-      metric: `${formatNumber(filteredGraph.node_count)} nodes`,
-      detail: `${formatNumber(filteredGraph.edge_count)} links`
-    },
-    {
-      value: "story" as const,
-      label: "Storylines",
-      accent: "#c77724",
-      icon: Sparkles,
-      metric: `${formatNumber(graphInsights.storylines.length)} trails`,
-      detail: `${formatNumber(graphInsights.corroboratedNodes)} corroborated nodes`
-    },
-    {
-      value: "ops" as const,
-      label: "Graph Ops",
-      accent: "#2477c7",
-      icon: Workflow,
-      metric: `${formatPercent(graphInsights.sessionCoverage * 100)}% coverage`,
-      detail: graphInsights.warnings.length ? `${graphInsights.warnings.length} lint signals` : "Scope is connected"
-    }
-  ];
+  const workspaceCards = usesCategoryWorkspace
+    ? activeDisplayCategory === "journal"
+      ? [
+          {
+            value: "atlas" as const,
+            label: "Timeline",
+            accent: pilePalette.journal.accent,
+            icon: Activity,
+            metric: `${formatNumber(categoryViewsQuery.data?.journal?.timeline.length ?? 0)} entries`,
+            detail: "Daily progression"
+          },
+          {
+            value: "story" as const,
+            label: "Places",
+            accent: "#2477c7",
+            icon: MapPin,
+            metric: `${formatNumber(categoryViewsQuery.data?.journal?.locations.length ?? 0)} places`,
+            detail: "Travel view"
+          },
+          {
+            value: "ops" as const,
+            label: "People",
+            accent: "#0f8a84",
+            icon: Users,
+            metric: `${formatNumber((categoryViewsQuery.data?.journal?.people.length ?? 0) + (categoryViewsQuery.data?.journal?.entities.length ?? 0))} named`,
+            detail: "Relationships and items"
+          }
+        ]
+      : activeDisplayCategory === "ideas"
+        ? [
+            {
+              value: "atlas" as const,
+              label: "Evolution",
+              accent: pilePalette.ideas.accent,
+              icon: GitBranch,
+              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.nodes.length ?? 0)} ideas`,
+              detail: "Thread progression"
+            },
+            {
+              value: "story" as const,
+              label: "Mind map",
+              accent: "#4968ab",
+              icon: BrainCircuit,
+              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.threads.length ?? 0)} threads`,
+              detail: "Facts and contributors"
+            },
+            {
+              value: "ops" as const,
+              label: "Attribution",
+              accent: "#0f8a84",
+              icon: Users,
+              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.contributors.length ?? 0)} voices`,
+              detail: "Validates and counters"
+            }
+          ]
+        : [
+            {
+              value: "atlas" as const,
+              label: "Backlog",
+              accent: pilePalette.factual.accent,
+              icon: ListChecks,
+              metric: `${formatNumber(categoryViewsQuery.data?.factual?.backlog.length ?? 0)} notes`,
+              detail: "Learned by date"
+            },
+            {
+              value: "story" as const,
+              label: "Links",
+              accent: "#4968ab",
+              icon: Workflow,
+              metric: `${formatNumber(categoryViewsQuery.data?.factual?.linked_sources.length ?? 0)} sources`,
+              detail: "Referenced by other piles"
+            },
+            {
+              value: "ops" as const,
+              label: "Terms",
+              accent: "#c77724",
+              icon: Tags,
+              metric: `${formatNumber(categoryViewsQuery.data?.factual?.entities.length ?? 0)} entities`,
+              detail: "Queryable surface"
+            }
+          ]
+    : [
+        {
+          value: "atlas" as const,
+          label: "Atlas",
+          accent: pilePalette[activeDisplayCategory].accent,
+          icon: BrainCircuit,
+          metric: `${formatNumber(filteredGraph.node_count)} nodes`,
+          detail: `${formatNumber(filteredGraph.edge_count)} links`
+        },
+        {
+          value: "story" as const,
+          label: "Storylines",
+          accent: "#c77724",
+          icon: Sparkles,
+          metric: `${formatNumber(graphInsights.storylines.length)} trails`,
+          detail: `${formatNumber(graphInsights.corroboratedNodes)} corroborated nodes`
+        },
+        {
+          value: "ops" as const,
+          label: "Graph Ops",
+          accent: "#2477c7",
+          icon: Workflow,
+          metric: `${formatPercent(graphInsights.sessionCoverage * 100)}% coverage`,
+          detail: graphInsights.warnings.length ? `${graphInsights.warnings.length} lint signals` : "Scope is connected"
+        }
+      ];
 
   async function persistTodoItems(nextItems: BackendTodoItem[], summary: string): Promise<void> {
     if (!settings || route.pile !== "todo") {
@@ -1051,14 +1173,26 @@ function App() {
   const isTodoWorkspace = !isCustomScope && route.pile === "todo";
   const workspaceTitle = isTodoWorkspace
     ? "Shared list workspace"
-    : activeDisplayCategory === "factual"
-      ? "Knowledge graph workspace"
-      : "Context workspace";
+    : usesCategoryWorkspace && activeDisplayCategory === "journal"
+      ? "Journal timeline workspace"
+      : usesCategoryWorkspace && activeDisplayCategory === "ideas"
+        ? "Idea evolution workspace"
+        : usesCategoryWorkspace && activeDisplayCategory === "factual"
+          ? "Factual backlog workspace"
+          : activeDisplayCategory === "factual"
+            ? "Knowledge graph workspace"
+            : "Context workspace";
   const workspaceDescription = isTodoWorkspace
-    ? "Check tasks off, review git-backed list history, and keep note evidence close to the shared checklist."
-    : isCustomScope
-      ? "This view follows one extra pile while preserving the underlying note and graph structure."
-      : "Start with the atlas. Storylines and graph ops are supporting views.";
+    ? "A plain shared checklist with active and completed tasks."
+    : usesCategoryWorkspace && activeDisplayCategory === "journal"
+      ? "Daily progression, places, people, entities, and mentioned activities."
+      : usesCategoryWorkspace && activeDisplayCategory === "ideas"
+        ? "Threads preserve how ideas build, validate, counter, and remain attributed."
+        : usesCategoryWorkspace && activeDisplayCategory === "factual"
+          ? "Simple dated reminders of what was learned, with links back from other piles."
+          : isCustomScope
+            ? "This view follows one extra pile while preserving the underlying note and graph structure."
+            : "Start with the atlas. Storylines and graph ops are supporting views.";
 
   const headerMetrics =
     isTodoWorkspace
@@ -1066,7 +1200,56 @@ function App() {
           { label: "Shared tasks", value: formatNumber(todo?.total_count), icon: Database },
           { label: "Active", value: formatNumber(todo?.active_count), icon: Workflow },
           { label: "Completed", value: formatNumber(todo?.completed_count), icon: Activity },
-          { label: "Last updated", value: formatCompactDate(stats.latest_updated_at, "No data"), icon: Activity }
+          { label: "Update notes", value: formatNumber(stats.notes_with_todo_summary), icon: Activity }
+        ]
+      : usesCategoryWorkspace
+        ? [
+            { label: "Notes in scope", value: formatNumber(visibleSessions.length), icon: Database },
+            {
+              label:
+                activeDisplayCategory === "journal"
+                  ? "Journal entries"
+                  : activeDisplayCategory === "ideas"
+                    ? "Idea nodes"
+                    : "Backlog notes",
+              value:
+                activeDisplayCategory === "journal"
+                  ? formatNumber(categoryViewsQuery.data?.journal?.timeline.length ?? 0)
+                  : activeDisplayCategory === "ideas"
+                    ? formatNumber(categoryViewsQuery.data?.ideas?.nodes.length ?? 0)
+                    : formatNumber(categoryViewsQuery.data?.factual?.backlog.length ?? 0),
+              icon: activeDisplayCategory === "journal" ? Activity : activeDisplayCategory === "ideas" ? BrainCircuit : ListChecks
+            },
+            {
+              label:
+                activeDisplayCategory === "journal"
+                  ? "People"
+                  : activeDisplayCategory === "ideas"
+                    ? "Contributors"
+                    : "Entities",
+              value:
+                activeDisplayCategory === "journal"
+                  ? formatNumber(categoryViewsQuery.data?.journal?.people.length ?? 0)
+                  : activeDisplayCategory === "ideas"
+                    ? formatNumber(categoryViewsQuery.data?.ideas?.contributors.length ?? 0)
+                    : formatNumber(categoryViewsQuery.data?.factual?.entities.length ?? 0),
+              icon: Users
+            },
+            {
+              label:
+                activeDisplayCategory === "journal"
+                  ? "Places"
+                  : activeDisplayCategory === "ideas"
+                    ? "Relations"
+                    : "Linked from",
+              value:
+                activeDisplayCategory === "journal"
+                  ? formatNumber(categoryViewsQuery.data?.journal?.locations.length ?? 0)
+                  : activeDisplayCategory === "ideas"
+                    ? formatNumber(categoryViewsQuery.data?.ideas?.edges.length ?? 0)
+                    : formatNumber(categoryViewsQuery.data?.factual?.linked_sources.length ?? 0),
+              icon: Workflow
+            }
         ]
       : [
           { label: "Notes in scope", value: formatNumber(visibleSessions.length), icon: Database },
@@ -1370,6 +1553,15 @@ function App() {
                   onDraftChange={setTodoDraft}
                   onAddTask={() => void handleTodoAdd()}
                   onToggleTask={(item, done) => void handleTodoToggle(item, done)}
+                />
+              ) : usesCategoryWorkspace ? (
+                <CategoryWorkspace
+                  pile={activeDisplayCategory}
+                  view={route.view}
+                  views={categoryViewsQuery.data ?? null}
+                  sessions={visibleSessions}
+                  loading={categoryViewsQuery.isLoading}
+                  onFocus={activateFocus}
                 />
               ) : (
                 <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as PileWorkspaceView }, true)}>
@@ -2156,6 +2348,7 @@ function App() {
       searchQuery.error ||
       statsQuery.error ||
       graphQuery.error ||
+      categoryViewsQuery.error ||
       noteQuery.error ||
       todoQuery.error ||
       extraPilesQuery.error ||
@@ -2167,6 +2360,7 @@ function App() {
             (searchQuery.error instanceof Error && searchQuery.error.message) ||
             (statsQuery.error instanceof Error && statsQuery.error.message) ||
             (graphQuery.error instanceof Error && graphQuery.error.message) ||
+            (categoryViewsQuery.error instanceof Error && categoryViewsQuery.error.message) ||
             (noteQuery.error instanceof Error && noteQuery.error.message) ||
             (todoQuery.error instanceof Error && todoQuery.error.message) ||
             (extraPilesQuery.error instanceof Error && extraPilesQuery.error.message) ||

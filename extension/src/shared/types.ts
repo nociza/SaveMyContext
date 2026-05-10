@@ -424,6 +424,115 @@ export interface BackendPileGraphPath {
   paths: BackendExplorerGraphPath[];
 }
 
+export interface BackendJournalTimelineItem {
+  session_id: string;
+  title?: string | null;
+  provider?: ProviderName | null;
+  updated_at?: string | null;
+  occurred_on?: string | null;
+  entry: string;
+  mood?: string | null;
+  people: string[];
+  entities: string[];
+  activities: string[];
+  locations: string[];
+  travel_path: string[];
+}
+
+export interface BackendJournalGroup {
+  label: string;
+  count: number;
+  session_ids: string[];
+  dates: string[];
+  snippets: string[];
+}
+
+export interface BackendJournalViews {
+  timeline: BackendJournalTimelineItem[];
+  locations: BackendJournalGroup[];
+  people: BackendJournalGroup[];
+  entities: BackendJournalGroup[];
+  activities: BackendJournalGroup[];
+}
+
+export interface BackendIdeaClaimView {
+  idea: string;
+  attributed_to: string;
+  stance: string;
+  evidence?: string | null;
+}
+
+export interface BackendIdeaEvolutionNode {
+  id: string;
+  session_id: string;
+  title?: string | null;
+  provider?: ProviderName | null;
+  updated_at?: string | null;
+  thread?: string | null;
+  core_idea: string;
+  reasoning_steps: string[];
+  related_facts: string[];
+  claims: BackendIdeaClaimView[];
+  next_steps: string[];
+  share_post?: string | null;
+}
+
+export interface BackendIdeaEvolutionEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  label?: string | null;
+  session_ids: string[];
+}
+
+export interface BackendIdeaViews {
+  nodes: BackendIdeaEvolutionNode[];
+  edges: BackendIdeaEvolutionEdge[];
+  threads: BackendJournalGroup[];
+  contributors: BackendJournalGroup[];
+  facts: BackendJournalGroup[];
+}
+
+export interface BackendFactualLinkedSource {
+  session_id: string;
+  title?: string | null;
+  pile_slug?: BuiltInPileSlug | null;
+  provider?: ProviderName | null;
+  matched_terms: string[];
+}
+
+export interface BackendFactualBacklogItem {
+  session_id: string;
+  title?: string | null;
+  provider?: ProviderName | null;
+  updated_at?: string | null;
+  learned_on?: string | null;
+  summary?: string | null;
+  context?: string | null;
+  keywords: string[];
+  entities: string[];
+  triplet_count: number;
+  linked_from: BackendFactualLinkedSource[];
+}
+
+export interface BackendFactualViews {
+  backlog: BackendFactualBacklogItem[];
+  keywords: BackendLabelCount[];
+  entities: BackendLabelCount[];
+  linked_sources: BackendFactualLinkedSource[];
+}
+
+export interface BackendPileViews {
+  pile_slug: BuiltInPileSlug;
+  scope_kind: "default" | "custom";
+  scope_label: string;
+  dominant_pile_slug: BuiltInPileSlug;
+  journal?: BackendJournalViews | null;
+  ideas?: BackendIdeaViews | null;
+  factual?: BackendFactualViews | null;
+}
+
 export interface BackendTodoItem {
   text: string;
   done: boolean;

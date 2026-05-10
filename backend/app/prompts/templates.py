@@ -123,12 +123,16 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         system_prompt=(
             "You write concise diary-style notes from a user transcript and extract structured "
             "daily-life fields. Return JSON with keys entry, action_items, occurred_on (ISO date or null), "
-            "people (list of names), activities (list), locations (list), mood (short phrase or null)."
+            "people (list of named people), entities (list of organizations/projects/objects mentioned), "
+            "activities (list), locations (list), travel_path (ordered list of places when movement is mentioned), "
+            "mood (short phrase or null)."
         ),
         user_prompt=(
             "Focus only on the user's personal day-to-day life: what they did, how they felt, who they "
             "interacted with, routines and reflections. Do not invent content; leave fields empty when "
-            "the transcript does not mention them. Strip AI filler. Keep the entry grounded."
+            "the transcript does not mention them. Preserve daily progression and named people/places so "
+            "the UI can render a timeline, travel map, relationship map, and mentioned-items list. "
+            "Strip AI filler. Keep the entry grounded."
             "{{pile_addendum_block}}\n\n"
             "{{transcript}}"
         ),
@@ -171,10 +175,9 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         system_prompt=(
             "You maintain a shared markdown to-do list and emit structured metadata for each item. "
             "Return JSON with keys summary, updated_markdown, and items. items is a list of "
-            "{text, deadline (ISO date or null), reminder_at (ISO datetime or null), is_persistent "
-            "(true when the item has no date), completed}. In updated_markdown, dated items "
-            "appear in Active with a `(YYYY-MM-DD)` prefix before the item text; undated items are "
-            "persistent and appear without a date prefix. Keep `## Active` and `## Done` as the "
+            "{text, deadline (null unless the user explicitly names a due date), reminder_at (always null), "
+            "is_persistent, completed}. The visible shared list should be a plain to-do list: no timestamps, "
+            "no clustering, no graph terms, and no scheduling UI. Keep `## Active` and `## Done` as the "
             "top-level sections so the file stays compatible with existing parsers."
         ),
         user_prompt=(
@@ -182,8 +185,8 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "Only apply changes the user clearly requested to the shared to-do list.\n"
             "Do not turn general planning advice into to-do items unless the transcript explicitly asks to modify the shared list.\n"
             "Preserve unfinished work unless the transcript says to remove or complete it.\n"
-            "If the user gives a date or relative date, convert to ISO (YYYY-MM-DD) and write it as a "
-            "`(YYYY-MM-DD)` prefix on the item text. Undated items are persistent.\n"
+            "Do not add time-of-day text or date prefixes to the markdown unless the user explicitly states "
+            "that a date is part of the task text. Undated items are persistent.\n"
             "Keep the response markdown concise and readable for Obsidian.\n"
             "The file should remain a complete standalone markdown document."
             "{{pile_addendum_block}}\n\n"
@@ -205,18 +208,24 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         group="pipeline",
         description="Extracts structured ideation outputs, reasoning steps, and a shareable note.",
         system_prompt=(
-            "Summarize ideation transcripts and extract the causal / reasoning structure. "
+            "Summarize ideation transcripts and extract the causal / reasoning structure without collapsing "
+            "distinct people's positions into one generic fact. "
             "Return JSON with keys core_idea, pros, cons, next_steps, share_post, "
             "reasoning_steps (ordered list of inference steps that developed the idea), "
             "related_facts (short list of durable facts/entities the idea rests on — "
             "these anchor into the factual substrate), supports (prior ideas this one reinforces), "
             "conflicts_with (prior ideas this one contradicts), and thread_hint (a short phrase "
-            "identifying the broader thread of thought, or null)."
+            "identifying the broader thread of thought, or null), attributed_ideas "
+            "(list of {idea, attributed_to, stance, evidence}), relations "
+            "(list of {target, relation, rationale}), builds_on, validates, and counters."
         ),
         user_prompt=(
             "Distill the transcript into a structured brainstorm summary. Capture the reasoning "
             "path, not just the conclusion: reasoning_steps should read as a chain the user can "
-            "pick up later. Related_facts are pointers into stored factual knowledge.\n"
+            "pick up later. Treat ideas as nuanced claims with attribution: when the user mentions "
+            "another person, source, company, or entity's variant of an idea, keep it as its own "
+            "attributed_ideas entry. Use builds_on, validates, counters, and relations to show how "
+            "ideas evolve across people and sessions. Related_facts are pointers into stored factual knowledge.\n"
             "Keep the share_post concise, specific, and credible. Avoid hype words such as "
             "revolutionary, effortless, unlock, game-changing, or world-class. Write it like a "
             "thoughtful builder note."
@@ -294,12 +303,12 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "Use fast mode. Do not use extended reasoning, hidden chain-of-thought, or thinking mode.\n"
             "Treat each batch as a fresh independent task.\n"
             "Return exactly one JSON object with this shape:\n"
-            "{\"results\":[{\"task_key\":\"task_1\",\"pile\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"]}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\"}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\"}|null}]}\n"
+            "{\"results\":[{\"task_key\":\"task_1\",\"pile\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"],\"occurred_on\":null,\"people\":[],\"entities\":[],\"activities\":[],\"locations\":[],\"travel_path\":[],\"mood\":null}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\",\"items\":[]}|null,\"factual\":{\"summary\":\"...\",\"keywords\":[\"...\"],\"triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}]}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\",\"reasoning_steps\":[],\"related_facts\":[],\"supports\":[],\"conflicts_with\":[],\"thread_hint\":null,\"attributed_ideas\":[],\"relations\":[],\"builds_on\":[],\"validates\":[],\"counters\":[]}|null}]}\n"
             "The results array must contain exactly one item for each task and must use the same task_key values.\n"
             "If pile is journal, journal is required and factual_triplets must be empty and idea null.\n"
             "If pile is todo, todo is required and must contain the full updated markdown for the shared to-do list after applying that task.\n"
-            "If pile is factual, factual_triplets may be non-empty and journal and idea must be null.\n"
-            "If pile is ideas, idea is required and journal must be null and factual_triplets must be empty.\n"
+            "If pile is factual, prefer factual with summary, keywords, and triplets; factual_triplets may mirror factual.triplets for compatibility. journal, todo, and idea must be null.\n"
+            "If pile is ideas, idea is required and journal must be null and factual/factual_triplets must be empty.\n"
             "If multiple tasks are classified as todo, apply them in task order against the same shared list and return each task's cumulative updated_markdown.\n"
             "Keep every result grounded in its transcript. Do not invent facts.\n"
             "Keep the JSON compact and return no prose."

@@ -172,6 +172,31 @@ class MarkdownExporter:
 
         if session.journal_entry:
             lines.extend(["## Journal Entry", "", session.journal_entry.strip(), ""])
+            journal_payload = self._nested_pile_output(session, "journal")
+            structured_rows = []
+            for label, key in (
+                ("People", "people"),
+                ("Entities", "entities"),
+                ("Activities", "activities"),
+                ("Locations", "locations"),
+                ("Travel Path", "travel_path"),
+            ):
+                values = journal_payload.get(key)
+                if isinstance(values, list):
+                    cleaned = [str(value).strip() for value in values if str(value).strip()]
+                    if cleaned:
+                        structured_rows.append((label, cleaned))
+            mood = str(journal_payload.get("mood") or "").strip()
+            if mood:
+                lines.extend(["## Journal Signals", "", f"- Mood: {mood}"])
+                for label, values in structured_rows:
+                    lines.append(f"- {label}: {', '.join(values)}")
+                lines.append("")
+            elif structured_rows:
+                lines.extend(["## Journal Signals", ""])
+                for label, values in structured_rows:
+                    lines.append(f"- {label}: {', '.join(values)}")
+                lines.append("")
 
         if session.todo_summary:
             lines.extend(
@@ -184,6 +209,18 @@ class MarkdownExporter:
                     "",
                 ]
             )
+
+        factual_payload = self._nested_pile_output(session, "factual")
+        factual_summary = str(factual_payload.get("summary") or "").strip()
+        factual_keywords = factual_payload.get("keywords")
+        if factual_summary or (isinstance(factual_keywords, list) and factual_keywords):
+            lines.extend(["## Factual Backlog Item", ""])
+            if factual_summary:
+                lines.extend([factual_summary, ""])
+            if isinstance(factual_keywords, list) and any(str(item).strip() for item in factual_keywords):
+                lines.append("Keywords:")
+                lines.extend(f"- {str(item).strip()}" for item in factual_keywords if str(item).strip())
+                lines.append("")
 
         if session.triplets:
             lines.extend(["## Fact Triplets", ""])
@@ -634,6 +671,9 @@ class MarkdownExporter:
         return lines
 
     def _render_pile_outputs(self, pile_outputs: dict[str, object]) -> list[str]:
+        if any(key in pile_outputs for key in ("journal", "factual", "idea", "todo")):
+            return []
+
         lines = ["## Pile Outputs", ""]
 
         summary = str(pile_outputs.get("summary") or "").strip()
@@ -708,6 +748,9 @@ class MarkdownExporter:
             ("Related Facts", "related_facts"),
             ("Supports", "supports"),
             ("Conflicts With", "conflicts_with"),
+            ("Builds On", "builds_on"),
+            ("Validates", "validates"),
+            ("Counters", "counters"),
         ):
             values = idea_summary.get(key)
             if isinstance(values, list) and any(str(value).strip() for value in values):
@@ -715,7 +758,41 @@ class MarkdownExporter:
                 lines.extend(f"- {str(value).strip()}" for value in values if str(value).strip())
                 lines.append("")
 
+        attributed = idea_summary.get("attributed_ideas")
+        if isinstance(attributed, list) and attributed:
+            lines.extend(["### Attributed Ideas", ""])
+            for item in attributed:
+                if not isinstance(item, dict):
+                    continue
+                idea = str(item.get("idea") or "").strip()
+                if not idea:
+                    continue
+                person = str(item.get("attributed_to") or "User").strip()
+                stance = str(item.get("stance") or "proposes").strip()
+                lines.append(f"- **{person}** ({stance}): {idea}")
+            lines.append("")
+
+        relations = idea_summary.get("relations")
+        if isinstance(relations, list) and relations:
+            lines.extend(["### Idea Relations", ""])
+            for item in relations:
+                if not isinstance(item, dict):
+                    continue
+                target = str(item.get("target") or "").strip()
+                relation = str(item.get("relation") or "related_to").strip()
+                rationale = str(item.get("rationale") or "").strip()
+                if target:
+                    suffix = f" — {rationale}" if rationale else ""
+                    lines.append(f"- {relation}: {target}{suffix}")
+            lines.append("")
+
         return lines
+
+    @staticmethod
+    def _nested_pile_output(session: ChatSession, key: str) -> dict[str, object]:
+        pile_outputs = session.pile_outputs if isinstance(session.pile_outputs, dict) else {}
+        value = pile_outputs.get(key)
+        return value if isinstance(value, dict) else {}
 
     def _render_sync_event_source(self, index: int, event: SyncEvent) -> list[str]:
         lines = [f"### Capture {index}", ""]

@@ -279,6 +279,47 @@ describe("backend validation helpers", () => {
     });
     expect(summary.total_sessions).toBe(3);
     expect(summary.piles).toHaveLength(3);
+    expect(summary.extra_piles).toEqual([]);
+  });
+
+  it("normalizes missing dashboard summary arrays", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          total_sessions: 0,
+          total_messages: 0,
+          total_triplets: 0,
+          total_sync_events: 0,
+          active_tokens: 0,
+          latest_sync_at: null
+        })
+      }))
+    );
+
+    const { fetchDashboardSummary } = await import("../src/background/backend");
+    const summary = await fetchDashboardSummary({
+      backendUrl: "https://notes.example.com/",
+      backendToken: "savemycontext_pat_test",
+      autoSyncHistory: true,
+      indexingMode: "all",
+      triggerWords: ["lorem"],
+      blacklistWords: [],
+      discardWordsEnabled: true,
+      discardWords: [],
+      selectionCaptureEnabled: false,
+      contextSuggestionsEnabled: false,
+      contextSuggestionsFloatingButtonEnabled: true,
+      enabledProviders: {
+        chatgpt: true,
+        gemini: true,
+        grok: true
+      }
+    });
+
+    expect(summary.piles).toEqual([]);
+    expect(summary.extra_piles).toEqual([]);
   });
 
   it("fetches knowledge search results with encoded query params", async () => {

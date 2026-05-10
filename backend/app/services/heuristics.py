@@ -5,7 +5,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from app.models import ChatMessage, MessageRole, BuiltInPileSlug
-from app.schemas.processing import ClassificationResult, IdeaResult, JournalResult, TripletResult
+from app.schemas.processing import ClassificationResult, IdeaClaim, IdeaResult, JournalResult, TripletResult
 from app.services.text import compact_lines, normalize_whitespace, take_sentences, truncate_text
 
 
@@ -270,4 +270,12 @@ def heuristic_idea(messages: list[ChatMessage]) -> IdeaResult:
         cons=cons,
         next_steps=next_steps[:5],
         share_post=share_post,
+        reasoning_steps=[core_idea, *next_steps[:2]],
+        attributed_ideas=[
+            IdeaClaim(
+                idea=core_idea,
+                attributed_to="User",
+                stance="proposes",
+            )
+        ],
     )

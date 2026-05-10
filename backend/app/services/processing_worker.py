@@ -143,6 +143,7 @@ class ExtensionBrowserProcessingService:
                     classification_reason=item.classification_reason,
                     journal=item.journal,
                     todo=item.todo,
+                    factual=item.factual,
                     factual_triplets=item.factual_triplets,
                     idea=item.idea,
                 ),
@@ -250,6 +251,7 @@ class ExtensionBrowserProcessingService:
                     classification_reason=single.classification_reason,
                     journal=single.journal,
                     todo=single.todo,
+                    factual=single.factual,
                     factual_triplets=single.factual_triplets,
                     idea=single.idea,
                 )
@@ -286,6 +288,7 @@ class ExtensionBrowserProcessingService:
                     classification_reason=item.classification_reason,
                     journal=item.journal,
                     todo=item.todo,
+                    factual=item.factual,
                     factual_triplets=item.factual_triplets,
                     idea=item.idea,
                 )

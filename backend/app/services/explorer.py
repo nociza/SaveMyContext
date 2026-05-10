@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 import heapq
 from itertools import count
 from math import log
@@ -17,9 +17,20 @@ from app.models import ChatSession, ProviderName, BuiltInPileSlug
 from app.schemas.explorer import (
     ActivityBucket,
     BuiltInPileCount,
+    FactualBacklogItem,
+    FactualLinkedSource,
+    FactualViews,
+    IdeaClaimView,
+    IdeaEvolutionEdge,
+    IdeaEvolutionNode,
+    IdeaViews,
+    JournalGroup,
+    JournalTimelineItem,
+    JournalViews,
     PileGraph,
     PileGraphPath,
     PileStats,
+    PileViews,
     ExplorerGraphEvidence,
     ExplorerGraphEdge,
     ExplorerGraphNode,
@@ -157,10 +168,26 @@ def _session_text(session: ChatSession) -> str:
         core_idea = session.idea_summary.get("core_idea")
         if core_idea:
             parts.append(str(core_idea))
-        for key in ("pros", "cons", "next_steps"):
+        for key in (
+            "pros",
+            "cons",
+            "next_steps",
+            "reasoning_steps",
+            "related_facts",
+            "supports",
+            "conflicts_with",
+            "builds_on",
+            "validates",
+            "counters",
+        ):
             value = session.idea_summary.get(key)
             if isinstance(value, list):
                 parts.extend(str(item) for item in value)
+        attributed = session.idea_summary.get("attributed_ideas")
+        if isinstance(attributed, list):
+            for item in attributed:
+                if isinstance(item, dict):
+                    parts.extend(str(value) for value in item.values() if value)
     parts.extend(message.content for message in session.messages[:8])
     return "\n".join(part for part in parts if part)
 
@@ -196,6 +223,59 @@ def _compact_snippet(value: str, terms: list[str] | None = None, *, max_chars: i
     if start + max_chars < len(compact):
         snippet = f"{snippet}..."
     return snippet
+
+
+def _text_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        cleaned = str(item).strip()
+        if cleaned:
+            items.append(cleaned)
+    return items
+
+
+def _dict_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _clean_label(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _date_label(session: ChatSession, explicit: object | None = None) -> str:
+    explicit_text = _clean_label(explicit)
+    if explicit_text:
+        return explicit_text
+    timestamp = session.last_captured_at or session.updated_at
+    return timestamp.date().isoformat() if timestamp is not None else ""
+
+
+def datetime_sort_key(value: datetime | None) -> tuple[int, float]:
+    if value is None:
+        return (1, float("-inf"))
+    return (0, value.timestamp())
+
+
+def _structured_output(session: ChatSession, key: str) -> dict[str, object]:
+    outputs = session.pile_outputs if isinstance(session.pile_outputs, dict) else {}
+    nested = outputs.get(key)
+    if isinstance(nested, dict):
+        return nested
+    # Some older or user-defined outputs were stored directly under pile_outputs.
+    return outputs if outputs else {}
+
+
+def _journal_entry_body(value: str | None) -> str:
+    normalized = (value or "").strip()
+    if not normalized:
+        return ""
+    marker = "Action Items:"
+    index = normalized.find(marker)
+    return normalized[:index].strip() if index >= 0 else normalized
 
 
 def _triplet_snippet(subject: str, predicate: str, object_: str) -> str:
@@ -256,6 +336,23 @@ class ExplorerService:
         sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
         return self._build_graph("default", category.value, sessions, fallback_category=category)
 
+    async def category_views(
+        self,
+        category: BuiltInPileSlug,
+        *,
+        session_ids: list[str] | None = None,
+        provider: ProviderName | None = None,
+    ) -> PileViews:
+        sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
+        related_sessions = await self._all_sessions(provider=provider) if category == BuiltInPileSlug.FACTUAL else []
+        return self._build_views(
+            "default",
+            category.value,
+            sessions,
+            fallback_category=category,
+            related_sessions=related_sessions,
+        )
+
     async def custom_category_graph(
         self,
         name: str,
@@ -265,6 +362,24 @@ class ExplorerService:
     ) -> PileGraph:
         sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
         return self._build_graph("custom", name, sessions, fallback_category=self._dominant_category(sessions))
+
+    async def custom_category_views(
+        self,
+        name: str,
+        *,
+        session_ids: list[str] | None = None,
+        provider: ProviderName | None = None,
+    ) -> PileViews:
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
+        dominant = self._dominant_category(sessions)
+        related_sessions = await self._all_sessions(provider=provider) if dominant == BuiltInPileSlug.FACTUAL else []
+        return self._build_views(
+            "custom",
+            name,
+            sessions,
+            fallback_category=dominant,
+            related_sessions=related_sessions,
+        )
 
     async def category_graph_path(
         self,
@@ -345,6 +460,25 @@ class ExplorerService:
         sessions = list(result.scalars().unique().all())
         return [session for session in sessions if has_extra_pile(session.custom_tags, name)]
 
+    async def _all_sessions(
+        self,
+        *,
+        provider: ProviderName | None = None,
+    ) -> list[ChatSession]:
+        statement = (
+            select(ChatSession)
+            .options(
+                selectinload(ChatSession.messages),
+                selectinload(ChatSession.triplets),
+            )
+            .where(ChatSession.is_discarded.is_(False))
+            .order_by(ChatSession.updated_at.desc())
+        )
+        if provider:
+            statement = statement.where(ChatSession.provider == provider)
+        result = await self.db.execute(statement)
+        return list(result.scalars().unique().all())
+
     def extra_pile_summaries(self, sessions: list[ChatSession]) -> list[tuple[str, int]]:
         return summarize_extra_piles([session.custom_tags for session in sessions])
 
@@ -420,6 +554,380 @@ class ExplorerService:
             top_entities=top_entities,
             top_predicates=top_predicates,
         )
+
+    def _build_views(
+        self,
+        scope_kind: str,
+        scope_label: str,
+        sessions: list[ChatSession],
+        *,
+        fallback_category: BuiltInPileSlug | None,
+        related_sessions: list[ChatSession] | None = None,
+    ) -> PileViews:
+        dominant_category = self._dominant_category(sessions, fallback=fallback_category)
+        normalized_scope = "custom" if scope_kind == "custom" else "default"
+        return PileViews(
+            pile_slug=dominant_category,
+            scope_kind=normalized_scope,
+            scope_label=scope_label,
+            dominant_pile_slug=dominant_category,
+            journal=self._journal_views(sessions) if dominant_category == BuiltInPileSlug.JOURNAL else None,
+            ideas=self._idea_views(sessions) if dominant_category == BuiltInPileSlug.IDEAS else None,
+            factual=(
+                self._factual_views(sessions, related_sessions or sessions)
+                if dominant_category == BuiltInPileSlug.FACTUAL
+                else None
+            ),
+        )
+
+    def _journal_views(self, sessions: list[ChatSession]) -> JournalViews:
+        timeline: list[JournalTimelineItem] = []
+        people: dict[str, list[tuple[ChatSession, str]]] = defaultdict(list)
+        entities: dict[str, list[tuple[ChatSession, str]]] = defaultdict(list)
+        activities: dict[str, list[tuple[ChatSession, str]]] = defaultdict(list)
+        locations: dict[str, list[tuple[ChatSession, str]]] = defaultdict(list)
+
+        for session in sorted(sessions, key=lambda item: datetime_sort_key(item.last_captured_at or item.updated_at)):
+            payload = _structured_output(session, "journal")
+            entry = _clean_label(payload.get("entry")) or _journal_entry_body(session.journal_entry)
+            if not entry:
+                entry = _compact_snippet(_session_text(session), max_chars=180)
+            people_values = _text_list(payload.get("people"))
+            entity_values = _text_list(payload.get("entities"))
+            activity_values = _text_list(payload.get("activities"))
+            location_values = _text_list(payload.get("locations"))
+            travel_path = _text_list(payload.get("travel_path")) or location_values
+            date = _date_label(session, payload.get("occurred_on"))
+
+            item = JournalTimelineItem(
+                session_id=session.id,
+                title=session.title,
+                provider=session.provider,
+                updated_at=session.updated_at,
+                occurred_on=date or None,
+                entry=entry,
+                mood=_clean_label(payload.get("mood")) or None,
+                people=people_values,
+                entities=entity_values,
+                activities=activity_values,
+                locations=location_values,
+                travel_path=travel_path,
+            )
+            timeline.append(item)
+
+            for value in people_values:
+                people[value].append((session, entry))
+            for value in entity_values:
+                entities[value].append((session, entry))
+            for value in activity_values:
+                activities[value].append((session, entry))
+            for value in location_values:
+                locations[value].append((session, entry))
+
+        return JournalViews(
+            timeline=timeline,
+            locations=self._journal_groups(locations),
+            people=self._journal_groups(people),
+            entities=self._journal_groups(entities),
+            activities=self._journal_groups(activities),
+        )
+
+    def _journal_groups(self, groups: dict[str, list[tuple[ChatSession, str]]]) -> list[JournalGroup]:
+        rows: list[JournalGroup] = []
+        for label, entries in groups.items():
+            session_ids = list(dict.fromkeys(session.id for session, _ in entries))
+            dates = sorted(
+                {
+                    _date_label(session)
+                    for session, _ in entries
+                    if _date_label(session)
+                }
+            )
+            snippets = [
+                _compact_snippet(snippet, [label], max_chars=120)
+                for _, snippet in entries
+                if snippet
+            ]
+            rows.append(
+                JournalGroup(
+                    label=label,
+                    count=len(session_ids),
+                    session_ids=session_ids,
+                    dates=dates[-4:],
+                    snippets=list(dict.fromkeys(snippets))[:3],
+                )
+            )
+        return sorted(rows, key=lambda item: (-item.count, item.label.lower()))[:24]
+
+    def _idea_views(self, sessions: list[ChatSession]) -> IdeaViews:
+        nodes: list[IdeaEvolutionNode] = []
+        for session in sorted(sessions, key=lambda item: datetime_sort_key(item.updated_at)):
+            payload = session.idea_summary if isinstance(session.idea_summary, dict) else _structured_output(session, "idea")
+            core = _clean_label(payload.get("core_idea") or payload.get("summary"))
+            if not core:
+                core = _compact_snippet(_session_text(session), max_chars=180)
+            if not core:
+                continue
+
+            claim_rows = [
+                IdeaClaimView(
+                    idea=_clean_label(item.get("idea")),
+                    attributed_to=_clean_label(item.get("attributed_to")) or "User",
+                    stance=_clean_label(item.get("stance")) or "proposes",
+                    evidence=_clean_label(item.get("evidence")) or None,
+                )
+                for item in _dict_list(payload.get("attributed_ideas"))
+                if _clean_label(item.get("idea"))
+            ]
+            if not claim_rows:
+                claim_rows = [IdeaClaimView(idea=core, attributed_to="User", stance="proposes")]
+
+            nodes.append(
+                IdeaEvolutionNode(
+                    id=session.id,
+                    session_id=session.id,
+                    title=session.title,
+                    provider=session.provider,
+                    updated_at=session.updated_at,
+                    thread=_clean_label(payload.get("thread_hint")) or None,
+                    core_idea=core,
+                    reasoning_steps=_text_list(payload.get("reasoning_steps")),
+                    related_facts=_text_list(payload.get("related_facts")),
+                    claims=claim_rows,
+                    next_steps=_text_list(payload.get("next_steps")),
+                    share_post=session.share_post,
+                )
+            )
+
+        node_by_id = {node.id: node for node in nodes}
+        edges: list[IdeaEvolutionEdge] = []
+        edge_keys: set[tuple[str, str, str]] = set()
+
+        nodes_by_thread: dict[str, list[IdeaEvolutionNode]] = defaultdict(list)
+        for node in nodes:
+            nodes_by_thread[(node.thread or "Unthreaded").casefold()].append(node)
+        for thread_nodes in nodes_by_thread.values():
+            thread_nodes.sort(key=lambda node: datetime_sort_key(node.updated_at))
+            for left, right in zip(thread_nodes, thread_nodes[1:], strict=False):
+                self._append_idea_edge(edges, edge_keys, left.id, right.id, "builds_on", "evolves into", [left.session_id, right.session_id])
+
+        for session in sessions:
+            payload = session.idea_summary if isinstance(session.idea_summary, dict) else _structured_output(session, "idea")
+            source = node_by_id.get(session.id)
+            if source is None:
+                continue
+            relation_inputs: list[tuple[str, str, str | None]] = []
+            relation_inputs.extend((target, "builds_on", None) for target in _text_list(payload.get("builds_on")))
+            relation_inputs.extend((target, "validates", None) for target in _text_list(payload.get("validates")))
+            relation_inputs.extend((target, "validates", None) for target in _text_list(payload.get("supports")))
+            relation_inputs.extend((target, "counters", None) for target in _text_list(payload.get("counters")))
+            relation_inputs.extend((target, "counters", None) for target in _text_list(payload.get("conflicts_with")))
+            for item in _dict_list(payload.get("relations")):
+                relation_inputs.append(
+                    (
+                        _clean_label(item.get("target")),
+                        _clean_label(item.get("relation")) or "related_to",
+                        _clean_label(item.get("rationale")) or None,
+                    )
+                )
+            for target_text, relation, rationale in relation_inputs:
+                target = self._best_idea_target(target_text, nodes, source.id)
+                if target is None:
+                    continue
+                self._append_idea_edge(
+                    edges,
+                    edge_keys,
+                    target.id if relation == "builds_on" else source.id,
+                    source.id if relation == "builds_on" else target.id,
+                    relation,
+                    rationale or relation.replace("_", " "),
+                    [source.session_id, target.session_id],
+                )
+
+        threads = self._idea_group_counts(
+            (node.thread or "Unthreaded", node.session_id, node.core_idea)
+            for node in nodes
+        )
+        contributors = self._idea_group_counts(
+            (claim.attributed_to, node.session_id, claim.idea)
+            for node in nodes
+            for claim in node.claims
+        )
+        facts = self._idea_group_counts(
+            (fact, node.session_id, node.core_idea)
+            for node in nodes
+            for fact in node.related_facts
+        )
+
+        return IdeaViews(nodes=nodes, edges=edges, threads=threads, contributors=contributors, facts=facts)
+
+    def _append_idea_edge(
+        self,
+        edges: list[IdeaEvolutionEdge],
+        seen: set[tuple[str, str, str]],
+        source: str,
+        target: str,
+        relation: str,
+        label: str | None,
+        session_ids: list[str],
+    ) -> None:
+        if source == target:
+            return
+        key = (source, target, relation)
+        if key in seen:
+            return
+        seen.add(key)
+        edges.append(
+            IdeaEvolutionEdge(
+                id=f"{source}:{relation}:{target}",
+                source=source,
+                target=target,
+                relation=relation,
+                label=label,
+                session_ids=list(dict.fromkeys(session_ids)),
+            )
+        )
+
+    def _best_idea_target(
+        self,
+        target_text: str,
+        nodes: list[IdeaEvolutionNode],
+        source_id: str,
+    ) -> IdeaEvolutionNode | None:
+        cleaned = target_text.casefold().strip()
+        if not cleaned:
+            return None
+        target_tokens = _tokenize_text(cleaned)
+        candidates: list[tuple[int, IdeaEvolutionNode]] = []
+        for node in nodes:
+            if node.id == source_id:
+                continue
+            haystack = f"{node.core_idea} {node.title or ''} {node.thread or ''}".casefold()
+            if cleaned in haystack or haystack in cleaned:
+                candidates.append((1000, node))
+                continue
+            overlap = len(target_tokens & _tokenize_text(haystack))
+            if overlap:
+                candidates.append((overlap, node))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (-item[0], datetime_sort_key(item[1].updated_at)))
+        return candidates[0][1]
+
+    def _idea_group_counts(self, rows) -> list[JournalGroup]:
+        grouped: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        for label, session_id, snippet in rows:
+            cleaned = _clean_label(label)
+            if cleaned:
+                grouped[cleaned].append((session_id, _clean_label(snippet)))
+        return [
+            JournalGroup(
+                label=label,
+                count=len({session_id for session_id, _ in values}),
+                session_ids=sorted({session_id for session_id, _ in values}),
+                snippets=list(dict.fromkeys(snippet for _, snippet in values if snippet))[:3],
+            )
+            for label, values in sorted(grouped.items(), key=lambda item: (-len({row[0] for row in item[1]}), item[0].lower()))[:24]
+        ]
+
+    def _factual_views(
+        self,
+        sessions: list[ChatSession],
+        related_sessions: list[ChatSession],
+    ) -> FactualViews:
+        backlog: list[FactualBacklogItem] = []
+        keyword_counter: Counter[str] = Counter()
+        entity_counter: Counter[str] = Counter()
+        linked_sources: dict[str, FactualLinkedSource] = {}
+        related_lookup = [session for session in related_sessions if session.built_in_pile != BuiltInPileSlug.FACTUAL]
+
+        for session in sorted(sessions, key=lambda item: datetime_sort_key(item.updated_at), reverse=True):
+            payload = _structured_output(session, "factual")
+            keywords = _text_list(payload.get("keywords"))
+            entities = sorted(
+                {
+                    value
+                    for triplet in session.triplets
+                    for value in (triplet.subject.strip(), triplet.object.strip())
+                    if value
+                },
+                key=str.lower,
+            )
+            if not keywords:
+                keywords = sorted(
+                    {
+                        keyword
+                        for triplet in session.triplets
+                        for keyword in (getattr(triplet, "keywords", None) or [])
+                    },
+                    key=str.lower,
+                )
+            for keyword in keywords:
+                keyword_counter[keyword] += 1
+            for entity in entities:
+                entity_counter[entity] += 1
+
+            summary = _clean_label(payload.get("summary")) or None
+            context = session.classification_reason or _compact_snippet(_session_text(session), entities[:3] or keywords[:3], max_chars=180)
+            links = self._factual_links(session, entities + keywords, related_lookup)
+            for link in links:
+                existing = linked_sources.get(link.session_id)
+                if existing is None:
+                    linked_sources[link.session_id] = link
+                else:
+                    existing.matched_terms = sorted(set([*existing.matched_terms, *link.matched_terms]), key=str.lower)
+
+            backlog.append(
+                FactualBacklogItem(
+                    session_id=session.id,
+                    title=session.title,
+                    provider=session.provider,
+                    updated_at=session.updated_at,
+                    learned_on=_date_label(session) or None,
+                    summary=summary,
+                    context=context,
+                    keywords=keywords,
+                    entities=entities,
+                    triplet_count=len(session.triplets),
+                    linked_from=links[:6],
+                )
+            )
+
+        return FactualViews(
+            backlog=backlog,
+            keywords=[LabelCount(label=label, count=count) for label, count in keyword_counter.most_common(24)],
+            entities=[LabelCount(label=label, count=count) for label, count in entity_counter.most_common(24)],
+            linked_sources=sorted(linked_sources.values(), key=lambda item: (-(len(item.matched_terms)), item.title or ""))[:24],
+        )
+
+    def _factual_links(
+        self,
+        factual_session: ChatSession,
+        terms: list[str],
+        related_sessions: list[ChatSession],
+    ) -> list[FactualLinkedSource]:
+        cleaned_terms = [term for term in dict.fromkeys(_clean_label(term) for term in terms) if len(term) >= 3]
+        if not cleaned_terms:
+            return []
+        links: list[FactualLinkedSource] = []
+        for session in related_sessions:
+            if session.id == factual_session.id:
+                continue
+            haystack = _session_text(session).casefold()
+            matches = [term for term in cleaned_terms if term.casefold() in haystack]
+            if not matches:
+                continue
+            links.append(
+                FactualLinkedSource(
+                    session_id=session.id,
+                    title=session.title,
+                    pile_slug=session.built_in_pile,
+                    provider=session.provider,
+                    matched_terms=matches[:6],
+                )
+            )
+        links.sort(key=lambda item: (-len(item.matched_terms), item.title or item.session_id))
+        return links
 
     def _build_graph(
         self,

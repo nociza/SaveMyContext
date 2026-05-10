@@ -125,6 +125,115 @@ class PileGraphPath(BaseModel):
     paths: list[ExplorerGraphPath]
 
 
+class JournalTimelineItem(BaseModel):
+    session_id: str
+    title: str | None = None
+    provider: ProviderName | None = None
+    updated_at: datetime | None = None
+    occurred_on: str | None = None
+    entry: str
+    mood: str | None = None
+    people: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    activities: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
+    travel_path: list[str] = Field(default_factory=list)
+
+
+class JournalGroup(BaseModel):
+    label: str
+    count: int
+    session_ids: list[str]
+    dates: list[str] = Field(default_factory=list)
+    snippets: list[str] = Field(default_factory=list)
+
+
+class JournalViews(BaseModel):
+    timeline: list[JournalTimelineItem] = Field(default_factory=list)
+    locations: list[JournalGroup] = Field(default_factory=list)
+    people: list[JournalGroup] = Field(default_factory=list)
+    entities: list[JournalGroup] = Field(default_factory=list)
+    activities: list[JournalGroup] = Field(default_factory=list)
+
+
+class IdeaClaimView(BaseModel):
+    idea: str
+    attributed_to: str = "User"
+    stance: str = "proposes"
+    evidence: str | None = None
+
+
+class IdeaEvolutionNode(BaseModel):
+    id: str
+    session_id: str
+    title: str | None = None
+    provider: ProviderName | None = None
+    updated_at: datetime | None = None
+    thread: str | None = None
+    core_idea: str
+    reasoning_steps: list[str] = Field(default_factory=list)
+    related_facts: list[str] = Field(default_factory=list)
+    claims: list[IdeaClaimView] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    share_post: str | None = None
+
+
+class IdeaEvolutionEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    relation: str
+    label: str | None = None
+    session_ids: list[str] = Field(default_factory=list)
+
+
+class IdeaViews(BaseModel):
+    nodes: list[IdeaEvolutionNode] = Field(default_factory=list)
+    edges: list[IdeaEvolutionEdge] = Field(default_factory=list)
+    threads: list[JournalGroup] = Field(default_factory=list)
+    contributors: list[JournalGroup] = Field(default_factory=list)
+    facts: list[JournalGroup] = Field(default_factory=list)
+
+
+class FactualLinkedSource(BaseModel):
+    session_id: str
+    title: str | None = None
+    pile_slug: BuiltInPileSlug | None = None
+    provider: ProviderName | None = None
+    matched_terms: list[str] = Field(default_factory=list)
+
+
+class FactualBacklogItem(BaseModel):
+    session_id: str
+    title: str | None = None
+    provider: ProviderName | None = None
+    updated_at: datetime | None = None
+    learned_on: str | None = None
+    summary: str | None = None
+    context: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    triplet_count: int = 0
+    linked_from: list[FactualLinkedSource] = Field(default_factory=list)
+
+
+class FactualViews(BaseModel):
+    backlog: list[FactualBacklogItem] = Field(default_factory=list)
+    keywords: list[LabelCount] = Field(default_factory=list)
+    entities: list[LabelCount] = Field(default_factory=list)
+    linked_sources: list[FactualLinkedSource] = Field(default_factory=list)
+
+
+class PileViews(BaseModel):
+    pile_slug: BuiltInPileSlug
+    scope_kind: Literal["default", "custom"] = "default"
+    scope_label: str
+    dominant_pile_slug: BuiltInPileSlug
+    journal: JournalViews | None = None
+    ideas: IdeaViews | None = None
+    factual: FactualViews | None = None
+
+
 class SessionNoteRead(SessionRead):
     raw_markdown: str | None = None
     related_entities: list[str]

@@ -11,10 +11,10 @@ export const pileLabels: Record<BuiltInPileSlug, string> = {
 };
 
 export const pileDescriptions: Record<BuiltInPileSlug, string> = {
-  factual: "Verified notes, extracted facts, and the knowledge graph.",
-  ideas: "Concepts, proposals, and next-step thinking.",
-  journal: "Daily reflections, summaries, and action items.",
-  todo: "Task updates and notes that changed the shared list.",
+  factual: "A dated backlog of what you learned, kept queryable and linked from other piles.",
+  ideas: "Attributed claims, reasoning, and how thoughts build, validate, or counter each other.",
+  journal: "Daily progression with people, places, travel, activities, and relationship views.",
+  todo: "A plain shared checklist with active and completed tasks.",
   discarded: "Captured but shelved. Not summarized, not on the dashboard, but recoverable."
 };
 

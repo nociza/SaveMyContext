@@ -3,6 +3,7 @@ import type {
   BackendPileGraph,
   BackendPileGraphPath,
   BackendPileStats,
+  BackendPileViews,
   ConnectionRedeemResponse,
   BackendDashboardSummary,
   BackendDiscardedSessionsResponse,
@@ -251,7 +252,12 @@ export async function fetchDashboardSummary(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendDashboardSummary> {
-  return fetchBackendJson<BackendDashboardSummary>(settings, "/dashboard/summary", capabilities);
+  const summary = await fetchBackendJson<BackendDashboardSummary>(settings, "/dashboard/summary", capabilities);
+  return {
+    ...summary,
+    piles: summary.piles ?? [],
+    extra_piles: summary.extra_piles ?? []
+  };
 }
 
 export async function fetchSystemStatus(
@@ -602,6 +608,30 @@ export async function fetchPileGraph(
   );
 }
 
+export async function fetchPileViews(
+  settings: ExtensionSettings,
+  pile: BuiltInPileSlug,
+  filters?: {
+    provider?: ProviderName;
+    sessionIds?: string[];
+  },
+  capabilities?: BackendCapabilities
+): Promise<BackendPileViews> {
+  const search = new URLSearchParams();
+  if (filters?.provider) {
+    search.set("provider", filters.provider);
+  }
+  for (const sessionId of filters?.sessionIds ?? []) {
+    search.append("session_id", sessionId);
+  }
+  const query = search.toString();
+  return fetchBackendJson<BackendPileViews>(
+    settings,
+    `/piles/${encodeURIComponent(pile)}/views${query ? `?${query}` : ""}`,
+    capabilities
+  );
+}
+
 export async function fetchCustomPileGraph(
   settings: ExtensionSettings,
   name: string,
@@ -622,6 +652,30 @@ export async function fetchCustomPileGraph(
   return fetchBackendJson<BackendPileGraph>(
     settings,
     `/extra-piles/${encodeURIComponent(name)}/graph${query ? `?${query}` : ""}`,
+    capabilities
+  );
+}
+
+export async function fetchCustomPileViews(
+  settings: ExtensionSettings,
+  name: string,
+  filters?: {
+    provider?: ProviderName;
+    sessionIds?: string[];
+  },
+  capabilities?: BackendCapabilities
+): Promise<BackendPileViews> {
+  const search = new URLSearchParams();
+  if (filters?.provider) {
+    search.set("provider", filters.provider);
+  }
+  for (const sessionId of filters?.sessionIds ?? []) {
+    search.append("session_id", sessionId);
+  }
+  const query = search.toString();
+  return fetchBackendJson<BackendPileViews>(
+    settings,
+    `/extra-piles/${encodeURIComponent(name)}/views${query ? `?${query}` : ""}`,
     capabilities
   );
 }

@@ -11,7 +11,7 @@ from app.core.version import get_app_version
 from app.models import APIToken, ChatMessage, ChatSession, FactTriplet, ProviderName, BuiltInPileSlug, SyncEvent
 from app.models.base import utcnow
 from app.schemas.dashboard import DashboardSummary, ExtraPileCount, PileCount
-from app.schemas.explorer import PileGraph, PileGraphPath, PileStats
+from app.schemas.explorer import PileGraph, PileGraphPath, PileStats, PileViews
 from app.schemas.graph import GraphEdge, GraphNode
 from app.schemas.search import SearchResponse
 from app.schemas.system import StorageSettingsResponse, StorageSettingsUpdate, SystemStatus
@@ -123,6 +123,17 @@ async def category_graph(
     return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
 
 
+@router.get("/categories/{category}/views", response_model=PileViews)
+async def category_views(
+    category: BuiltInPileSlug,
+    provider: ProviderName | None = Query(default=None),
+    session_id: list[str] | None = Query(default=None),
+    _: AuthContext = Depends(require_scope("read")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileViews:
+    return await ExplorerService(db).category_views(category, session_ids=session_id, provider=provider)
+
+
 @router.get("/categories/{category}/graph/path", response_model=PileGraphPath)
 async def category_graph_path(
     category: BuiltInPileSlug,
@@ -164,6 +175,18 @@ async def extra_pile_graph(
     db: AsyncSession = Depends(get_db_session),
 ) -> PileGraph:
     return await ExplorerService(db).custom_category_graph(name, session_ids=session_id, provider=provider)
+
+
+@router.get("/extra-piles/{name}/views", response_model=PileViews)
+@router.get("/custom-categories/{name}/views", response_model=PileViews, include_in_schema=False)
+async def extra_pile_views(
+    name: str,
+    provider: ProviderName | None = Query(default=None),
+    session_id: list[str] | None = Query(default=None),
+    _: AuthContext = Depends(require_scope("read")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileViews:
+    return await ExplorerService(db).custom_category_views(name, session_ids=session_id, provider=provider)
 
 
 @router.get("/extra-piles/{name}/graph/path", response_model=PileGraphPath)

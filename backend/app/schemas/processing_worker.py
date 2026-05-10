@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import ProviderName, BuiltInPileSlug
-from app.schemas.processing import IdeaResult, JournalResult, TodoResult, TripletResult
+from app.schemas.processing import FactualResult, IdeaResult, JournalResult, TodoResult, TripletResult
 
 
 class SessionPipelineResult(BaseModel):
@@ -13,6 +13,7 @@ class SessionPipelineResult(BaseModel):
     classification_reason: str = Field(min_length=1)
     journal: JournalResult | None = None
     todo: TodoResult | None = None
+    factual: FactualResult | None = None
     factual_triplets: list[TripletResult] = Field(default_factory=list)
     idea: IdeaResult | None = None
 
@@ -30,6 +31,8 @@ class SessionPipelineResult(BaseModel):
             raise ValueError("todo must be null unless pile='todo'.")
         if self.pile != BuiltInPileSlug.IDEAS and self.idea is not None:
             raise ValueError("idea must be null unless pile='ideas'.")
+        if self.pile != BuiltInPileSlug.FACTUAL and self.factual is not None:
+            raise ValueError("factual must be null unless pile='factual'.")
         if self.pile != BuiltInPileSlug.FACTUAL and self.factual_triplets:
             raise ValueError("factual_triplets must be empty unless pile='factual'.")
         return self

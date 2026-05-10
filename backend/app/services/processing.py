@@ -88,6 +88,7 @@ class SessionProcessor:
             result = SessionPipelineResult(
                 pile=classification.pile,
                 classification_reason=classification.reason,
+                factual=factual,
                 factual_triplets=factual.triplets,
             )
         elif classification.pile == BuiltInPileSlug.TODO:
@@ -393,6 +394,7 @@ class SessionProcessor:
         session.todo_summary = None
         session.idea_summary = None
         session.share_post = None
+        session.pile_outputs = None
 
         if result.pile == BuiltInPileSlug.JOURNAL and result.journal is not None:
             action_lines = [f"- {item}" for item in result.journal.action_items]
@@ -400,16 +402,29 @@ class SessionProcessor:
                 session.journal_entry = f"{result.journal.entry}\n\nAction Items:\n" + "\n".join(action_lines)
             else:
                 session.journal_entry = result.journal.entry
+            session.pile_outputs = {"journal": result.journal.model_dump(exclude_none=True)}
             await self._replace_triplets(session, [])
         elif result.pile == BuiltInPileSlug.TODO and result.todo is not None:
             TodoListService(base_dir=self.base_dir).write_markdown(result.todo.updated_markdown)
             session.todo_summary = result.todo.summary
+            session.pile_outputs = {"todo": result.todo.model_dump(exclude_none=True)}
             await self._replace_triplets(session, [])
         elif result.pile == BuiltInPileSlug.FACTUAL:
-            await self._replace_triplets(session, result.factual_triplets)
+            factual = result.factual
+            triplets = factual.triplets if factual is not None else result.factual_triplets
+            if factual is not None:
+                session.pile_outputs = {"factual": factual.model_dump(exclude_none=True)}
+            elif triplets:
+                session.pile_outputs = {
+                    "factual": {
+                        "triplets": [triplet.model_dump(exclude_none=True) for triplet in triplets]
+                    }
+                }
+            await self._replace_triplets(session, triplets)
         elif result.pile == BuiltInPileSlug.IDEAS and result.idea is not None:
             session.idea_summary = result.idea.model_dump(exclude={"share_post"})
             session.share_post = result.idea.share_post
+            session.pile_outputs = {"idea": result.idea.model_dump(exclude={"share_post"})}
             await self._replace_triplets(session, [])
         else:
             await self._replace_triplets(session, [])

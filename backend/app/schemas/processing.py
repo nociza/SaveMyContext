@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import BuiltInPileSlug
@@ -63,8 +65,10 @@ class JournalResult(BaseModel):
     action_items: list[str] = Field(default_factory=list)
     occurred_on: str | None = None
     people: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
     activities: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
+    travel_path: list[str] = Field(default_factory=list)
     mood: str | None = None
 
 
@@ -96,6 +100,19 @@ class FactualResult(BaseModel):
     triplets: list[TripletResult] = Field(default_factory=list)
 
 
+class IdeaClaim(BaseModel):
+    idea: str = Field(min_length=1)
+    attributed_to: str = Field(default="User", min_length=1)
+    stance: Literal["proposes", "supports", "validates", "counters", "questions", "refines"] = "proposes"
+    evidence: str | None = None
+
+
+class IdeaRelation(BaseModel):
+    target: str = Field(min_length=1)
+    relation: Literal["builds_on", "validates", "counters", "refines", "related_to"]
+    rationale: str | None = None
+
+
 class IdeaResult(BaseModel):
     core_idea: str = Field(min_length=1)
     pros: list[str] = Field(default_factory=list)
@@ -107,3 +124,8 @@ class IdeaResult(BaseModel):
     supports: list[str] = Field(default_factory=list)
     conflicts_with: list[str] = Field(default_factory=list)
     thread_hint: str | None = None
+    attributed_ideas: list[IdeaClaim] = Field(default_factory=list)
+    relations: list[IdeaRelation] = Field(default_factory=list)
+    builds_on: list[str] = Field(default_factory=list)
+    validates: list[str] = Field(default_factory=list)
+    counters: list[str] = Field(default_factory=list)
