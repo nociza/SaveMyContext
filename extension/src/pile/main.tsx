@@ -435,6 +435,7 @@ function GraphPathPanel({
   onFocusPath: (path: BackendExplorerGraphPath) => void;
 }) {
   const canSearch = nodes.length >= 2 && sourceId && targetId && sourceId !== targetId;
+  const paths = path?.paths ?? [];
 
   return (
     <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-2.5">
@@ -473,7 +474,7 @@ function GraphPathPanel({
         {nodes.length < 2 ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">At least two visible concepts are needed.</p> : null}
         {loading ? <p className="text-xs text-[var(--color-ink-soft)]">Finding paths...</p> : null}
         {error && canSearch ? <p className="text-xs text-[#963c24]">{error.message}</p> : null}
-        {path?.paths.slice(0, 2).map((item, index) => (
+        {paths.slice(0, 2).map((item, index) => (
           <button
             key={`${item.node_ids.join(":")}:${index}`}
             type="button"
@@ -488,7 +489,7 @@ function GraphPathPanel({
             </div>
           </button>
         ))}
-        {path && !path.paths.length && canSearch ? (
+        {path && !paths.length && canSearch ? (
           <p className="text-xs leading-5 text-[var(--color-ink-soft)]">No visible path connects those concepts.</p>
         ) : null}
       </div>
@@ -986,6 +987,19 @@ function App() {
     activateFocus(`Path: ${labels.join(" -> ")}`, sessionIds, "atlas");
   }
 
+  const categoryViews = categoryViewsQuery.data;
+  const journalEntryCount = categoryViews?.journal?.timeline?.length ?? 0;
+  const journalPlaceCount = categoryViews?.journal?.locations?.length ?? 0;
+  const journalPeopleCount = categoryViews?.journal?.people?.length ?? 0;
+  const journalEntityCount = categoryViews?.journal?.entities?.length ?? 0;
+  const ideaNodeCount = categoryViews?.ideas?.nodes?.length ?? 0;
+  const ideaThreadCount = categoryViews?.ideas?.threads?.length ?? 0;
+  const ideaContributorCount = categoryViews?.ideas?.contributors?.length ?? 0;
+  const ideaRelationCount = categoryViews?.ideas?.edges?.length ?? 0;
+  const factualBacklogCount = categoryViews?.factual?.backlog?.length ?? 0;
+  const factualLinkedSourceCount = categoryViews?.factual?.linked_sources?.length ?? 0;
+  const factualEntityCount = categoryViews?.factual?.entities?.length ?? 0;
+
   const workspaceCards = usesCategoryWorkspace
     ? activeDisplayCategory === "journal"
       ? [
@@ -994,7 +1008,7 @@ function App() {
             label: "Timeline",
             accent: pilePalette.journal.accent,
             icon: Activity,
-            metric: `${formatNumber(categoryViewsQuery.data?.journal?.timeline.length ?? 0)} entries`,
+            metric: `${formatNumber(journalEntryCount)} entries`,
             detail: "Daily progression"
           },
           {
@@ -1002,7 +1016,7 @@ function App() {
             label: "Places",
             accent: "#2477c7",
             icon: MapPin,
-            metric: `${formatNumber(categoryViewsQuery.data?.journal?.locations.length ?? 0)} places`,
+            metric: `${formatNumber(journalPlaceCount)} places`,
             detail: "Travel view"
           },
           {
@@ -1010,7 +1024,7 @@ function App() {
             label: "People",
             accent: "#0f8a84",
             icon: Users,
-            metric: `${formatNumber((categoryViewsQuery.data?.journal?.people.length ?? 0) + (categoryViewsQuery.data?.journal?.entities.length ?? 0))} named`,
+            metric: `${formatNumber(journalPeopleCount + journalEntityCount)} named`,
             detail: "Relationships and items"
           }
         ]
@@ -1021,7 +1035,7 @@ function App() {
               label: "Evolution",
               accent: pilePalette.ideas.accent,
               icon: GitBranch,
-              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.nodes.length ?? 0)} ideas`,
+              metric: `${formatNumber(ideaNodeCount)} ideas`,
               detail: "Thread progression"
             },
             {
@@ -1029,7 +1043,7 @@ function App() {
               label: "Mind map",
               accent: "#4968ab",
               icon: BrainCircuit,
-              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.threads.length ?? 0)} threads`,
+              metric: `${formatNumber(ideaThreadCount)} threads`,
               detail: "Facts and contributors"
             },
             {
@@ -1037,7 +1051,7 @@ function App() {
               label: "Attribution",
               accent: "#0f8a84",
               icon: Users,
-              metric: `${formatNumber(categoryViewsQuery.data?.ideas?.contributors.length ?? 0)} voices`,
+              metric: `${formatNumber(ideaContributorCount)} voices`,
               detail: "Validates and counters"
             }
           ]
@@ -1047,7 +1061,7 @@ function App() {
               label: "Backlog",
               accent: pilePalette.factual.accent,
               icon: ListChecks,
-              metric: `${formatNumber(categoryViewsQuery.data?.factual?.backlog.length ?? 0)} notes`,
+              metric: `${formatNumber(factualBacklogCount)} notes`,
               detail: "Learned by date"
             },
             {
@@ -1055,7 +1069,7 @@ function App() {
               label: "Links",
               accent: "#4968ab",
               icon: Workflow,
-              metric: `${formatNumber(categoryViewsQuery.data?.factual?.linked_sources.length ?? 0)} sources`,
+              metric: `${formatNumber(factualLinkedSourceCount)} sources`,
               detail: "Referenced by other piles"
             },
             {
@@ -1063,7 +1077,7 @@ function App() {
               label: "Terms",
               accent: "#c77724",
               icon: Tags,
-              metric: `${formatNumber(categoryViewsQuery.data?.factual?.entities.length ?? 0)} entities`,
+              metric: `${formatNumber(factualEntityCount)} entities`,
               detail: "Queryable surface"
             }
           ]
@@ -1214,10 +1228,10 @@ function App() {
                     : "Backlog notes",
               value:
                 activeDisplayCategory === "journal"
-                  ? formatNumber(categoryViewsQuery.data?.journal?.timeline.length ?? 0)
+                  ? formatNumber(journalEntryCount)
                   : activeDisplayCategory === "ideas"
-                    ? formatNumber(categoryViewsQuery.data?.ideas?.nodes.length ?? 0)
-                    : formatNumber(categoryViewsQuery.data?.factual?.backlog.length ?? 0),
+                    ? formatNumber(ideaNodeCount)
+                    : formatNumber(factualBacklogCount),
               icon: activeDisplayCategory === "journal" ? Activity : activeDisplayCategory === "ideas" ? BrainCircuit : ListChecks
             },
             {
@@ -1229,10 +1243,10 @@ function App() {
                     : "Entities",
               value:
                 activeDisplayCategory === "journal"
-                  ? formatNumber(categoryViewsQuery.data?.journal?.people.length ?? 0)
+                  ? formatNumber(journalPeopleCount)
                   : activeDisplayCategory === "ideas"
-                    ? formatNumber(categoryViewsQuery.data?.ideas?.contributors.length ?? 0)
-                    : formatNumber(categoryViewsQuery.data?.factual?.entities.length ?? 0),
+                    ? formatNumber(ideaContributorCount)
+                    : formatNumber(factualEntityCount),
               icon: Users
             },
             {
@@ -1244,10 +1258,10 @@ function App() {
                     : "Linked from",
               value:
                 activeDisplayCategory === "journal"
-                  ? formatNumber(categoryViewsQuery.data?.journal?.locations.length ?? 0)
+                  ? formatNumber(journalPlaceCount)
                   : activeDisplayCategory === "ideas"
-                    ? formatNumber(categoryViewsQuery.data?.ideas?.edges.length ?? 0)
-                    : formatNumber(categoryViewsQuery.data?.factual?.linked_sources.length ?? 0),
+                    ? formatNumber(ideaRelationCount)
+                    : formatNumber(factualLinkedSourceCount),
               icon: Workflow
             }
         ]

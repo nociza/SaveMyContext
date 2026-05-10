@@ -171,6 +171,7 @@ function App() {
   const nodes = nodesQuery.data ?? [];
   const edges = edgesQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
+  const discardedItems = discardedQuery.data?.items ?? [];
   const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
   const processing = status ? processingTone(status) : { label: "Waiting", tone: "neutral" as const };
 
@@ -484,9 +485,9 @@ function App() {
             ) : null}
             {discardedQuery.isLoading ? (
               <div className="text-sm text-[var(--color-ink-subtle)]">Loading…</div>
-            ) : discardedQuery.data?.items.length ? (
+            ) : discardedItems.length ? (
               <ul className="divide-y divide-[var(--color-line)]">
-                {discardedQuery.data.items.slice(0, 10).map((item) => (
+                {discardedItems.slice(0, 10).map((item) => (
                   <li key={item.id} className="flex items-start justify-between gap-4 py-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-[var(--color-ink)]">

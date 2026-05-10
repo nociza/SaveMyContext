@@ -34,8 +34,9 @@ export function TodoWorkspace({
   onAddTask,
   onToggleTask
 }: TodoWorkspaceProps) {
-  const activeItems = todo?.items.filter((item) => !item.done) ?? [];
-  const completedItems = todo?.items.filter((item) => item.done) ?? [];
+  const items = todo?.items ?? [];
+  const activeItems = items.filter((item) => !item.done);
+  const completedItems = items.filter((item) => item.done);
 
   return (
     <div className="space-y-4">

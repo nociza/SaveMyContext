@@ -98,6 +98,7 @@ const ACTION_ICON_PATHS: Record<number, string> = {
 const ACTION_ICON_SIZES = [16, 32, 48, 128] as const;
 const syncIconImageData = new Map<number, ImageData>();
 let actionIconMode: "default" | "syncing" = "default";
+let actionBadgeUpdateSequence = 0;
 
 function refreshedProcessingLastError(status: SyncStatus, pendingCount: number): string | null {
   if (status.processingInProgress) {
@@ -292,11 +293,25 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function syncActionBadge(status: SyncStatus): Promise<void> {
-  await syncActionIcon(status);
+  const sequence = (actionBadgeUpdateSequence += 1);
+  try {
+    await syncActionIcon(status);
+  } catch (error) {
+    console.warn("SaveMyContext action icon update failed", error);
+  }
+  if (sequence !== actionBadgeUpdateSequence) {
+    return;
+  }
 
   if (status.providerDriftAlert) {
     await chrome.action.setBadgeBackgroundColor({ color: "#BD5D38" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setBadgeText({ text: "!" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setTitle({
       title: `SaveMyContext: Provider drift suspected for ${status.providerDriftAlert.provider}. Open the extension for details.`
     });
@@ -305,7 +320,13 @@ async function syncActionBadge(status: SyncStatus): Promise<void> {
 
   if (status.historySyncInProgress) {
     await chrome.action.setBadgeBackgroundColor({ color: "#0B8C88" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setBadgeText({ text: "…" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setTitle({
       title: `SaveMyContext: History sync running for ${formatProviderList(
         status.historySyncActiveProviders,
@@ -317,7 +338,13 @@ async function syncActionBadge(status: SyncStatus): Promise<void> {
 
   if (status.processingInProgress) {
     await chrome.action.setBadgeBackgroundColor({ color: "#16324B" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setBadgeText({ text: "AI" });
+    if (sequence !== actionBadgeUpdateSequence) {
+      return;
+    }
     await chrome.action.setTitle({
       title: `SaveMyContext: AI processing running through ${status.processingProvider ?? "provider"}.`
     });
@@ -325,6 +352,9 @@ async function syncActionBadge(status: SyncStatus): Promise<void> {
   }
 
   await chrome.action.setBadgeText({ text: "" });
+  if (sequence !== actionBadgeUpdateSequence) {
+    return;
+  }
   await chrome.action.setTitle({ title: "SaveMyContext" });
 }
 

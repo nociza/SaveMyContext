@@ -641,7 +641,7 @@ test("runs queued AI processing from the popup through the signed-in provider ta
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
-      await optionsPage.locator("#auto-sync-history").setChecked(true);
+      await optionsPage.locator("#auto-sync-history").setChecked(false);
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });
@@ -815,11 +815,11 @@ test("runs queued AI processing from the popup through the signed-in provider ta
             const sessions = (await response.json()) as Array<{
               id: string;
               external_session_id: string;
-              category: string | null;
+              pile_slug: string | null;
             }>;
-            const firstCategory = sessions.find((session) => session.external_session_id === pendingSessionId)?.category ?? null;
+            const firstCategory = sessions.find((session) => session.external_session_id === pendingSessionId)?.pile_slug ?? null;
             const secondCategory =
-              sessions.find((session) => session.external_session_id === secondPendingSessionId)?.category ?? null;
+              sessions.find((session) => session.external_session_id === secondPendingSessionId)?.pile_slug ?? null;
             return `${firstCategory ?? "null"}:${secondCategory ?? "null"}`;
           },
           {
@@ -833,34 +833,34 @@ test("runs queued AI processing from the popup through the signed-in provider ta
       const sessions = (await sessionsResponse.json()) as Array<{
         id: string;
         external_session_id: string;
-        category: string | null;
+        pile_slug: string | null;
       }>;
       const matchedSession = sessions.find((session) => session.external_session_id === pendingSessionId);
       const matchedSecondSession = sessions.find((session) => session.external_session_id === secondPendingSessionId);
-      expect(matchedSession?.category).toBe("journal");
-      expect(matchedSecondSession?.category).toBe("factual");
+      expect(matchedSession?.pile_slug).toBe("journal");
+      expect(matchedSecondSession?.pile_slug).toBe("factual");
 
       const sessionResponse = await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`);
       expect(sessionResponse.ok()).toBeTruthy();
       const persisted = (await sessionResponse.json()) as {
-        category: string | null;
+        pile_slug: string | null;
         journal_entry: string | null;
         classification_reason: string | null;
       };
 
-      expect(persisted.category).toBe("journal");
+      expect(persisted.pile_slug).toBe("journal");
       expect(persisted.classification_reason).toContain("personal planning");
       expect(persisted.journal_entry).toContain("Planned the next day");
 
       const secondSessionResponse = await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSecondSession?.id}`);
       expect(secondSessionResponse.ok()).toBeTruthy();
       const secondPersisted = (await secondSessionResponse.json()) as {
-        category: string | null;
+        pile_slug: string | null;
         triplets: Array<{ subject: string; predicate: string; object: string }>;
         classification_reason: string | null;
       };
 
-      expect(secondPersisted.category).toBe("factual");
+      expect(secondPersisted.pile_slug).toBe("factual");
       expect(secondPersisted.classification_reason).toContain("technical explanation");
       expect(secondPersisted.triplets).toEqual(
         expect.arrayContaining([
@@ -995,7 +995,7 @@ test("salvages a partial batched AI processing reply and continues with the rema
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
-      await optionsPage.locator("#auto-sync-history").setChecked(true);
+      await optionsPage.locator("#auto-sync-history").setChecked(false);
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });
@@ -1171,11 +1171,11 @@ test("salvages a partial batched AI processing reply and continues with the rema
             }
             const sessions = (await response.json()) as Array<{
               external_session_id: string;
-              category: string | null;
+              pile_slug: string | null;
             }>;
-            const firstCategory = sessions.find((session) => session.external_session_id === firstPendingSessionId)?.category ?? null;
+            const firstCategory = sessions.find((session) => session.external_session_id === firstPendingSessionId)?.pile_slug ?? null;
             const secondCategory =
-              sessions.find((session) => session.external_session_id === secondPendingSessionId)?.category ?? null;
+              sessions.find((session) => session.external_session_id === secondPendingSessionId)?.pile_slug ?? null;
             return `${firstCategory ?? "null"}:${secondCategory ?? "null"}`;
           },
           {
@@ -1285,7 +1285,7 @@ test("repairs malformed processing JSON by retrying in the provider tab", async 
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
-      await optionsPage.locator("#auto-sync-history").setChecked(true);
+      await optionsPage.locator("#auto-sync-history").setChecked(false);
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });
@@ -1422,9 +1422,9 @@ test("repairs malformed processing JSON by retrying in the provider tab", async 
             const sessions = (await response.json()) as Array<{
               id: string;
               external_session_id: string;
-              category: string | null;
+              pile_slug: string | null;
             }>;
-            return sessions.find((session) => session.external_session_id === pendingSessionId)?.category ?? null;
+            return sessions.find((session) => session.external_session_id === pendingSessionId)?.pile_slug ?? null;
           },
           {
             message: "Waiting for the extension worker to repair and complete queued AI processing."
@@ -1437,10 +1437,10 @@ test("repairs malformed processing JSON by retrying in the provider tab", async 
       const sessions = (await sessionResponse.json()) as Array<{
         id: string;
         external_session_id: string;
-        category: string | null;
+        pile_slug: string | null;
       }>;
       const matchedSession = sessions.find((session) => session.external_session_id === pendingSessionId);
-      expect(matchedSession?.category).toBe("journal");
+      expect(matchedSession?.pile_slug).toBe("journal");
 
       expect(observedPrompts).toHaveLength(2);
       expect(observedPrompts[0]).toContain("Use fast mode.");
@@ -1526,7 +1526,7 @@ test("waits for provider generation to finish before attempting JSON repair", as
       const optionsPage = await context.newPage();
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
-      await optionsPage.locator("#auto-sync-history").setChecked(true);
+      await optionsPage.locator("#auto-sync-history").setChecked(false);
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });
@@ -1673,9 +1673,9 @@ test("waits for provider generation to finish before attempting JSON repair", as
             const sessions = (await response.json()) as Array<{
               id: string;
               external_session_id: string;
-              category: string | null;
+              pile_slug: string | null;
             }>;
-            return sessions.find((session) => session.external_session_id === pendingSessionId)?.category ?? null;
+            return sessions.find((session) => session.external_session_id === pendingSessionId)?.pile_slug ?? null;
           },
           {
             timeout: 25_000,
@@ -2284,14 +2284,17 @@ test("surfaces provider drift alerts when Gemini history shapes change", async (
           }
         });
 
-      const badge = await serviceWorker.evaluate(async () => {
-        return {
-          text: await chrome.action.getBadgeText({}),
-          title: await chrome.action.getTitle({})
-        };
-      });
-      expect(badge.text).toBe("!");
-      expect(badge.title).toContain("Provider drift suspected for gemini");
+      await eventually
+        .poll(async () =>
+          serviceWorker.evaluate(async () => ({
+            text: await chrome.action.getBadgeText({}),
+            title: await chrome.action.getTitle({})
+          }))
+        )
+        .toMatchObject({
+          text: "!",
+          title: expect.stringContaining("Provider drift suspected for gemini")
+        });
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -3044,14 +3047,17 @@ test("surfaces provider drift alerts when Grok history shapes change", async ({}
           }
         });
 
-      const badge = await serviceWorker.evaluate(async () => {
-        return {
-          text: await chrome.action.getBadgeText({}),
-          title: await chrome.action.getTitle({})
-        };
-      });
-      expect(badge.text).toBe("!");
-      expect(badge.title).toContain("Provider drift suspected for grok");
+      await eventually
+        .poll(async () =>
+          serviceWorker.evaluate(async () => ({
+            text: await chrome.action.getBadgeText({}),
+            title: await chrome.action.getTitle({})
+          }))
+        )
+        .toMatchObject({
+          text: "!",
+          title: expect.stringContaining("Provider drift suspected for grok")
+        });
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -3225,10 +3231,10 @@ test("renders the dashboard with backend corpus, graph, and storage statistics",
       await expect(dashboardPage.locator("#metric-triplets")).toHaveText("3");
       await expect(dashboardPage.locator("#metric-entities")).toHaveText("6");
       await expect(dashboardPage.locator("#metric-edges")).toHaveText("3");
-      await expect(dashboardPage.locator("#category-total-label")).toContainText("3 indexed sessions");
-      await expect(dashboardPage.locator("#category-list")).toContainText("Factual");
-      await expect(dashboardPage.locator("#category-list")).toContainText("Ideas");
-      await expect(dashboardPage.locator("#category-list")).toContainText("To-Do");
+      await expect(dashboardPage.locator("#pile-total-label")).toContainText("3 indexed sessions");
+      await expect(dashboardPage.locator("#pile-list")).toContainText("Factual");
+      await expect(dashboardPage.locator("#pile-list")).toContainText("Ideas");
+      await expect(dashboardPage.locator("#pile-list")).toContainText("To-Do");
       await expect(dashboardPage.locator("#graph-summary")).toContainText("6 entities, 3 edges");
       await expect(dashboardPage.locator("#top-entities")).toContainText("Rust");
       await expect(dashboardPage.locator("#system-auth-mode")).toHaveText("bootstrap_local");

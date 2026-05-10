@@ -10,6 +10,27 @@ describe("backend validation helpers", () => {
     });
   });
 
+  function remoteSettings() {
+    return {
+      backendUrl: "https://notes.example.com/",
+      backendToken: "savemycontext_pat_test",
+      autoSyncHistory: true,
+      indexingMode: "all" as const,
+      triggerWords: ["lorem"],
+      blacklistWords: [],
+      discardWordsEnabled: true,
+      discardWords: [],
+      selectionCaptureEnabled: false,
+      contextSuggestionsEnabled: false,
+      contextSuggestionsFloatingButtonEnabled: true,
+      enabledProviders: {
+        chatgpt: true,
+        gemini: true,
+        grok: true
+      }
+    };
+  }
+
   it("treats localhost as local", async () => {
     const { isLocalBackendUrl } = await import("../src/background/backend");
     expect(isLocalBackendUrl(new URL("http://127.0.0.1:18888"))).toBe(true);
@@ -320,6 +341,187 @@ describe("backend validation helpers", () => {
 
     expect(summary.piles).toEqual([]);
     expect(summary.extra_piles).toEqual([]);
+  });
+
+  it("normalizes missing shared to-do arrays and counters", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          title: "Shared checklist",
+          content: ""
+        })
+      }))
+    );
+
+    const { fetchTodoList } = await import("../src/background/backend");
+    const todo = await fetchTodoList(remoteSettings());
+
+    expect(todo.items).toEqual([]);
+    expect(todo.active_count).toBe(0);
+    expect(todo.completed_count).toBe(0);
+    expect(todo.total_count).toBe(0);
+    expect(todo.git.repository_ready).toBe(false);
+  });
+
+  it("normalizes missing nested pile workspace arrays", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          pile_slug: "journal",
+          scope_kind: "default",
+          scope_label: "journal",
+          dominant_pile_slug: "journal",
+          journal: {
+            timeline: [
+              {
+                session_id: "session-1",
+                entry: "A day in motion"
+              }
+            ],
+            locations: [
+              {
+                label: "Lisbon",
+                count: 1
+              }
+            ]
+          },
+          ideas: {
+            nodes: [
+              {
+                id: "idea-1",
+                session_id: "session-2",
+                core_idea: "Use typed boundaries"
+              }
+            ],
+            edges: [
+              {
+                id: "edge-1",
+                source: "idea-1",
+                target: "idea-2",
+                relation: "builds_on"
+              }
+            ]
+          },
+          factual: {
+            backlog: [
+              {
+                session_id: "session-3",
+                title: "Fact"
+              }
+            ],
+            linked_sources: [
+              {
+                session_id: "session-4",
+                title: "Source"
+              }
+            ]
+          }
+        })
+      }))
+    );
+
+    const { fetchPileViews } = await import("../src/background/backend");
+    const views = await fetchPileViews(remoteSettings(), "journal");
+
+    expect(views.journal?.timeline[0].people).toEqual([]);
+    expect(views.journal?.timeline[0].travel_path).toEqual([]);
+    expect(views.journal?.locations[0].session_ids).toEqual([]);
+    expect(views.journal?.people).toEqual([]);
+    expect(views.ideas?.nodes[0].claims).toEqual([]);
+    expect(views.ideas?.edges[0].session_ids).toEqual([]);
+    expect(views.factual?.backlog[0].keywords).toEqual([]);
+    expect(views.factual?.backlog[0].linked_from).toEqual([]);
+    expect(views.factual?.linked_sources[0].matched_terms).toEqual([]);
+  });
+
+  it("normalizes missing graph path arrays", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          pile_slug: "factual",
+          scope_kind: "default",
+          scope_label: "factual",
+          dominant_pile_slug: "factual",
+          source: "node-a",
+          target: "node-b"
+        })
+      }))
+    );
+
+    const { fetchPileGraphPath } = await import("../src/background/backend");
+    const path = await fetchPileGraphPath(remoteSettings(), "factual", "node-a", "node-b");
+
+    expect(path.paths).toEqual([]);
+  });
+
+  it("normalizes missing pile stats arrays and counters", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          pile_slug: "factual",
+          scope_kind: "default",
+          scope_label: "factual",
+          dominant_pile_slug: "factual"
+        })
+      }))
+    );
+
+    const { fetchPileStats } = await import("../src/background/backend");
+    const stats = await fetchPileStats(remoteSettings(), "factual");
+
+    expect(stats.total_sessions).toBe(0);
+    expect(stats.provider_counts).toEqual([]);
+    expect(stats.activity).toEqual([]);
+    expect(stats.top_tags).toEqual([]);
+    expect(stats.top_entities).toEqual([]);
+    expect(stats.top_predicates).toEqual([]);
+  });
+
+  it("normalizes missing pile graph arrays", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          pile_slug: "factual",
+          scope_kind: "default",
+          scope_label: "factual",
+          dominant_pile_slug: "factual",
+          nodes: [
+            {
+              id: "node-1",
+              label: "Node",
+              kind: "entity"
+            }
+          ],
+          edges: [
+            {
+              id: "edge-1",
+              source: "node-1",
+              target: "node-2"
+            }
+          ]
+        })
+      }))
+    );
+
+    const { fetchPileGraph } = await import("../src/background/backend");
+    const graph = await fetchPileGraph(remoteSettings(), "factual");
+
+    expect(graph.node_count).toBe(1);
+    expect(graph.edge_count).toBe(1);
+    expect(graph.nodes[0].session_ids).toEqual([]);
+    expect(graph.nodes[0].evidence).toEqual([]);
+    expect(graph.edges[0].session_ids).toEqual([]);
+    expect(graph.edges[0].evidence).toEqual([]);
   });
 
   it("fetches knowledge search results with encoded query params", async () => {

@@ -8,7 +8,9 @@ import type {
   BackendDashboardSummary,
   BackendDiscardedSessionsResponse,
   BackendExplorerGraphEdge,
+  BackendExplorerGraphPath,
   BackendExplorerGraphNode,
+  BackendJournalGroup,
   BackendGraphEdge,
   BackendGraphNode,
   BackendPileRead,
@@ -88,6 +90,237 @@ async function fetchBackendJson<TResponse>(
     throw new Error(`Backend request failed with ${response.status}.`);
   }
   return (await response.json()) as TResponse;
+}
+
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeSessionListItem<TSession extends BackendSessionListItem>(session: TSession): TSession {
+  return {
+    ...session,
+    custom_tags: arrayOrEmpty(session.custom_tags),
+    extra_piles: arrayOrEmpty(session.extra_piles)
+  };
+}
+
+function normalizeSessionRead<TSession extends BackendSessionRead>(session: TSession): TSession {
+  return {
+    ...normalizeSessionListItem(session),
+    messages: arrayOrEmpty(session.messages),
+    triplets: arrayOrEmpty(session.triplets)
+  };
+}
+
+function normalizeSessionNoteRead(note: BackendSessionNoteRead): BackendSessionNoteRead {
+  return {
+    ...normalizeSessionRead(note),
+    related_entities: arrayOrEmpty(note.related_entities),
+    word_count: note.word_count ?? 0
+  };
+}
+
+function normalizeTodoList(todo: BackendTodoListRead): BackendTodoListRead {
+  const items = arrayOrEmpty(todo.items);
+  const activeCount = items.filter((item) => !item.done).length;
+  const completedCount = items.filter((item) => item.done).length;
+  const git = todo.git;
+  return {
+    ...todo,
+    title: todo.title ?? "Shared checklist",
+    content: todo.content ?? "",
+    items,
+    active_count: todo.active_count ?? activeCount,
+    completed_count: todo.completed_count ?? completedCount,
+    total_count: todo.total_count ?? items.length,
+    git: {
+      ...(git ?? {}),
+      versioning_enabled: git?.versioning_enabled ?? false,
+      available: git?.available ?? false,
+      repository_ready: git?.repository_ready ?? false
+    }
+  };
+}
+
+function normalizePileStats(stats: BackendPileStats, fallbackPile: BuiltInPileSlug, fallbackLabel: string): BackendPileStats {
+  return {
+    ...stats,
+    pile_slug: stats.pile_slug ?? fallbackPile,
+    scope_kind: stats.scope_kind ?? "default",
+    scope_label: stats.scope_label ?? fallbackLabel,
+    dominant_pile_slug: stats.dominant_pile_slug ?? fallbackPile,
+    total_sessions: stats.total_sessions ?? 0,
+    total_messages: stats.total_messages ?? 0,
+    total_triplets: stats.total_triplets ?? 0,
+    latest_updated_at: stats.latest_updated_at ?? null,
+    avg_messages_per_session: stats.avg_messages_per_session ?? 0,
+    avg_triplets_per_session: stats.avg_triplets_per_session ?? 0,
+    notes_with_share_post: stats.notes_with_share_post ?? 0,
+    notes_with_idea_summary: stats.notes_with_idea_summary ?? 0,
+    notes_with_journal_entry: stats.notes_with_journal_entry ?? 0,
+    notes_with_todo_summary: stats.notes_with_todo_summary ?? 0,
+    built_in_pile_counts: arrayOrEmpty(stats.built_in_pile_counts),
+    provider_counts: arrayOrEmpty(stats.provider_counts),
+    activity: arrayOrEmpty(stats.activity),
+    top_tags: arrayOrEmpty(stats.top_tags),
+    top_entities: arrayOrEmpty(stats.top_entities),
+    top_predicates: arrayOrEmpty(stats.top_predicates)
+  };
+}
+
+function normalizeExplorerGraphNode(node: BackendExplorerGraphNode): BackendExplorerGraphNode {
+  const evidence = arrayOrEmpty(node.evidence);
+  return {
+    ...node,
+    size: node.size ?? 1,
+    session_ids: arrayOrEmpty(node.session_ids),
+    degree: node.degree ?? 0,
+    centrality: node.centrality ?? 0,
+    evidence_count: node.evidence_count ?? evidence.length,
+    evidence
+  };
+}
+
+function normalizeExplorerGraphEdge(edge: BackendExplorerGraphEdge): BackendExplorerGraphEdge {
+  const evidence = arrayOrEmpty(edge.evidence);
+  return {
+    ...edge,
+    weight: edge.weight ?? 1,
+    session_ids: arrayOrEmpty(edge.session_ids),
+    predicate_count: edge.predicate_count ?? 1,
+    evidence_count: edge.evidence_count ?? evidence.length,
+    evidence
+  };
+}
+
+function normalizePileGraph(graph: BackendPileGraph, fallbackPile: BuiltInPileSlug, fallbackLabel: string): BackendPileGraph {
+  const nodes = arrayOrEmpty(graph.nodes).map(normalizeExplorerGraphNode);
+  const edges = arrayOrEmpty(graph.edges).map(normalizeExplorerGraphEdge);
+  return {
+    ...graph,
+    pile_slug: graph.pile_slug ?? fallbackPile,
+    scope_kind: graph.scope_kind ?? "default",
+    scope_label: graph.scope_label ?? fallbackLabel,
+    dominant_pile_slug: graph.dominant_pile_slug ?? fallbackPile,
+    node_count: graph.node_count ?? nodes.length,
+    edge_count: graph.edge_count ?? edges.length,
+    nodes,
+    edges
+  };
+}
+
+function normalizeJournalGroup(group: BackendJournalGroup): BackendJournalGroup {
+  return {
+    ...group,
+    session_ids: arrayOrEmpty(group.session_ids),
+    dates: arrayOrEmpty(group.dates),
+    snippets: arrayOrEmpty(group.snippets)
+  };
+}
+
+function normalizePileViews(views: BackendPileViews, fallbackPile: BuiltInPileSlug, fallbackLabel: string): BackendPileViews {
+  return {
+    ...views,
+    pile_slug: views.pile_slug ?? fallbackPile,
+    scope_kind: views.scope_kind ?? "default",
+    scope_label: views.scope_label ?? fallbackLabel,
+    dominant_pile_slug: views.dominant_pile_slug ?? fallbackPile,
+    journal: views.journal
+      ? {
+          ...views.journal,
+          timeline: arrayOrEmpty(views.journal.timeline).map((item) => ({
+            ...item,
+            people: arrayOrEmpty(item.people),
+            entities: arrayOrEmpty(item.entities),
+            activities: arrayOrEmpty(item.activities),
+            locations: arrayOrEmpty(item.locations),
+            travel_path: arrayOrEmpty(item.travel_path)
+          })),
+          locations: arrayOrEmpty(views.journal.locations).map(normalizeJournalGroup),
+          people: arrayOrEmpty(views.journal.people).map(normalizeJournalGroup),
+          entities: arrayOrEmpty(views.journal.entities).map(normalizeJournalGroup),
+          activities: arrayOrEmpty(views.journal.activities).map(normalizeJournalGroup)
+        }
+      : views.journal,
+    ideas: views.ideas
+      ? {
+          ...views.ideas,
+          nodes: arrayOrEmpty(views.ideas.nodes).map((node) => ({
+            ...node,
+            reasoning_steps: arrayOrEmpty(node.reasoning_steps),
+            related_facts: arrayOrEmpty(node.related_facts),
+            claims: arrayOrEmpty(node.claims),
+            next_steps: arrayOrEmpty(node.next_steps)
+          })),
+          edges: arrayOrEmpty(views.ideas.edges).map((edge) => ({
+            ...edge,
+            session_ids: arrayOrEmpty(edge.session_ids)
+          })),
+          threads: arrayOrEmpty(views.ideas.threads).map(normalizeJournalGroup),
+          contributors: arrayOrEmpty(views.ideas.contributors).map(normalizeJournalGroup),
+          facts: arrayOrEmpty(views.ideas.facts).map(normalizeJournalGroup)
+        }
+      : views.ideas,
+    factual: views.factual
+      ? {
+          ...views.factual,
+          backlog: arrayOrEmpty(views.factual.backlog).map((item) => ({
+            ...item,
+            keywords: arrayOrEmpty(item.keywords),
+            entities: arrayOrEmpty(item.entities),
+            triplet_count: item.triplet_count ?? 0,
+            linked_from: arrayOrEmpty(item.linked_from).map((source) => ({
+              ...source,
+              matched_terms: arrayOrEmpty(source.matched_terms)
+            }))
+          })),
+          keywords: arrayOrEmpty(views.factual.keywords),
+          entities: arrayOrEmpty(views.factual.entities),
+          linked_sources: arrayOrEmpty(views.factual.linked_sources).map((source) => ({
+            ...source,
+            matched_terms: arrayOrEmpty(source.matched_terms)
+          }))
+        }
+      : views.factual
+  };
+}
+
+function normalizeExplorerGraphPath(path: BackendExplorerGraphPath): BackendExplorerGraphPath {
+  const nodes = arrayOrEmpty(path.nodes).map(normalizeExplorerGraphNode);
+  const edges = arrayOrEmpty(path.edges).map(normalizeExplorerGraphEdge);
+  return {
+    ...path,
+    node_ids: arrayOrEmpty(path.node_ids),
+    edge_ids: arrayOrEmpty(path.edge_ids),
+    nodes,
+    edges,
+    hop_count: path.hop_count ?? Math.max(nodes.length - 1, 0),
+    score: path.score ?? 0,
+    evidence_session_ids: arrayOrEmpty(path.evidence_session_ids)
+  };
+}
+
+function normalizePileGraphPath(path: BackendPileGraphPath, fallbackPile: BuiltInPileSlug, fallbackLabel: string): BackendPileGraphPath {
+  return {
+    ...path,
+    pile_slug: path.pile_slug ?? fallbackPile,
+    scope_kind: path.scope_kind ?? "default",
+    scope_label: path.scope_label ?? fallbackLabel,
+    dominant_pile_slug: path.dominant_pile_slug ?? fallbackPile,
+    paths: arrayOrEmpty(path.paths).map(normalizeExplorerGraphPath)
+  };
+}
+
+function normalizeSearchResponse(response: BackendSearchResponse): BackendSearchResponse {
+  const results = arrayOrEmpty(response.results).map((result) => ({
+    ...result,
+    extra_piles: arrayOrEmpty(result.extra_piles)
+  }));
+  return {
+    ...response,
+    count: response.count ?? results.length,
+    results
+  };
 }
 
 export function buildBackendHeaders(settings: ExtensionSettings): Record<string, string> {
@@ -219,7 +452,13 @@ export async function fetchNextProcessingTask(
   if (!response.ok) {
     throw new Error(`Processing task request failed with ${response.status}.`);
   }
-  return (await response.json()) as ProcessingTaskResponse;
+  const task = (await response.json()) as ProcessingTaskResponse;
+  const tasks = arrayOrEmpty(task.tasks);
+  return {
+    ...task,
+    tasks,
+    task_count: task.task_count ?? tasks.length
+  };
 }
 
 export async function completeProcessingTask(
@@ -245,7 +484,13 @@ export async function completeProcessingTask(
     const details = await response.text();
     throw new Error(`Processing completion failed with ${response.status}: ${details.slice(0, 300)}`);
   }
-  return (await response.json()) as ProcessingCompleteResponse;
+  const result = (await response.json()) as ProcessingCompleteResponse;
+  const results = arrayOrEmpty(result.results);
+  return {
+    ...result,
+    processed_count: result.processed_count ?? results.filter((item) => item.processed).length,
+    results
+  };
 }
 
 export async function fetchDashboardSummary(
@@ -271,7 +516,7 @@ export async function fetchTodoList(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendTodoListRead> {
-  return fetchBackendJson<BackendTodoListRead>(settings, "/todo", capabilities);
+  return normalizeTodoList(await fetchBackendJson<BackendTodoListRead>(settings, "/todo", capabilities));
 }
 
 export async function updateTodoList(
@@ -288,21 +533,30 @@ export async function updateTodoList(
     const details = await response.text();
     throw new Error(`Shared to-do update failed with ${response.status}: ${details.slice(0, 300)}`);
   }
-  return (await response.json()) as BackendTodoListRead;
+  return normalizeTodoList((await response.json()) as BackendTodoListRead);
 }
 
 export async function fetchPiles(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendPileRead[]> {
-  return fetchBackendJson<BackendPileRead[]>(settings, "/piles", capabilities);
+  const piles = await fetchBackendJson<BackendPileRead[]>(settings, "/piles", capabilities);
+  return arrayOrEmpty(piles).map((pile) => ({
+    ...pile,
+    attributes: arrayOrEmpty(pile.attributes),
+    pipeline_config: pile.pipeline_config ?? {}
+  }));
 }
 
 export async function fetchPromptTemplates(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendPromptTemplateRead[]> {
-  return fetchBackendJson<BackendPromptTemplateRead[]>(settings, "/prompts/templates", capabilities);
+  const templates = await fetchBackendJson<BackendPromptTemplateRead[]>(settings, "/prompts/templates", capabilities);
+  return arrayOrEmpty(templates).map((template) => ({
+    ...template,
+    variables: arrayOrEmpty(template.variables)
+  }));
 }
 
 export interface PileCreatePayload {
@@ -429,11 +683,17 @@ export async function fetchDiscardedSessions(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendDiscardedSessionsResponse> {
-  return fetchBackendJson<BackendDiscardedSessionsResponse>(
+  const response = await fetchBackendJson<BackendDiscardedSessionsResponse>(
     settings,
     "/piles/discarded/sessions",
     capabilities
   );
+  const items = arrayOrEmpty(response.items);
+  return {
+    ...response,
+    count: response.count ?? items.length,
+    items
+  };
 }
 
 export async function recoverDiscardedSession(
@@ -456,7 +716,7 @@ export async function recoverDiscardedSession(
     const details = await response.text();
     throw new Error(`Recover discarded session failed with ${response.status}: ${details.slice(0, 300)}`);
   }
-  return (await response.json()) as BackendSessionRead;
+  return normalizeSessionRead((await response.json()) as BackendSessionRead);
 }
 
 export async function discardSession(
@@ -480,21 +740,30 @@ export async function discardSession(
     const details = await response.text();
     throw new Error(`Manual discard failed with ${response.status}: ${details.slice(0, 300)}`);
   }
-  return (await response.json()) as BackendSessionRead;
+  return normalizeSessionRead((await response.json()) as BackendSessionRead);
 }
 
 export async function fetchGraphNodes(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendGraphNode[]> {
-  return fetchBackendJson<BackendGraphNode[]>(settings, "/graph/nodes", capabilities);
+  const nodes = await fetchBackendJson<BackendGraphNode[]>(settings, "/graph/nodes", capabilities);
+  return arrayOrEmpty(nodes).map((node) => ({
+    ...node,
+    degree: node.degree ?? 0
+  }));
 }
 
 export async function fetchGraphEdges(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
 ): Promise<BackendGraphEdge[]> {
-  return fetchBackendJson<BackendGraphEdge[]>(settings, "/graph/edges", capabilities);
+  const edges = await fetchBackendJson<BackendGraphEdge[]>(settings, "/graph/edges", capabilities);
+  return arrayOrEmpty(edges).map((edge) => ({
+    ...edge,
+    support_count: edge.support_count ?? 0,
+    session_ids: arrayOrEmpty(edge.session_ids)
+  }));
 }
 
 export async function fetchSessions(
@@ -517,7 +786,8 @@ export async function fetchSessions(
     search.set("extra_pile", filters.extraPile);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendSessionListItem[]>(settings, `/sessions${query ? `?${query}` : ""}`, capabilities);
+  const sessions = await fetchBackendJson<BackendSessionListItem[]>(settings, `/sessions${query ? `?${query}` : ""}`, capabilities);
+  return arrayOrEmpty(sessions).map(normalizeSessionListItem);
 }
 
 export async function fetchSession(
@@ -525,7 +795,7 @@ export async function fetchSession(
   sessionId: string,
   capabilities?: BackendCapabilities
 ): Promise<BackendSessionRead> {
-  return fetchBackendJson<BackendSessionRead>(settings, `/sessions/${encodeURIComponent(sessionId)}`, capabilities);
+  return normalizeSessionRead(await fetchBackendJson<BackendSessionRead>(settings, `/sessions/${encodeURIComponent(sessionId)}`, capabilities));
 }
 
 export async function fetchSessionNote(
@@ -533,7 +803,7 @@ export async function fetchSessionNote(
   sessionId: string,
   capabilities?: BackendCapabilities
 ): Promise<BackendSessionNoteRead> {
-  return fetchBackendJson<BackendSessionNoteRead>(settings, `/notes/${encodeURIComponent(sessionId)}`, capabilities);
+  return normalizeSessionNoteRead(await fetchBackendJson<BackendSessionNoteRead>(settings, `/notes/${encodeURIComponent(sessionId)}`, capabilities));
 }
 
 export async function fetchPileStats(
@@ -553,11 +823,12 @@ export async function fetchPileStats(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileStats>(
+  const stats = await fetchBackendJson<BackendPileStats>(
     settings,
     `/piles/${encodeURIComponent(pile)}/stats${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileStats(stats, pile, pile);
 }
 
 export async function fetchCustomPileStats(
@@ -577,11 +848,12 @@ export async function fetchCustomPileStats(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileStats>(
+  const stats = await fetchBackendJson<BackendPileStats>(
     settings,
     `/extra-piles/${encodeURIComponent(name)}/stats${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileStats(stats, stats.dominant_pile_slug ?? "factual", name);
 }
 
 export async function fetchPileGraph(
@@ -601,11 +873,12 @@ export async function fetchPileGraph(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileGraph>(
+  const graph = await fetchBackendJson<BackendPileGraph>(
     settings,
     `/piles/${encodeURIComponent(pile)}/graph${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileGraph(graph, pile, pile);
 }
 
 export async function fetchPileViews(
@@ -625,11 +898,12 @@ export async function fetchPileViews(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileViews>(
+  const views = await fetchBackendJson<BackendPileViews>(
     settings,
     `/piles/${encodeURIComponent(pile)}/views${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileViews(views, pile, pile);
 }
 
 export async function fetchCustomPileGraph(
@@ -649,11 +923,12 @@ export async function fetchCustomPileGraph(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileGraph>(
+  const graph = await fetchBackendJson<BackendPileGraph>(
     settings,
     `/extra-piles/${encodeURIComponent(name)}/graph${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileGraph(graph, graph.dominant_pile_slug ?? "factual", name);
 }
 
 export async function fetchCustomPileViews(
@@ -673,11 +948,12 @@ export async function fetchCustomPileViews(
     search.append("session_id", sessionId);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendPileViews>(
+  const views = await fetchBackendJson<BackendPileViews>(
     settings,
     `/extra-piles/${encodeURIComponent(name)}/views${query ? `?${query}` : ""}`,
     capabilities
   );
+  return normalizePileViews(views, views.dominant_pile_slug ?? "factual", name);
 }
 
 export async function fetchPileGraphPath(
@@ -698,11 +974,12 @@ export async function fetchPileGraphPath(
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
   }
-  return fetchBackendJson<BackendPileGraphPath>(
+  const path = await fetchBackendJson<BackendPileGraphPath>(
     settings,
     `/piles/${encodeURIComponent(pile)}/graph/path?${search.toString()}`,
     capabilities
   );
+  return normalizePileGraphPath(path, pile, pile);
 }
 
 export async function fetchCustomPileGraphPath(
@@ -723,11 +1000,12 @@ export async function fetchCustomPileGraphPath(
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
   }
-  return fetchBackendJson<BackendPileGraphPath>(
+  const path = await fetchBackendJson<BackendPileGraphPath>(
     settings,
     `/extra-piles/${encodeURIComponent(name)}/graph/path?${search.toString()}`,
     capabilities
   );
+  return normalizePileGraphPath(path, path.dominant_pile_slug ?? "factual", name);
 }
 
 export async function fetchExplorerSearch(
@@ -758,7 +1036,7 @@ export async function fetchExplorerSearch(
   for (const kind of options?.kinds ?? []) {
     search.append("kind", kind);
   }
-  return fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities);
+  return normalizeSearchResponse(await fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities));
 }
 
 export async function fetchExtraPiles(
@@ -777,11 +1055,12 @@ export async function fetchExtraPiles(
     search.set("pile", filters.pile);
   }
   const query = search.toString();
-  return fetchBackendJson<BackendExtraPileSummary[]>(
+  const extraPiles = await fetchBackendJson<BackendExtraPileSummary[]>(
     settings,
     `/extra-piles${query ? `?${query}` : ""}`,
     capabilities
   );
+  return arrayOrEmpty(extraPiles);
 }
 
 export async function updateSessionExtraPiles(
@@ -801,7 +1080,7 @@ export async function updateSessionExtraPiles(
     const details = await response.text();
     throw new Error(`Session extra piles update failed with ${response.status}: ${details.slice(0, 300)}`);
   }
-  return (await response.json()) as BackendSessionListItem;
+  return normalizeSessionListItem((await response.json()) as BackendSessionListItem);
 }
 
 export async function fetchKnowledgeSearch(
@@ -824,7 +1103,7 @@ export async function fetchKnowledgeSearch(
   for (const kind of options?.kinds ?? []) {
     search.append("kind", kind);
   }
-  return fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities);
+  return normalizeSearchResponse(await fetchBackendJson<BackendSearchResponse>(settings, `/search?${search.toString()}`, capabilities));
 }
 
 export async function updateKnowledgeStoragePath(
