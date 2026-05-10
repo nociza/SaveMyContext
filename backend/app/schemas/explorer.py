@@ -146,6 +146,8 @@ class JournalGroup(BaseModel):
     session_ids: list[str]
     dates: list[str] = Field(default_factory=list)
     snippets: list[str] = Field(default_factory=list)
+    slug: str | None = None
+    kind: str | None = None
 
 
 class JournalViews(BaseModel):
@@ -170,6 +172,9 @@ class IdeaEvolutionNode(BaseModel):
     provider: ProviderName | None = None
     updated_at: datetime | None = None
     thread: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
+    project_source: str | None = None
     core_idea: str
     reasoning_steps: list[str] = Field(default_factory=list)
     related_facts: list[str] = Field(default_factory=list)
@@ -190,6 +195,7 @@ class IdeaEvolutionEdge(BaseModel):
 class IdeaViews(BaseModel):
     nodes: list[IdeaEvolutionNode] = Field(default_factory=list)
     edges: list[IdeaEvolutionEdge] = Field(default_factory=list)
+    projects: list[JournalGroup] = Field(default_factory=list)
     threads: list[JournalGroup] = Field(default_factory=list)
     contributors: list[JournalGroup] = Field(default_factory=list)
     facts: list[JournalGroup] = Field(default_factory=list)

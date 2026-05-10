@@ -11,7 +11,8 @@ from app.models.base import Base
 from app.models.enums import MessageRole, ProviderName
 from app.schemas.ingest import IngestDiffRequest, IngestMessage
 from app.services.ingest import IngestService
-from app.services.processing_worker import ExtensionBrowserProcessingService, immediate_processing_model
+from app.services.idea_projects import IdeaProjectService
+from app.services.processing_worker import ExtensionBrowserProcessingService, PendingProcessingTask, immediate_processing_model
 
 
 @pytest.mark.asyncio
@@ -106,6 +107,48 @@ def test_immediate_processing_model_uses_resolved_openrouter_default(monkeypatch
         assert immediate_processing_model() == DEFAULT_OPENROUTER_MODEL
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_prompt_includes_active_idea_projects(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-projects.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    get_settings.cache_clear()
+
+    try:
+        async with session_factory() as session:
+            await IdeaProjectService(session).create_project(
+                name="Agent Workflow Surfaces",
+                description="Badges, capability pages, and workflow graph ideas.",
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            prompt = await worker._build_prompt(
+                [
+                    PendingProcessingTask(
+                        task_key="task_1",
+                        session_id="session-1",
+                        source_provider="gemini",
+                        source_session_id="source-1",
+                        title="Workflow badge",
+                        transcript="USER: Brainstorm workflow badges.",
+                    )
+                ],
+                current_todo_markdown="# To-Do List\n",
+            )
+
+            assert "Active idea projects" in prompt
+            assert "agent-workflow-surfaces" in prompt
+            assert "Badges, capability pages" in prompt
+    finally:
+        get_settings.cache_clear()
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

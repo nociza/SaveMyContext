@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.models import ChatSession, ProviderName, BuiltInPileSlug
+from app.models import ChatSession, IdeaProject, ProviderName, BuiltInPileSlug
 from app.schemas.explorer import (
     ActivityBucket,
     BuiltInPileCount,
@@ -40,6 +40,7 @@ from app.schemas.explorer import (
 )
 from app.services.graph import entity_id, entity_note_path
 from app.services.extra_piles import has_extra_pile, summarize_extra_piles, visible_custom_tags
+from app.services.idea_projects import IdeaProjectService, best_project_match_for_text, slugify_project_name
 
 
 STOPWORDS = {
@@ -109,6 +110,17 @@ SIMILARITY_GRAPH_NODE_LIMIT = 96
 SIMILARITY_GRAPH_EDGE_LIMIT = 220
 GRAPH_PATH_LIMIT = 4
 GRAPH_PATH_MAX_HOPS = 4
+GENERIC_IDEA_GROUP_LABELS = {
+    "general",
+    "general ideas",
+    "idea",
+    "ideas",
+    "misc",
+    "miscellaneous",
+    "thread",
+    "unassigned",
+    "unthreaded",
+}
 
 
 def session_related_entities(session: ChatSession) -> list[str]:
@@ -246,6 +258,39 @@ def _clean_label(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _idea_project_label(node: IdeaEvolutionNode) -> str:
+    if node.project_name:
+        return node.project_name
+    if node.project_slug:
+        return node.project_slug.replace("-", " ").title()
+    return "Unassigned"
+
+
+def _titleize_label(value: str) -> str:
+    words = re.split(r"[\s_-]+", value.strip())
+    small_words = {"a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with"}
+    titled: list[str] = []
+    for index, word in enumerate(words):
+        cleaned = word.strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.casefold()
+        if index > 0 and lowered in small_words:
+            titled.append(lowered)
+        else:
+            titled.append(cleaned[:1].upper() + cleaned[1:])
+    return " ".join(titled)
+
+
+def _usable_project_label(value: str | None) -> str | None:
+    cleaned = _clean_label(value)
+    if not cleaned:
+        return None
+    if cleaned.casefold() in GENERIC_IDEA_GROUP_LABELS:
+        return None
+    return _titleize_label(cleaned)
+
+
 def _date_label(session: ChatSession, explicit: object | None = None) -> str:
     explicit_text = _clean_label(explicit)
     if explicit_text:
@@ -345,12 +390,14 @@ class ExplorerService:
     ) -> PileViews:
         sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
         related_sessions = await self._all_sessions(provider=provider) if category == BuiltInPileSlug.FACTUAL else []
+        idea_projects = await IdeaProjectService(self.db).list_projects() if category == BuiltInPileSlug.IDEAS else None
         return self._build_views(
             "default",
             category.value,
             sessions,
             fallback_category=category,
             related_sessions=related_sessions,
+            idea_projects=idea_projects,
         )
 
     async def custom_category_graph(
@@ -373,12 +420,14 @@ class ExplorerService:
         sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
         dominant = self._dominant_category(sessions)
         related_sessions = await self._all_sessions(provider=provider) if dominant == BuiltInPileSlug.FACTUAL else []
+        idea_projects = await IdeaProjectService(self.db).list_projects() if dominant == BuiltInPileSlug.IDEAS else None
         return self._build_views(
             "custom",
             name,
             sessions,
             fallback_category=dominant,
             related_sessions=related_sessions,
+            idea_projects=idea_projects,
         )
 
     async def category_graph_path(
@@ -563,6 +612,7 @@ class ExplorerService:
         *,
         fallback_category: BuiltInPileSlug | None,
         related_sessions: list[ChatSession] | None = None,
+        idea_projects: list[IdeaProject] | None = None,
     ) -> PileViews:
         dominant_category = self._dominant_category(sessions, fallback=fallback_category)
         normalized_scope = "custom" if scope_kind == "custom" else "default"
@@ -572,7 +622,7 @@ class ExplorerService:
             scope_label=scope_label,
             dominant_pile_slug=dominant_category,
             journal=self._journal_views(sessions) if dominant_category == BuiltInPileSlug.JOURNAL else None,
-            ideas=self._idea_views(sessions) if dominant_category == BuiltInPileSlug.IDEAS else None,
+            ideas=self._idea_views(sessions, idea_projects=idea_projects) if dominant_category == BuiltInPileSlug.IDEAS else None,
             factual=(
                 self._factual_views(sessions, related_sessions or sessions)
                 if dominant_category == BuiltInPileSlug.FACTUAL
@@ -659,15 +709,52 @@ class ExplorerService:
             )
         return sorted(rows, key=lambda item: (-item.count, item.label.lower()))[:24]
 
-    def _idea_views(self, sessions: list[ChatSession]) -> IdeaViews:
-        nodes: list[IdeaEvolutionNode] = []
-        for session in sorted(sessions, key=lambda item: datetime_sort_key(item.updated_at)):
+    def _idea_views(
+        self,
+        sessions: list[ChatSession],
+        *,
+        idea_projects: list[IdeaProject] | None = None,
+    ) -> IdeaViews:
+        node_inputs: list[dict[str, object]] = []
+        sorted_sessions = sorted(sessions, key=lambda item: datetime_sort_key(item.updated_at))
+        for session in sorted_sessions:
             payload = session.idea_summary if isinstance(session.idea_summary, dict) else _structured_output(session, "idea")
             core = _clean_label(payload.get("core_idea") or payload.get("summary"))
             if not core:
                 core = _compact_snippet(_session_text(session), max_chars=180)
             if not core:
                 continue
+            node_inputs.append(
+                {
+                    "session": session,
+                    "payload": payload,
+                    "core": core,
+                    "suggestion_text": " ".join(
+                        [
+                            session.title or "",
+                            core,
+                            _clean_label(payload.get("thread_hint")),
+                            " ".join(_text_list(payload.get("related_facts"))),
+                            " ".join(_text_list(payload.get("reasoning_steps"))),
+                            session.share_post or "",
+                        ]
+                    ),
+                }
+            )
+
+        suggestion_token_counts = Counter(
+            token
+            for item in node_inputs
+            for token in _tokenize_text(str(item["suggestion_text"]))
+        )
+
+        nodes: list[IdeaEvolutionNode] = []
+        for item in node_inputs:
+            session = item["session"]
+            assert isinstance(session, ChatSession)
+            payload = item["payload"]
+            assert isinstance(payload, dict)
+            core = str(item["core"])
 
             claim_rows = [
                 IdeaClaimView(
@@ -682,6 +769,34 @@ class ExplorerService:
             if not claim_rows:
                 claim_rows = [IdeaClaimView(idea=core, attributed_to="User", stance="proposes")]
 
+            project_slug = _clean_label(payload.get("project_slug")) or None
+            project_name = _clean_label(payload.get("project_name")) or None
+            project_source: str | None = "defined" if project_slug or project_name else None
+            if not project_slug and idea_projects:
+                matched_project = best_project_match_for_text(
+                    idea_projects,
+                    core_idea=core,
+                    thread_hint=_clean_label(payload.get("thread_hint")) or None,
+                    related_facts=_text_list(payload.get("related_facts")),
+                    reasoning_steps=_text_list(payload.get("reasoning_steps")),
+                    evidence_text=_session_text(session),
+                )
+                if matched_project is not None:
+                    project_slug = matched_project.slug
+                    project_name = matched_project.name
+                    project_source = "defined"
+
+            if not project_slug:
+                suggested_project_name = self._suggested_idea_project_name(
+                    session=session,
+                    payload=payload,
+                    core=core,
+                    token_counts=suggestion_token_counts,
+                )
+                project_slug = f"suggested-{slugify_project_name(suggested_project_name)}"
+                project_name = suggested_project_name
+                project_source = "suggested"
+
             nodes.append(
                 IdeaEvolutionNode(
                     id=session.id,
@@ -690,6 +805,9 @@ class ExplorerService:
                     provider=session.provider,
                     updated_at=session.updated_at,
                     thread=_clean_label(payload.get("thread_hint")) or None,
+                    project_slug=project_slug,
+                    project_name=project_name,
+                    project_source=project_source,
                     core_idea=core,
                     reasoning_steps=_text_list(payload.get("reasoning_steps")),
                     related_facts=_text_list(payload.get("related_facts")),
@@ -705,7 +823,7 @@ class ExplorerService:
 
         nodes_by_thread: dict[str, list[IdeaEvolutionNode]] = defaultdict(list)
         for node in nodes:
-            nodes_by_thread[(node.thread or "Unthreaded").casefold()].append(node)
+            nodes_by_thread[f"{_idea_project_label(node).casefold()}::{(node.thread or 'Unthreaded').casefold()}"].append(node)
         for thread_nodes in nodes_by_thread.values():
             thread_nodes.sort(key=lambda node: datetime_sort_key(node.updated_at))
             for left, right in zip(thread_nodes, thread_nodes[1:], strict=False):
@@ -744,6 +862,10 @@ class ExplorerService:
                     [source.session_id, target.session_id],
                 )
 
+        projects = self._idea_group_counts(
+            (_idea_project_label(node), node.session_id, node.core_idea, node.project_slug, node.project_source)
+            for node in nodes
+        )
         threads = self._idea_group_counts(
             (node.thread or "Unthreaded", node.session_id, node.core_idea)
             for node in nodes
@@ -759,7 +881,7 @@ class ExplorerService:
             for fact in node.related_facts
         )
 
-        return IdeaViews(nodes=nodes, edges=edges, threads=threads, contributors=contributors, facts=facts)
+        return IdeaViews(nodes=nodes, edges=edges, projects=projects, threads=threads, contributors=contributors, facts=facts)
 
     def _append_idea_edge(
         self,
@@ -814,20 +936,85 @@ class ExplorerService:
         candidates.sort(key=lambda item: (-item[0], datetime_sort_key(item[1].updated_at)))
         return candidates[0][1]
 
+    def _suggested_idea_project_name(
+        self,
+        *,
+        session: ChatSession,
+        payload: dict[str, object],
+        core: str,
+        token_counts: Counter[str],
+    ) -> str:
+        thread_label = _usable_project_label(_clean_label(payload.get("thread_hint")))
+        if thread_label:
+            return thread_label
+
+        for tag in visible_custom_tags(session.custom_tags):
+            tag_label = _usable_project_label(tag)
+            if tag_label and tag_label.casefold() != "savemycontext":
+                return tag_label
+
+        text = " ".join(
+            [
+                session.title or "",
+                core,
+                " ".join(_text_list(payload.get("related_facts"))),
+                " ".join(_text_list(payload.get("reasoning_steps"))),
+                " ".join(_text_list(payload.get("next_steps"))),
+            ]
+        )
+        tokens = sorted(
+            _tokenize_text(text),
+            key=lambda token: (-token_counts.get(token, 0), len(token), token),
+        )
+        repeated_tokens = [token for token in tokens if token_counts.get(token, 0) > 1]
+        chosen = repeated_tokens[:2] or tokens[:2]
+        if chosen:
+            return _titleize_label(" ".join(chosen))
+
+        return "General Ideas"
+
     def _idea_group_counts(self, rows) -> list[JournalGroup]:
-        grouped: dict[str, list[tuple[str, str]]] = defaultdict(list)
-        for label, session_id, snippet in rows:
+        grouped: dict[str, dict[str, object]] = {}
+        for row in rows:
+            label, session_id, snippet, *metadata = row
             cleaned = _clean_label(label)
-            if cleaned:
-                grouped[cleaned].append((session_id, _clean_label(snippet)))
+            if not cleaned:
+                continue
+            bucket = grouped.setdefault(
+                cleaned,
+                {
+                    "values": [],
+                    "slug": None,
+                    "kind": None,
+                },
+            )
+            values = bucket["values"]
+            assert isinstance(values, list)
+            values.append((session_id, _clean_label(snippet)))
+            if metadata:
+                bucket["slug"] = bucket["slug"] or (_clean_label(metadata[0]) or None)
+            if len(metadata) >= 2:
+                bucket["kind"] = bucket["kind"] or (_clean_label(metadata[1]) or None)
+
+        def sort_key(item: tuple[str, dict[str, object]]) -> tuple[int, int, str]:
+            values = item[1]["values"]
+            assert isinstance(values, list)
+            kind = item[1].get("kind")
+            kind_rank = 0 if kind == "defined" else 1 if kind == "suggested" else 2
+            return (kind_rank, -len({row[0] for row in values}), item[0].lower())
+
         return [
             JournalGroup(
                 label=label,
                 count=len({session_id for session_id, _ in values}),
                 session_ids=sorted({session_id for session_id, _ in values}),
                 snippets=list(dict.fromkeys(snippet for _, snippet in values if snippet))[:3],
+                slug=_clean_label(bucket.get("slug")) or None,
+                kind=_clean_label(bucket.get("kind")) or None,
             )
-            for label, values in sorted(grouped.items(), key=lambda item: (-len({row[0] for row in item[1]}), item[0].lower()))[:24]
+            for label, bucket in sorted(grouped.items(), key=sort_key)[:24]
+            for values in [bucket["values"]]
+            if isinstance(values, list)
         ]
 
     def _factual_views(

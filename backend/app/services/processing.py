@@ -10,7 +10,8 @@ from app.models import ChatSession, FactTriplet, Pile, PileKind, BuiltInPileSlug
 from app.models.base import utcnow
 from app.schemas.processing import SegmentRouting, TripletResult
 from app.schemas.processing_worker import SessionPipelineResult
-from app.services.orchestrator import ProcessingOrchestrator
+from app.services.idea_projects import IdeaProjectService
+from app.services.orchestrator import ProcessingOrchestrator, render_transcript
 from app.services.pile_service import PileService
 from app.services.piles import BUILT_IN_SLUG_TO_CATEGORY, CATEGORY_TO_BUILT_IN_SLUG, pipeline_prompt_addendum_from_config
 from app.services.todo import TodoListService
@@ -251,6 +252,10 @@ class SessionProcessor:
                     slice_messages,
                     prompt_addendum=prompt_addendum,
                 )
+                idea = await IdeaProjectService(self.db).assign_project(
+                    idea,
+                    evidence_text=render_transcript(slice_messages),
+                )
                 outputs["idea"] = idea.model_dump(exclude={"share_post"})
                 idea_outputs.append(idea.model_dump(exclude={"share_post"}))
                 share_posts.append(idea.share_post)
@@ -422,6 +427,10 @@ class SessionProcessor:
                 }
             await self._replace_triplets(session, triplets)
         elif result.pile == BuiltInPileSlug.IDEAS and result.idea is not None:
+            result.idea = await IdeaProjectService(self.db).assign_project(
+                result.idea,
+                evidence_text=render_transcript(session.messages),
+            )
             session.idea_summary = result.idea.model_dump(exclude={"share_post"})
             session.share_post = result.idea.share_post
             session.pile_outputs = {"idea": result.idea.model_dump(exclude={"share_post"})}

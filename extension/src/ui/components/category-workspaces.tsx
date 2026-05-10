@@ -30,6 +30,7 @@ type CategoryWorkspaceProps = {
   views: BackendPileViews | null;
   sessions: BackendSessionListItem[];
   loading: boolean;
+  focusedProjectSlug?: string | null;
   onFocus: FocusHandler;
 };
 
@@ -226,6 +227,20 @@ function relationTone(relation: string): "neutral" | "success" | "warning" | "da
   return "neutral";
 }
 
+function ideaProjectLabel(node: BackendIdeaEvolutionNode): string {
+  if (node.project_name) {
+    return node.project_name;
+  }
+  if (node.project_slug) {
+    return node.project_slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
+  }
+  return "Unassigned";
+}
+
+function ideaProjectSlug(node: BackendIdeaEvolutionNode): string {
+  return node.project_slug || ideaProjectLabel(node);
+}
+
 function IdeaCard({
   node,
   onFocus
@@ -243,7 +258,7 @@ function IdeaCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-            {node.thread || "Unthreaded"} · {formatCompactDate(node.updated_at)}
+            {ideaProjectLabel(node)} · {node.thread || "Unthreaded"} · {formatCompactDate(node.updated_at)}
           </div>
           <div className="mt-1 text-sm font-semibold leading-5 text-[var(--color-ink)]">{node.core_idea}</div>
         </div>
@@ -260,7 +275,7 @@ function IdeaCard({
   );
 }
 
-function IdeaWorkspace({ view, views, loading, onFocus }: CategoryWorkspaceProps) {
+function IdeaWorkspace({ view, views, loading, focusedProjectSlug, onFocus }: CategoryWorkspaceProps) {
   const ideas = views?.ideas;
   if (loading && !ideas) {
     return <EmptyState label="Loading idea evolution..." />;
@@ -268,16 +283,21 @@ function IdeaWorkspace({ view, views, loading, onFocus }: CategoryWorkspaceProps
   if (!ideas) {
     return <EmptyState label="No idea evolution data is available yet." />;
   }
-  const nodes = ideas.nodes ?? [];
-  const edges = ideas.edges ?? [];
-  const threads = ideas.threads ?? [];
-  const contributors = ideas.contributors ?? [];
-  const facts = ideas.facts ?? [];
+  const allNodes = ideas.nodes ?? [];
+  const nodes = focusedProjectSlug ? allNodes.filter((node) => ideaProjectSlug(node) === focusedProjectSlug) : allNodes;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = (ideas.edges ?? []).filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+  const projects = ideas.projects ?? [];
+  const focusedProject = focusedProjectSlug ? projects.find((project) => project.slug === focusedProjectSlug) : null;
+  const focusedSessionIds = new Set(focusedProject?.session_ids ?? []);
+  const threads = (ideas.threads ?? []).filter((group) => !focusedProjectSlug || group.session_ids.some((sessionId) => focusedSessionIds.has(sessionId)));
+  const facts = (ideas.facts ?? []).filter((group) => !focusedProjectSlug || group.session_ids.some((sessionId) => focusedSessionIds.has(sessionId)));
+  const visibleProjects = focusedProject ? [focusedProject] : projects;
   if (view === "story") {
     return (
       <div className="grid h-full min-h-0 gap-3 xl:grid-cols-3">
+        <GroupList title="Projects" groups={visibleProjects} icon={Lightbulb} onFocus={onFocus} />
         <GroupList title="Threads" groups={threads} icon={GitBranch} onFocus={onFocus} />
-        <GroupList title="Contributors" groups={contributors} icon={Users} onFocus={onFocus} />
         <GroupList title="Grounding facts" groups={facts} icon={BookOpen} onFocus={onFocus} />
       </div>
     );
@@ -321,23 +341,34 @@ function IdeaWorkspace({ view, views, loading, onFocus }: CategoryWorkspaceProps
     );
   }
 
-  const threadLabels = threads.length ? threads.map((thread) => thread.label) : ["Unthreaded"];
+  const projectLabels = visibleProjects.length ? visibleProjects.map((project) => project.label) : ["Unassigned"];
   return (
     <ScrollArea className="h-full min-h-[360px] pr-4">
       <div className="grid gap-4">
-        {threadLabels.map((thread) => {
-          const threadNodes = nodes.filter((node) => (node.thread || "Unthreaded") === thread);
+        {projectLabels.map((project) => {
+          const projectNodes = nodes.filter((node) => ideaProjectLabel(node) === project);
+          const projectThreads = Array.from(new Set(projectNodes.map((node) => node.thread || "Unthreaded")));
           return (
-            <section key={thread} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
+            <section key={project} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-3">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Lightbulb className="h-4 w-4 text-[var(--color-ink-subtle)]" />
-                  <div className="text-sm font-semibold text-[var(--color-ink)]">{thread}</div>
+                  <div className="text-sm font-semibold text-[var(--color-ink)]">{project}</div>
                 </div>
-                <Badge tone="info">{threadNodes.length}</Badge>
+                <Badge tone="info">{projectNodes.length}</Badge>
               </div>
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {threadNodes.map((node) => <IdeaCard key={node.id} node={node} onFocus={onFocus} />)}
+              <div className="grid gap-3">
+                {projectThreads.map((thread) => {
+                  const threadNodes = projectNodes.filter((node) => (node.thread || "Unthreaded") === thread);
+                  return (
+                    <div key={`${project}:${thread}`} className="grid gap-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{thread}</div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {threadNodes.map((node) => <IdeaCard key={node.id} node={node} onFocus={onFocus} />)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           );

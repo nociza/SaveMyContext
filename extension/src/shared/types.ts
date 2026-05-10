@@ -445,6 +445,8 @@ export interface BackendJournalGroup {
   session_ids: string[];
   dates: string[];
   snippets: string[];
+  slug?: string | null;
+  kind?: string | null;
 }
 
 export interface BackendJournalViews {
@@ -469,6 +471,9 @@ export interface BackendIdeaEvolutionNode {
   provider?: ProviderName | null;
   updated_at?: string | null;
   thread?: string | null;
+  project_slug?: string | null;
+  project_name?: string | null;
+  project_source?: string | null;
   core_idea: string;
   reasoning_steps: string[];
   related_facts: string[];
@@ -489,6 +494,7 @@ export interface BackendIdeaEvolutionEdge {
 export interface BackendIdeaViews {
   nodes: BackendIdeaEvolutionNode[];
   edges: BackendIdeaEvolutionEdge[];
+  projects: BackendJournalGroup[];
   threads: BackendJournalGroup[];
   contributors: BackendJournalGroup[];
   facts: BackendJournalGroup[];
@@ -786,6 +792,17 @@ export interface BackendPileRead {
   pipeline_config: Record<string, unknown>;
   is_active: boolean;
   is_visible_on_dashboard: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendIdeaProjectRead {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
   sort_order: number;
   created_at: string;
   updated_at: string;

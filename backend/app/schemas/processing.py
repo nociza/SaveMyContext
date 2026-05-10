@@ -115,6 +115,8 @@ class IdeaRelation(BaseModel):
 
 class IdeaResult(BaseModel):
     core_idea: str = Field(min_length=1)
+    project_slug: str | None = Field(default=None, max_length=64)
+    project_name: str | None = Field(default=None, max_length=128)
     pros: list[str] = Field(default_factory=list)
     cons: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)

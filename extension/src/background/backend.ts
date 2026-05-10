@@ -13,6 +13,7 @@ import type {
   BackendJournalGroup,
   BackendGraphEdge,
   BackendGraphNode,
+  BackendIdeaProjectRead,
   BackendPileRead,
   BackendPromptTemplateRead,
   BackendProcessingStatus,
@@ -212,6 +213,8 @@ function normalizePileGraph(graph: BackendPileGraph, fallbackPile: BuiltInPileSl
 function normalizeJournalGroup(group: BackendJournalGroup): BackendJournalGroup {
   return {
     ...group,
+    slug: group.slug ?? null,
+    kind: group.kind ?? null,
     session_ids: arrayOrEmpty(group.session_ids),
     dates: arrayOrEmpty(group.dates),
     snippets: arrayOrEmpty(group.snippets)
@@ -256,6 +259,7 @@ function normalizePileViews(views: BackendPileViews, fallbackPile: BuiltInPileSl
             ...edge,
             session_ids: arrayOrEmpty(edge.session_ids)
           })),
+          projects: arrayOrEmpty(views.ideas.projects).map(normalizeJournalGroup),
           threads: arrayOrEmpty(views.ideas.threads).map(normalizeJournalGroup),
           contributors: arrayOrEmpty(views.ideas.contributors).map(normalizeJournalGroup),
           facts: arrayOrEmpty(views.ideas.facts).map(normalizeJournalGroup)
@@ -546,6 +550,92 @@ export async function fetchPiles(
     attributes: arrayOrEmpty(pile.attributes),
     pipeline_config: pile.pipeline_config ?? {}
   }));
+}
+
+export interface IdeaProjectCreatePayload {
+  name: string;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface IdeaProjectUpdatePayload {
+  name?: string;
+  description?: string;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
+function normalizeIdeaProject(project: BackendIdeaProjectRead): BackendIdeaProjectRead {
+  return {
+    ...project,
+    description: project.description ?? null,
+    is_active: project.is_active ?? true,
+    sort_order: project.sort_order ?? 100
+  };
+}
+
+export async function fetchIdeaProjects(
+  settings: ExtensionSettings,
+  capabilities?: BackendCapabilities
+): Promise<BackendIdeaProjectRead[]> {
+  const projects = await fetchBackendJson<BackendIdeaProjectRead[]>(settings, "/idea-projects", capabilities);
+  return arrayOrEmpty(projects).map(normalizeIdeaProject);
+}
+
+export async function createIdeaProject(
+  settings: ExtensionSettings,
+  payload: IdeaProjectCreatePayload,
+  capabilities?: BackendCapabilities
+): Promise<BackendIdeaProjectRead> {
+  const response = await fetch(backendApiUrl(settings, "/idea-projects", capabilities), {
+    method: "POST",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Idea project create failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return normalizeIdeaProject((await response.json()) as BackendIdeaProjectRead);
+}
+
+export async function updateIdeaProject(
+  settings: ExtensionSettings,
+  slug: string,
+  payload: IdeaProjectUpdatePayload,
+  capabilities?: BackendCapabilities
+): Promise<BackendIdeaProjectRead> {
+  const response = await fetch(
+    backendApiUrl(settings, `/idea-projects/${encodeURIComponent(slug)}`, capabilities),
+    {
+      method: "PATCH",
+      headers: buildBackendHeaders(settings),
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Idea project update failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return normalizeIdeaProject((await response.json()) as BackendIdeaProjectRead);
+}
+
+export async function deleteIdeaProject(
+  settings: ExtensionSettings,
+  slug: string,
+  capabilities?: BackendCapabilities
+): Promise<void> {
+  const response = await fetch(
+    backendApiUrl(settings, `/idea-projects/${encodeURIComponent(slug)}`, capabilities),
+    {
+      method: "DELETE",
+      headers: buildBackendHeaders(settings)
+    }
+  );
+  if (!response.ok && response.status !== 204) {
+    const details = await response.text();
+    throw new Error(`Idea project delete failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
 }
 
 export async function fetchPromptTemplates(

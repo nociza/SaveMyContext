@@ -65,6 +65,8 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 source_url="https://example.com/badge",
                 idea_summary={
                     "core_idea": "Build a workflow badge for the agent.",
+                    "project_slug": "agent-workflows",
+                    "project_name": "Agent Workflows",
                     "thread_hint": "Agent workflow surfaces",
                     "pros": ["Clear workflow signal"],
                     "cons": ["Needs governance"],
@@ -90,6 +92,8 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 source_url="https://example.com/workflow-graph",
                 idea_summary={
                     "core_idea": "Use a graph to connect capability pages and workflow notes.",
+                    "project_slug": "agent-workflows",
+                    "project_name": "Agent Workflows",
                     "thread_hint": "Agent workflow surfaces",
                     "pros": ["Makes workflow relationships visible"],
                     "cons": ["Adds visual complexity"],
@@ -99,6 +103,21 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 },
                 last_captured_at=datetime(2026, 4, 13, 18, 0, tzinfo=timezone.utc),
                 updated_at=datetime(2026, 4, 13, 18, 0, tzinfo=timezone.utc),
+            )
+            idea_session_three = ChatSession(
+                provider=ProviderName.CHATGPT,
+                external_session_id="session-idea-3",
+                title="Reader layout redesign",
+                built_in_pile=BuiltInPileSlug.IDEAS,
+                source_url="https://example.com/reader-layout",
+                idea_summary={
+                    "core_idea": "Give the note reader more room and separate it from dense controls.",
+                    "thread_hint": "Reader layout",
+                    "pros": ["Readable notes are easier to inspect"],
+                    "next_steps": ["Prototype a wider reader pane"],
+                },
+                last_captured_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
             )
             journal_session = ChatSession(
                 provider=ProviderName.CHATGPT,
@@ -122,7 +141,7 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
                 last_captured_at=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc),
                 updated_at=datetime(2026, 4, 12, 18, 0, tzinfo=timezone.utc),
             )
-            session.add_all([factual_session, idea_session_one, idea_session_two, journal_session])
+            session.add_all([factual_session, idea_session_one, idea_session_two, idea_session_three, journal_session])
             await session.flush()
             session.add_all(
                 [
@@ -226,6 +245,14 @@ async def test_category_routes_expose_stats_graph_search_and_note_content(tmp_pa
 
         assert ideas_views_response.status_code == 200
         ideas_views_payload = ideas_views_response.json()
+        assert ideas_views_payload["ideas"]["projects"][0]["label"] == "Agent Workflows"
+        assert ideas_views_payload["ideas"]["projects"][0]["kind"] == "defined"
+        suggested_projects = [project for project in ideas_views_payload["ideas"]["projects"] if project["kind"] == "suggested"]
+        assert suggested_projects
+        assert suggested_projects[0]["label"] == "Reader Layout"
+        assert suggested_projects[0]["slug"].startswith("suggested-")
+        assert ideas_views_payload["ideas"]["nodes"][0]["project_slug"] == "agent-workflows"
+        assert any(node["project_source"] == "suggested" for node in ideas_views_payload["ideas"]["nodes"])
         assert ideas_views_payload["ideas"]["threads"][0]["label"] == "Agent workflow surfaces"
         assert ideas_views_payload["ideas"]["contributors"][0]["label"] == "User"
         assert any(edge["relation"] == "builds_on" for edge in ideas_views_payload["ideas"]["edges"])

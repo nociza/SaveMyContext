@@ -211,6 +211,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "Summarize ideation transcripts and extract the causal / reasoning structure without collapsing "
             "distinct people's positions into one generic fact. "
             "Return JSON with keys core_idea, pros, cons, next_steps, share_post, "
+            "project_slug (one supplied project slug or null), project_name (matching project name or null), "
             "reasoning_steps (ordered list of inference steps that developed the idea), "
             "related_facts (short list of durable facts/entities the idea rests on — "
             "these anchor into the factual substrate), supports (prior ideas this one reinforces), "
@@ -226,14 +227,19 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "another person, source, company, or entity's variant of an idea, keep it as its own "
             "attributed_ideas entry. Use builds_on, validates, counters, and relations to show how "
             "ideas evolve across people and sessions. Related_facts are pointers into stored factual knowledge.\n"
+            "Classify the idea into one of the user's active projects when the transcript clearly fits a project. "
+            "Use the exact project slug and name from Active idea projects; otherwise return project_slug and project_name as null.\n"
             "Keep the share_post concise, specific, and credible. Avoid hype words such as "
             "revolutionary, effortless, unlock, game-changing, or world-class. Write it like a "
             "thoughtful builder note."
             "{{pile_addendum_block}}\n\n"
+            "Active idea projects:\n"
+            "{{idea_projects_json}}\n\n"
             "{{transcript}}"
         ),
         variables=(
             PromptVariableDefinition("pile_addendum_block", "Optional pile-specific instructions for this run."),
+            PromptVariableDefinition("idea_projects_json", "The active user-defined idea projects as JSON."),
             PromptVariableDefinition("transcript", "The plain transcript text."),
         ),
         order=70,
@@ -303,12 +309,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "Use fast mode. Do not use extended reasoning, hidden chain-of-thought, or thinking mode.\n"
             "Treat each batch as a fresh independent task.\n"
             "Return exactly one JSON object with this shape:\n"
-            "{\"results\":[{\"task_key\":\"task_1\",\"pile\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"],\"occurred_on\":null,\"people\":[],\"entities\":[],\"activities\":[],\"locations\":[],\"travel_path\":[],\"mood\":null}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\",\"items\":[]}|null,\"factual\":{\"summary\":\"...\",\"keywords\":[\"...\"],\"triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}]}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\",\"reasoning_steps\":[],\"related_facts\":[],\"supports\":[],\"conflicts_with\":[],\"thread_hint\":null,\"attributed_ideas\":[],\"relations\":[],\"builds_on\":[],\"validates\":[],\"counters\":[]}|null}]}\n"
+            "{\"results\":[{\"task_key\":\"task_1\",\"pile\":\"journal|factual|ideas|todo\",\"classification_reason\":\"...\",\"journal\":{\"entry\":\"...\",\"action_items\":[\"...\"],\"occurred_on\":null,\"people\":[],\"entities\":[],\"activities\":[],\"locations\":[],\"travel_path\":[],\"mood\":null}|null,\"todo\":{\"summary\":\"...\",\"updated_markdown\":\"# To-Do List\\n...\",\"items\":[]}|null,\"factual\":{\"summary\":\"...\",\"keywords\":[\"...\"],\"triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}]}|null,\"factual_triplets\":[{\"subject\":\"...\",\"predicate\":\"...\",\"object\":\"...\",\"confidence\":0.0-1.0|null}],\"idea\":{\"core_idea\":\"...\",\"project_slug\":null,\"project_name\":null,\"pros\":[\"...\"],\"cons\":[\"...\"],\"next_steps\":[\"...\"],\"share_post\":\"...\",\"reasoning_steps\":[],\"related_facts\":[],\"supports\":[],\"conflicts_with\":[],\"thread_hint\":null,\"attributed_ideas\":[],\"relations\":[],\"builds_on\":[],\"validates\":[],\"counters\":[]}|null}]}\n"
             "The results array must contain exactly one item for each task and must use the same task_key values.\n"
             "If pile is journal, journal is required and factual_triplets must be empty and idea null.\n"
             "If pile is todo, todo is required and must contain the full updated markdown for the shared to-do list after applying that task.\n"
             "If pile is factual, prefer factual with summary, keywords, and triplets; factual_triplets may mirror factual.triplets for compatibility. journal, todo, and idea must be null.\n"
-            "If pile is ideas, idea is required and journal must be null and factual/factual_triplets must be empty.\n"
+            "If pile is ideas, idea is required and journal must be null and factual/factual_triplets must be empty. "
+            "For idea.project_slug/project_name, choose the exact active idea project when the transcript clearly fits one; otherwise use null.\n"
             "If multiple tasks are classified as todo, apply them in task order against the same shared list and return each task's cumulative updated_markdown.\n"
             "Keep every result grounded in its transcript. Do not invent facts.\n"
             "Keep the JSON compact and return no prose."
@@ -316,11 +323,14 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         user_prompt=(
             "Current shared to-do list markdown:\n"
             "{{current_todo_markdown}}\n\n"
+            "Active idea projects:\n"
+            "{{idea_projects_json}}\n\n"
             "Tasks:\n"
             "{{tasks_json}}"
         ),
         variables=(
             PromptVariableDefinition("current_todo_markdown", "The current shared to-do list."),
+            PromptVariableDefinition("idea_projects_json", "The active user-defined idea projects as JSON."),
             PromptVariableDefinition("tasks_json", "The queued processing tasks as compact JSON."),
         ),
         order=100,

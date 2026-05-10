@@ -72,6 +72,29 @@ def apply_schema_migrations(sync_connection) -> None:
             'CREATE INDEX IF NOT EXISTS ix_prompt_templates_key ON prompt_templates ("key")'
         )
 
+    if "idea_projects" not in table_names:
+        sync_connection.exec_driver_sql(
+            """
+            CREATE TABLE idea_projects (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                slug VARCHAR(64) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                description TEXT,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 100,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_idea_project_slug UNIQUE (slug)
+            )
+            """
+        )
+        sync_connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_idea_projects_slug ON idea_projects (slug)"
+        )
+        sync_connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_idea_projects_is_active ON idea_projects (is_active)"
+        )
+
     if "piles" in inspector.get_table_names():
         _normalize_pile_kind_values(sync_connection)
         _seed_built_in_piles(sync_connection)

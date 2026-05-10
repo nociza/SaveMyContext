@@ -393,6 +393,7 @@ class ProcessingOrchestrator:
                 "processing.ideas",
                 values={
                     "pile_addendum_block": self._pile_addendum_block(prompt_addendum),
+                    "idea_projects_json": await self._idea_projects_json(),
                     "transcript": transcript,
                 },
             )
@@ -488,6 +489,13 @@ class ProcessingOrchestrator:
         if not cleaned:
             return ""
         return f"\n\nAdditional pile-specific instructions:\n{cleaned}"
+
+    async def _idea_projects_json(self) -> str:
+        if self.db is None:
+            return "[]"
+        from app.services.idea_projects import IdeaProjectService
+
+        return await IdeaProjectService(self.db).prompt_context_json()
 
 
 def _heuristic_pile_outputs(messages: list[ChatMessage], wanted: set[str]) -> dict[str, object]:

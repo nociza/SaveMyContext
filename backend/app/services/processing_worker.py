@@ -21,6 +21,7 @@ from app.schemas.processing_worker import (
 )
 from app.services.markdown import MarkdownExporter
 from app.services.orchestrator import render_transcript
+from app.services.idea_projects import IdeaProjectService
 from app.services.processing import SessionProcessor
 from app.services.prompt_templates import PromptTemplateService
 from app.services.text import extract_json_object
@@ -176,6 +177,7 @@ class ExtensionBrowserProcessingService:
             "processing.worker_batch",
             values={
                 "current_todo_markdown": current_todo_markdown,
+                "idea_projects_json": await IdeaProjectService(self.db).prompt_context_json(),
                 "tasks_json": json.dumps(prompt_tasks, ensure_ascii=True, separators=(",", ":")),
             },
         )

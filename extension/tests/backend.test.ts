@@ -365,6 +365,34 @@ describe("backend validation helpers", () => {
     expect(todo.git.repository_ready).toBe(false);
   });
 
+  it("fetches idea projects with backend auth headers", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => [
+        {
+          id: "project-1",
+          slug: "agent-workflows",
+          name: "Agent Workflows",
+          created_at: "2026-04-14T00:00:00Z",
+          updated_at: "2026-04-14T00:00:00Z"
+        }
+      ]
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchIdeaProjects } = await import("../src/background/backend");
+    const projects = await fetchIdeaProjects(remoteSettings());
+
+    expect(fetchMock).toHaveBeenCalledWith("https://notes.example.com/api/v1/idea-projects", {
+      headers: {
+        Authorization: "Bearer savemycontext_pat_test"
+      }
+    });
+    expect(projects[0].slug).toBe("agent-workflows");
+    expect(projects[0].is_active).toBe(true);
+    expect(projects[0].sort_order).toBe(100);
+  });
+
   it("normalizes missing nested pile workspace arrays", async () => {
     vi.stubGlobal(
       "fetch",
@@ -431,6 +459,7 @@ describe("backend validation helpers", () => {
     expect(views.journal?.timeline[0].travel_path).toEqual([]);
     expect(views.journal?.locations[0].session_ids).toEqual([]);
     expect(views.journal?.people).toEqual([]);
+    expect(views.ideas?.projects).toEqual([]);
     expect(views.ideas?.nodes[0].claims).toEqual([]);
     expect(views.ideas?.edges[0].session_ids).toEqual([]);
     expect(views.factual?.backlog[0].keywords).toEqual([]);

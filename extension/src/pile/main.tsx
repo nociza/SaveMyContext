@@ -2,17 +2,41 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import * as Tabs from "@radix-ui/react-tabs";
-import { Activity, ArrowLeft, BrainCircuit, Database, ExternalLink, GitBranch, ListChecks, MapPin, Search, Sparkles, Tags, Users, Workflow } from "lucide-react";
+import {
+  Activity,
+  ArrowLeft,
+  BookOpen,
+  BrainCircuit,
+  Clock3,
+  Database,
+  ExternalLink,
+  Filter,
+  GitBranch,
+  Layers,
+  Lightbulb,
+  ListChecks,
+  MapPin,
+  Plus,
+  Search,
+  Sparkles,
+  Tags,
+  Users,
+  Workflow,
+  X
+} from "lucide-react";
 
 import {
   fetchPileGraph,
   fetchPileGraphPath,
   fetchPileStats,
   fetchPileViews,
+  createIdeaProject,
+  deleteIdeaProject,
   fetchCustomPileGraph,
   fetchCustomPileGraphPath,
   fetchCustomPileStats,
   fetchCustomPileViews,
+  fetchIdeaProjects,
   fetchExplorerSearch,
   fetchSessionNote,
   fetchSessions,
@@ -53,6 +77,7 @@ import type {
   BackendSessionNoteRead,
   BackendTodoItem,
   BackendExtraPileSummary,
+  BackendIdeaProjectRead,
   ExtensionSettings,
   ProviderName,
   BuiltInPileSlug
@@ -78,6 +103,7 @@ type RouteState = {
   sort: PileSortMode;
   view: PileWorkspaceView;
   bucket: string | null;
+  project: string | null;
   note: string | null;
   extraPile: string | null;
 };
@@ -96,6 +122,7 @@ function readRouteState(): RouteState {
     sort: parseSortMode(params.get("sort")),
     view: parsePileWorkspaceView(params.get("view")),
     bucket: params.get("bucket")?.trim() ?? null,
+    project: params.get("project")?.trim() ?? null,
     note: params.get("note"),
     extraPile: params.get("extraPile")?.trim() ?? null
   };
@@ -128,6 +155,11 @@ function writeRouteState(state: RouteState, push = true): void {
     url.searchParams.set("bucket", state.bucket);
   } else {
     url.searchParams.delete("bucket");
+  }
+  if (state.project?.trim()) {
+    url.searchParams.set("project", state.project.trim());
+  } else {
+    url.searchParams.delete("project");
   }
   if (state.note) {
     url.searchParams.set("note", state.note);
@@ -516,6 +548,10 @@ function App() {
   const [todoSavingSummary, setTodoSavingSummary] = useState<string | null>(null);
   const [extraPileDraft, setExtraPileDraft] = useState("");
   const [extraPileError, setExtraPileError] = useState<string | null>(null);
+  const [ideaProjectNameDraft, setIdeaProjectNameDraft] = useState("");
+  const [ideaProjectDescriptionDraft, setIdeaProjectDescriptionDraft] = useState("");
+  const [ideaProjectError, setIdeaProjectError] = useState<string | null>(null);
+  const [ideaProjectSaving, setIdeaProjectSaving] = useState(false);
   const debouncedQuery = useDebouncedValue(route.q);
   const isCustomScope = Boolean(route.extraPile);
   const usesCategoryWorkspace = !isCustomScope && route.pile !== "todo" && route.pile !== "discarded";
@@ -565,6 +601,12 @@ function App() {
         pile: isCustomScope ? undefined : route.pile
       }),
     enabled: Boolean(settings && !status?.backendValidationError)
+  });
+
+  const ideaProjectsQuery = useQuery<BackendIdeaProjectRead[]>({
+    queryKey: ["idea-projects", settings?.backendUrl, settings?.backendToken],
+    queryFn: () => fetchIdeaProjects(settings as ExtensionSettings),
+    enabled: Boolean(settings && !status?.backendValidationError && !isCustomScope && route.pile === "ideas")
   });
 
   const searchQuery = useQuery({
@@ -719,13 +761,38 @@ function App() {
     enabled: Boolean(settings && !status?.backendValidationError && usesCategoryWorkspace && (!scopedSessionIds || scopedSessionIds.length > 0))
   });
 
-  const noteListItems = useMemo(() => {
-    if (!graphFocus) {
+  const categoryViews = categoryViewsQuery.data;
+  const ideaProjectGroups = categoryViews?.ideas?.projects ?? [];
+  const activeIdeaProjectGroup =
+    !isCustomScope && route.pile === "ideas" && route.project
+      ? ideaProjectGroups.find((project) => (project.slug ?? project.label) === route.project || project.label === route.project) ?? null
+      : null;
+  const activeIdeaProjectSessionIds = activeIdeaProjectGroup ? new Set(activeIdeaProjectGroup.session_ids) : null;
+  const projectScopedSessions = useMemo(() => {
+    if (!activeIdeaProjectSessionIds) {
       return visibleSessions;
     }
+    return visibleSessions.filter((session) => activeIdeaProjectSessionIds.has(session.id));
+  }, [activeIdeaProjectSessionIds, visibleSessions]);
+
+  useEffect(() => {
+    if (!route.project || route.pile !== "ideas" || categoryViewsQuery.isLoading) {
+      return;
+    }
+    const projectExists = ideaProjectGroups.some((project) => (project.slug ?? project.label) === route.project || project.label === route.project);
+    if (!projectExists) {
+      updateRoute({ project: null, note: null }, false);
+    }
+  }, [categoryViewsQuery.isLoading, ideaProjectGroups, route.pile, route.project]);
+
+  const noteListItems = useMemo(() => {
+    const baseSessions = projectScopedSessions;
+    if (!graphFocus) {
+      return baseSessions;
+    }
     const focusSet = new Set(graphFocus.sessionIds);
-    return visibleSessions.filter((session) => focusSet.has(session.id));
-  }, [graphFocus, visibleSessions]);
+    return baseSessions.filter((session) => focusSet.has(session.id));
+  }, [graphFocus, projectScopedSessions]);
 
   useEffect(() => {
     if (route.note && noteListItems.some((session) => session.id === route.note)) {
@@ -764,6 +831,7 @@ function App() {
   const todo = !isCustomScope && route.pile === "todo" ? todoQuery.data ?? null : null;
   const activeDisplayCategory = graph.dominant_pile_slug ?? stats.dominant_pile_slug ?? route.pile;
   const extraPiles = extraPilesQuery.data ?? [];
+  const ideaProjects = ideaProjectsQuery.data ?? [];
 
   const signals = signalGroups(stats);
   const providerPie = stats.provider_counts.map((item) => ({
@@ -865,6 +933,7 @@ function App() {
     route.provider ? { key: "provider", label: "Provider", value: providerLabels[route.provider] } : null,
     route.q ? { key: "query", label: "Query", value: route.q } : null,
     route.bucket ? { key: "bucket", label: "Time", value: formatBucketLabel(route.bucket) } : null,
+    activeIdeaProjectGroup ? { key: "idea-project", label: "Project", value: activeIdeaProjectGroup.label } : null,
     graphFocus ? { key: "focus", label: "Focus", value: graphFocus.label } : null
   ].filter((item): item is { key: string; label: string; value: string } => Boolean(item));
   const scopeSummary = scopePills.length
@@ -941,14 +1010,14 @@ function App() {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ pile, note: null, bucket: null, view: "atlas", extraPile: null }, true);
+    updateRoute({ pile, note: null, bucket: null, project: null, view: "atlas", extraPile: null }, true);
   }
 
   function handleExtraPileSwitch(name: string): void {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ extraPile: name, note: null, bucket: null, view: "atlas" }, true);
+    updateRoute({ extraPile: name, note: null, bucket: null, project: null, view: "atlas" }, true);
   }
 
   function activateFocus(label: string, sessionIds: string[], nextView?: PileWorkspaceView): void {
@@ -972,7 +1041,7 @@ function App() {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, note: null, view: "atlas", extraPile: null }, true);
+    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, project: null, note: null, view: "atlas", extraPile: null }, true);
   }
 
   function handlePathFocus(path: BackendExplorerGraphPath): void {
@@ -987,12 +1056,12 @@ function App() {
     activateFocus(`Path: ${labels.join(" -> ")}`, sessionIds, "atlas");
   }
 
-  const categoryViews = categoryViewsQuery.data;
   const journalEntryCount = categoryViews?.journal?.timeline?.length ?? 0;
   const journalPlaceCount = categoryViews?.journal?.locations?.length ?? 0;
   const journalPeopleCount = categoryViews?.journal?.people?.length ?? 0;
   const journalEntityCount = categoryViews?.journal?.entities?.length ?? 0;
   const ideaNodeCount = categoryViews?.ideas?.nodes?.length ?? 0;
+  const ideaProjectCount = categoryViews?.ideas?.projects?.length ?? 0;
   const ideaThreadCount = categoryViews?.ideas?.threads?.length ?? 0;
   const ideaContributorCount = categoryViews?.ideas?.contributors?.length ?? 0;
   const ideaRelationCount = categoryViews?.ideas?.edges?.length ?? 0;
@@ -1043,8 +1112,8 @@ function App() {
               label: "Mind map",
               accent: "#4968ab",
               icon: BrainCircuit,
-              metric: `${formatNumber(ideaThreadCount)} threads`,
-              detail: "Facts and contributors"
+              metric: `${formatNumber(ideaProjectCount || ideaThreadCount)} projects`,
+              detail: "Projects and facts"
             },
             {
               value: "ops" as const,
@@ -1180,7 +1249,48 @@ function App() {
     const nextPiles = (selectedSession.extra_piles ?? []).filter((value) => value !== name);
     await updateSelectedSessionExtraPiles(nextPiles);
     if (route.extraPile === name) {
-      updateRoute({ extraPile: null }, true);
+      updateRoute({ extraPile: null, project: null }, true);
+    }
+  }
+
+  async function handleCreateIdeaProject(): Promise<void> {
+    const name = ideaProjectNameDraft.trim();
+    const description = ideaProjectDescriptionDraft.trim();
+    if (!settings || !name) {
+      return;
+    }
+
+    setIdeaProjectError(null);
+    setIdeaProjectSaving(true);
+    try {
+      await createIdeaProject(settings as ExtensionSettings, {
+        name,
+        description: description || undefined
+      });
+      setIdeaProjectNameDraft("");
+      setIdeaProjectDescriptionDraft("");
+      await Promise.all([ideaProjectsQuery.refetch(), categoryViewsQuery.refetch()]);
+    } catch (projectError) {
+      setIdeaProjectError(projectError instanceof Error ? projectError.message : "Could not create idea project.");
+    } finally {
+      setIdeaProjectSaving(false);
+    }
+  }
+
+  async function handleDeleteIdeaProject(project: BackendIdeaProjectRead): Promise<void> {
+    if (!settings || !confirm(`Deactivate idea project '${project.name}'? Existing idea notes stay assigned.`)) {
+      return;
+    }
+
+    setIdeaProjectError(null);
+    setIdeaProjectSaving(true);
+    try {
+      await deleteIdeaProject(settings as ExtensionSettings, project.slug);
+      await Promise.all([ideaProjectsQuery.refetch(), categoryViewsQuery.refetch()]);
+    } catch (projectError) {
+      setIdeaProjectError(projectError instanceof Error ? projectError.message : "Could not deactivate idea project.");
+    } finally {
+      setIdeaProjectSaving(false);
     }
   }
 
@@ -1201,7 +1311,7 @@ function App() {
     : usesCategoryWorkspace && activeDisplayCategory === "journal"
       ? "Daily progression, places, people, entities, and mentioned activities."
       : usesCategoryWorkspace && activeDisplayCategory === "ideas"
-        ? "Threads preserve how ideas build, validate, counter, and remain attributed."
+        ? "Projects preserve where ideas belong while threads show how they build, validate, and counter."
         : usesCategoryWorkspace && activeDisplayCategory === "factual"
           ? "Simple dated reminders of what was learned, with links back from other piles."
           : isCustomScope
@@ -1239,13 +1349,13 @@ function App() {
                 activeDisplayCategory === "journal"
                   ? "People"
                   : activeDisplayCategory === "ideas"
-                    ? "Contributors"
+                    ? "Projects"
                     : "Entities",
               value:
                 activeDisplayCategory === "journal"
                   ? formatNumber(journalPeopleCount)
                   : activeDisplayCategory === "ideas"
-                    ? formatNumber(ideaContributorCount)
+                    ? formatNumber(ideaProjectCount)
                     : formatNumber(factualEntityCount),
               icon: Users
             },
@@ -1284,56 +1394,81 @@ function App() {
           }
         ];
   const maxActivityBucketCount = Math.max(...activityBuckets.map((bucket) => bucket.count), 1);
+  const activePileAccent = pilePalette[activeDisplayCategory].accent;
+  const activePileName = isCustomScope ? route.extraPile : pileLabels[route.pile];
+  const notesTitle = !isCustomScope && route.pile === "todo" ? "Change log notes" : isCustomScope ? "Notes in extra pile" : "Notes in scope";
+  const issueMessage =
+    status?.backendValidationError ||
+    error ||
+    (sessionsQuery.error instanceof Error && sessionsQuery.error.message) ||
+    (searchQuery.error instanceof Error && searchQuery.error.message) ||
+    (statsQuery.error instanceof Error && statsQuery.error.message) ||
+    (graphQuery.error instanceof Error && graphQuery.error.message) ||
+    (categoryViewsQuery.error instanceof Error && categoryViewsQuery.error.message) ||
+    (noteQuery.error instanceof Error && noteQuery.error.message) ||
+    (todoQuery.error instanceof Error && todoQuery.error.message) ||
+    (extraPilesQuery.error instanceof Error && extraPilesQuery.error.message) ||
+    null;
 
   return (
-    <div className="app-page app-page--wide flex min-h-screen w-full flex-col gap-3">
-      <Card className="px-4 py-2.5">
-        <div className="flex min-h-10 flex-wrap items-center justify-between gap-x-5 gap-y-2">
-          <div className="flex items-center gap-3">
+    <div className="app-page app-page--wide pile-workbench">
+      <Card className="pile-workbench-header p-3">
+        <div className="grid gap-3 xl:grid-cols-[minmax(220px,0.45fr)_minmax(0,1fr)_auto] xl:items-center">
+          <div className="flex min-w-0 items-center gap-3">
             <span
-              className="display-serif flex h-8 w-8 items-center justify-center rounded-[8px] text-[15px]"
+              className="display-serif flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[16px]"
               style={{
-                backgroundColor: `${pilePalette[activeDisplayCategory].accent}1a`,
-                color: pilePalette[activeDisplayCategory].accent
+                backgroundColor: `${activePileAccent}1a`,
+                color: activePileAccent
               }}
             >
               {isCustomScope ? "⌘" : (pileGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
             </span>
             <div className="min-w-0">
               <div className="eyebrow text-[10px]">{isCustomScope ? "Extra pile" : "Pile"}</div>
-              <CardTitle className="display-serif truncate text-[19px] font-semibold leading-tight">
-                {isCustomScope ? route.extraPile : pileLabels[route.pile]}
-              </CardTitle>
+              <CardTitle className="display-serif truncate text-[20px] font-semibold leading-tight">{activePileName}</CardTitle>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="metric-strip">
             {headerMetrics.map((metric) => (
-              <div key={metric.label} className="flex items-center gap-2">
-                <metric.icon className="h-3.5 w-3.5 text-[var(--color-ink-subtle)]" />
-                <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{metric.label}</span>
-                <span className="text-sm font-semibold text-[var(--color-ink)]">{metric.value}</span>
+              <div key={metric.label} className="metric-tile">
+                <div className="flex items-center gap-1.5">
+                  <metric.icon className="h-3.5 w-3.5 text-[var(--color-ink-subtle)]" />
+                  <span className="truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-ink-soft)]">{metric.label}</span>
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold text-[var(--color-ink)]">{metric.value}</div>
               </div>
             ))}
           </div>
 
-          <Button variant="ghost" size="sm" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
+          <Button variant="secondary" size="sm" className="justify-self-start xl:justify-self-end" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
             <ArrowLeft className="h-3.5 w-3.5" />
             Overview
           </Button>
         </div>
+        {scopePills.length ? (
+          <div className="scope-chip-list mt-3">
+            {scopePills.map((pill) => (
+              <span key={pill.key} className="scope-token">
+                {pill.label}
+                <strong className="truncate">{pill.value}</strong>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </Card>
 
-      <div className="grid min-h-0 gap-3 xl:min-h-[calc(100vh-6.25rem)] xl:grid-cols-[208px_minmax(0,1fr)]">
-        <aside className="min-w-0 self-start">
-          <Card className="p-2.5">
+      <div className="pile-workbench-main grid min-h-0 gap-3 xl:grid-cols-[264px_minmax(0,1fr)]">
+        <aside className="min-h-0 min-w-0">
+          <Card className="pile-sidebar-card p-3">
             <CardHeader className="gap-2">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Explorer</div>
+                <div className="rail-heading"><Layers className="h-3.5 w-3.5" /> Explorer</div>
                 <CardTitle className="mt-0.5 text-base">Piles</CardTitle>
               </div>
             </CardHeader>
-            <CardContent className="mt-2 space-y-2.5">
+            <CardContent className="pile-sidebar-scroll mt-3 space-y-4 pr-1">
               <div className="grid gap-0.5">
                 {pileOrder.map((pile) => {
                   const active = !isCustomScope && route.pile === pile;
@@ -1343,11 +1478,8 @@ function App() {
                       key={pile}
                       type="button"
                       onClick={() => handlePileSwitch(pile)}
-                      className={`group flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-left transition ${
-                        active
-                          ? "bg-[var(--color-ink)] text-white"
-                          : "hover:bg-[var(--color-paper-sunken)]"
-                      }`}
+                      className="pile-nav-button group"
+                      data-active={active}
                     >
                       <span
                         className="display-serif flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] text-[12px] leading-none"
@@ -1358,15 +1490,129 @@ function App() {
                       >
                         {pileGlyphs[pile]}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{pileLabels[pile]}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">{pileLabels[pile]}</span>
                     </button>
                   );
                 })}
               </div>
 
-              <div className="space-y-1.5 border-t border-[var(--color-line)] pt-2.5">
+              {!isCustomScope && route.pile === "ideas" ? (
+                <div className="rail-section space-y-2">
+                  <div>
+                    <div className="rail-heading"><Lightbulb className="h-3.5 w-3.5" /> Idea projects</div>
+                    <p className="mt-1 text-xs leading-5 text-[var(--color-ink-soft)]">Switch the workspace by project. Suggested groups appear until you define your own.</p>
+                  </div>
+
+                  <div className="grid gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGraphFocus(null);
+                        setGraphInspect(null);
+                        updateRoute({ project: null, note: null }, true);
+                      }}
+                      className="flex w-full items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 py-1.5 text-left text-xs transition hover:bg-[var(--color-paper-sunken)]"
+                      data-active={!route.project}
+                    >
+                      <span className="font-semibold text-[var(--color-ink)]">All ideas</span>
+                      <span className="text-[var(--color-ink-soft)]">{formatNumber(ideaNodeCount)}</span>
+                    </button>
+                    {ideaProjectGroups.slice(0, 8).map((project) => {
+                      const activeProject = route.project === (project.slug ?? project.label) || route.project === project.label;
+                      return (
+                        <button
+                          key={project.slug ?? project.label}
+                          type="button"
+                          onClick={() => {
+                            setGraphFocus(null);
+                            setGraphInspect(null);
+                            updateRoute({ project: project.slug ?? project.label, note: null, view: "atlas" }, true);
+                          }}
+                          className={`w-full rounded-[8px] border px-2 py-1.5 text-left text-xs transition ${
+                            activeProject
+                              ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                              : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
+                          }`}
+                        >
+                          <span className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate font-semibold">{project.label}</span>
+                            <span className={activeProject ? "text-white/75" : "text-[var(--color-ink-soft)]"}>{formatNumber(project.count)}</span>
+                          </span>
+                          {project.kind === "suggested" ? (
+                            <span className={activeProject ? "mt-1 block text-[10px] uppercase tracking-[0.08em] text-white/60" : "mt-1 block text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
+                              Suggested
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                    {!ideaProjectGroups.length && categoryViewsQuery.isLoading ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Loading project groups...</p> : null}
+                    {!ideaProjectGroups.length && !categoryViewsQuery.isLoading ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Project groups appear as ideas are extracted.</p> : null}
+                  </div>
+
+                  <div className="border-t border-[var(--color-line)] pt-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Definitions</div>
+                    <p className="mt-1 text-xs leading-5 text-[var(--color-ink-soft)]">Saved definitions steer future AI classification.</p>
+                  </div>
+
+                  <div className="grid gap-1.5">
+                    {ideaProjects.slice(0, 5).map((project) => (
+                      <div key={project.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-semibold text-[var(--color-ink)]">{project.name}</div>
+                            <div className="mt-0.5 truncate text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">{project.slug}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteIdeaProject(project)}
+                            disabled={ideaProjectSaving}
+                            className="rounded-[6px] p-1 text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-raised)] hover:text-[var(--color-ink)] disabled:opacity-50"
+                            aria-label={`Deactivate ${project.name}`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {project.description ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--color-ink-soft)]">{project.description}</p> : null}
+                      </div>
+                    ))}
+                    {!ideaProjects.length && !ideaProjectsQuery.isLoading ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">No saved definitions yet.</p> : null}
+                    {ideaProjectsQuery.isLoading ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">Loading projects...</p> : null}
+                  </div>
+
+                  <form
+                    className="grid gap-1.5"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleCreateIdeaProject();
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={ideaProjectNameDraft}
+                      onChange={(event) => setIdeaProjectNameDraft(event.target.value)}
+                      placeholder="Project name"
+                      className="compact-field"
+                    />
+                    <textarea
+                      value={ideaProjectDescriptionDraft}
+                      onChange={(event) => setIdeaProjectDescriptionDraft(event.target.value)}
+                      placeholder="What are you working on?"
+                      rows={3}
+                      className="compact-field compact-textarea"
+                    />
+                    <Button type="submit" size="sm" variant="secondary" className="h-8 px-2.5 text-xs" disabled={ideaProjectSaving || !ideaProjectNameDraft.trim()}>
+                      <Plus className="h-3.5 w-3.5" />
+                      {ideaProjectSaving ? "Saving..." : "Add project"}
+                    </Button>
+                  </form>
+                  {ideaProjectError ? <p className="text-xs leading-5 text-[#963c24]">{ideaProjectError}</p> : null}
+                </div>
+              ) : null}
+
+              <div className="rail-section space-y-1.5">
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Extra piles</div>
+                  <div className="rail-heading"><Tags className="h-3.5 w-3.5" /> Extra piles</div>
                 </div>
 
                 <Select
@@ -1376,7 +1622,7 @@ function App() {
                     setGraphInspect(null);
                     setCollapsedGroups([]);
                     if (value === "__default__") {
-                      updateRoute({ extraPile: null, note: null, bucket: null, view: "atlas" }, true);
+                      updateRoute({ extraPile: null, note: null, bucket: null, project: null, view: "atlas" }, true);
                     } else {
                       handleExtraPileSwitch(value);
                     }
@@ -1409,16 +1655,16 @@ function App() {
                     value={extraPileDraft}
                     onChange={(event) => setExtraPileDraft(event.target.value)}
                     placeholder={selectedSession ? "New extra pile" : "Select a note first"}
-                    className="h-8 min-w-0 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 text-xs outline-none transition focus:border-[var(--color-line-strong)]"
+                    className="compact-field h-8 min-w-0 flex-1"
                   />
                   <Button type="submit" size="sm" variant="secondary" className="h-8 shrink-0 px-2 text-xs" disabled={!selectedSession || !extraPileDraft.trim()}>
-                    Add
+                    <Plus className="h-3.5 w-3.5" />
                   </Button>
                 </form>
               </div>
 
-              <div className="space-y-1.5 border-t border-[var(--color-line)] pt-2.5">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Scope</div>
+              <div className="rail-section space-y-1.5">
+                <div className="rail-heading"><Filter className="h-3.5 w-3.5" /> Scope</div>
 
                 <label className="block">
                   <div className="relative">
@@ -1429,10 +1675,10 @@ function App() {
                       onChange={(event) => {
                         setGraphFocus(null);
                         setGraphInspect(null);
-                        updateRoute({ q: event.target.value, note: null }, true);
+                        updateRoute({ q: event.target.value, project: null, note: null }, true);
                       }}
                       placeholder="Search notes"
-                      className="h-8 w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] pl-8 pr-2 text-xs outline-none transition focus:border-[var(--color-line-strong)]"
+                      className="compact-field h-8 pl-8 pr-2"
                     />
                   </div>
                 </label>
@@ -1444,7 +1690,7 @@ function App() {
                       if (value === "__suggestion__") {
                         return;
                       }
-                      updateRoute({ q: value, note: null, view: "atlas" }, true);
+                      updateRoute({ q: value, project: null, note: null, view: "atlas" }, true);
                       setGraphFocus(null);
                       setGraphInspect(null);
                     }}
@@ -1518,11 +1764,47 @@ function App() {
                 </div>
               </div>
 
+              <div className="rail-section space-y-1.5">
+                <div className="rail-heading"><Clock3 className="h-3.5 w-3.5" /> Activity</div>
+                <div className="grid gap-1">
+                  {activityBuckets.slice(-5).map((bucket) => {
+                    const active = route.bucket === bucket.bucket;
+                    return (
+                      <button
+                        key={bucket.bucket}
+                        type="button"
+                        onClick={() => handleBucketToggle(bucket.bucket)}
+                        className={`rounded-[8px] border px-2 py-1.5 text-left transition ${
+                          active
+                            ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                            : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
+                        }`}
+                      >
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold">{bucket.label}</span>
+                          <span className={active ? "text-xs text-white/75" : "text-xs text-[var(--color-ink-soft)]"}>{formatNumber(bucket.count)}</span>
+                        </span>
+                        <span className={active ? "mt-1.5 block h-1.5 rounded-full bg-white/20" : "mt-1.5 block h-1.5 rounded-full bg-[var(--color-paper-sunken)]"}>
+                          <span
+                            className="block h-full rounded-full"
+                            style={{
+                              width: `${(bucket.count / maxActivityBucketCount) * 100}%`,
+                              backgroundColor: active ? "#ffffff" : activePileAccent
+                            }}
+                          />
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!activityBuckets.length ? <p className="text-xs text-[var(--color-ink-soft)]">No recent activity yet.</p> : null}
+                </div>
+              </div>
+
             </CardContent>
           </Card>
         </aside>
 
-        <div className="min-h-0 xl:h-[calc(100vh-6.25rem)]">
+        <div className="min-h-0 xl:h-full">
           <Card className="flex min-h-0 flex-col overflow-hidden p-2.5 sm:p-3 xl:h-full">
             <CardHeader className="flex-wrap items-center gap-2">
               <div className="min-w-0">
@@ -1531,7 +1813,7 @@ function App() {
                 <CardDescription className="line-clamp-1 text-xs leading-5 xl:hidden">{workspaceDescription}</CardDescription>
               </div>
               {!isTodoWorkspace ? (
-                <div className="inline-grid w-full shrink-0 grid-cols-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1 sm:w-auto">
+                <div className="view-switch w-full shrink-0 sm:w-auto sm:min-w-[360px]">
                   {workspaceCards.map((card) => {
                     const active = route.view === card.value;
                     return (
@@ -1539,15 +1821,14 @@ function App() {
                         key={card.value}
                         type="button"
                         onClick={() => updateRoute({ view: card.value }, true)}
-                        className={`min-w-0 rounded-[6px] px-2 py-1.5 text-left outline-none transition sm:px-2.5 ${
-                          active ? "bg-[var(--color-paper-raised)] text-[var(--color-ink)] shadow-sm" : "text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
-                        }`}
+                        className="view-switch-button"
+                        data-active={active}
                       >
                         <span className="flex min-w-0 items-center gap-1.5">
                           <card.icon className="h-3.5 w-3.5 shrink-0" style={{ color: card.accent }} />
                           <span className="truncate text-xs font-semibold">{card.label}</span>
-                          <span className="hidden truncate text-[11px] lg:inline">{card.metric}</span>
                         </span>
+                        <span className="mt-1 block truncate text-[11px] leading-4 text-[var(--color-ink-soft)]">{card.metric}</span>
                       </button>
                     );
                   })}
@@ -1575,20 +1856,21 @@ function App() {
                   views={categoryViewsQuery.data ?? null}
                   sessions={visibleSessions}
                   loading={categoryViewsQuery.isLoading}
+                  focusedProjectSlug={activeIdeaProjectGroup?.slug ?? null}
                   onFocus={activateFocus}
                 />
               ) : (
                 <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as PileWorkspaceView }, true)}>
                 <Tabs.Content value="atlas" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-control-bar">
-                      <div className="workspace-control-group">
-                        <span className="workspace-control-label">Map</span>
+                    <div className="workspace-tool-strip">
+                      <div className="workspace-tool-group">
+                        <span className="tool-label">Map</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
 
-                      <div className="workspace-control-group flex-wrap justify-end xl:flex-nowrap">
-                        <span className="workspace-control-label">Group</span>
+                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
+                        <span className="tool-label">Group</span>
                         <Button
                           size="sm"
                           variant={groupingMode === "community" ? "primary" : "secondary"}
@@ -1688,7 +1970,7 @@ function App() {
                           </Select>
                         ) : null}
 
-                        <span className="workspace-control-label">View</span>
+                        <span className="tool-label">View</span>
                         <Button
                           size="sm"
                           variant={graphDensity === "curated" ? "primary" : "secondary"}
@@ -1782,13 +2064,13 @@ function App() {
 
                 <Tabs.Content value="story" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-control-bar">
-                      <div className="workspace-control-group">
-                        <span className="workspace-control-label">Story</span>
+                    <div className="workspace-tool-strip">
+                      <div className="workspace-tool-group">
+                        <span className="tool-label">Story</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
-                      <div className="workspace-control-group flex-wrap justify-end xl:flex-nowrap">
-                        <span className="workspace-control-label">Group</span>
+                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
+                        <span className="tool-label">Group</span>
                         <Button
                           size="sm"
                           variant={groupingMode === "community" ? "primary" : "secondary"}
@@ -1894,13 +2176,13 @@ function App() {
 
                 <Tabs.Content value="ops" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-control-bar">
-                      <div className="workspace-control-group">
-                        <span className="workspace-control-label">Ops</span>
+                    <div className="workspace-tool-strip">
+                      <div className="workspace-tool-group">
+                        <span className="tool-label">Ops</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
-                      <div className="workspace-control-group flex-wrap justify-end xl:flex-nowrap">
-                        <span className="workspace-control-label">Group</span>
+                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
+                        <span className="tool-label">Group</span>
                         <Button
                           size="sm"
                           variant={groupingMode === "community" ? "primary" : "secondary"}
@@ -2099,7 +2381,7 @@ function App() {
                                 onClick={() => {
                                   setGraphFocus(null);
                                   setGraphInspect(null);
-                                  updateRoute({ q: item.label, view: "atlas", note: null }, true);
+                                  updateRoute({ q: item.label, project: null, view: "atlas", note: null }, true);
                                 }}
                                 className="flex w-full items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 py-1.5 text-left transition hover:bg-[var(--color-paper-sunken)]"
                               >
@@ -2121,65 +2403,19 @@ function App() {
         </div>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[260px_340px_minmax(0,1fr)]">
-            <Card className="overflow-hidden p-3">
-              <CardHeader className="items-center gap-2">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Activity</div>
-                  <CardTitle className="mt-0.5 text-base">Recent activity</CardTitle>
-                </div>
-                {route.bucket ? <Badge tone="info">{formatBucketLabel(route.bucket)}</Badge> : null}
-              </CardHeader>
-              <CardContent className="mt-2">
-                <div className="space-y-1.5">
-                  {activityBuckets.slice(-6).map((bucket) => {
-                    const active = route.bucket === bucket.bucket;
-                    return (
-                      <button
-                        key={bucket.bucket}
-                        type="button"
-                        onClick={() => handleBucketToggle(bucket.bucket)}
-                        className={`w-full rounded-[8px] border px-2 py-1.5 text-left transition ${
-                          active
-                            ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
-                            : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold">{bucket.label}</span>
-                          <span className={active ? "text-xs text-white/75" : "text-xs text-[var(--color-ink-soft)]"}>{formatNumber(bucket.count)}</span>
-                        </div>
-                        <div className={active ? "mt-1.5 h-1.5 rounded-full bg-white/20" : "mt-1.5 h-1.5 rounded-full bg-[var(--color-paper-sunken)]"}>
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${(bucket.count / maxActivityBucketCount) * 100}%`,
-                              backgroundColor: active ? "#ffffff" : pilePalette[activeDisplayCategory].accent
-                            }}
-                          />
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {!activityBuckets.length ? <p className="text-xs text-[var(--color-ink-soft)]">No recent activity yet.</p> : null}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="overflow-hidden p-3">
+      <div className="pile-workbench-context">
+            <Card className="context-card-fill p-3">
               <CardHeader className="flex-col gap-2 sm:flex-row sm:items-start">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Results</div>
-                  <CardTitle className="mt-0.5 text-base">
-                    {!isCustomScope && route.pile === "todo" ? "Change log notes" : isCustomScope ? "Notes in extra pile" : "Notes in scope"}
-                  </CardTitle>
+                  <div className="rail-heading"><ListChecks className="h-3.5 w-3.5" /> Results</div>
+                  <CardTitle className="mt-0.5 text-base">{notesTitle}</CardTitle>
                 </div>
                 <div className="max-w-[30ch] text-left text-xs leading-5 text-[var(--color-ink-soft)] sm:text-right">
                   {noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}
                 </div>
               </CardHeader>
-              <CardContent className="mt-3">
-                <ScrollArea className="h-[min(56vh,560px)]">
+              <CardContent className="mt-3 min-h-0 flex-1">
+                <ScrollArea className="h-full">
                   <div className="space-y-2 pr-5 pb-1">
                     {noteListItems.map((session) => {
                       const match = matches.get(session.id);
@@ -2226,12 +2462,12 @@ function App() {
               </CardContent>
             </Card>
 
-            <Card className="overflow-hidden p-3">
+            <Card className="context-card-fill reader-pane p-4">
               <CardHeader className="gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Reader</div>
-                  <CardTitle className="mt-0.5 truncate text-base">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
-                  <CardDescription className="line-clamp-1 text-xs leading-5">
+                  <div className="rail-heading"><BookOpen className="h-3.5 w-3.5" /> Reader</div>
+                  <CardTitle className="mt-1 truncate text-lg">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
+                  <CardDescription className="line-clamp-2 text-xs leading-5">
                     {noteQuery.data
                       ? [
                           providerLabels[noteQuery.data.provider],
@@ -2251,9 +2487,10 @@ function App() {
                               key={pile}
                               type="button"
                               onClick={() => void handleRemoveExtraPile(pile)}
-                              className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1 text-xs text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-sunken)]"
+                              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1 text-xs text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-sunken)]"
                             >
-                              {pile} ×
+                              {pile}
+                              <X className="h-3 w-3" />
                             </button>
                           ))}
                           {!(selectedSession.extra_piles ?? []).length ? (
@@ -2273,9 +2510,10 @@ function App() {
                           value={extraPileDraft}
                           onChange={(event) => setExtraPileDraft(event.target.value)}
                           placeholder="Add this note to an extra pile"
-                          className="h-10 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
+                          className="compact-field h-10 flex-1 text-sm"
                         />
                         <Button type="submit" size="sm" variant="secondary" disabled={!extraPileDraft.trim()}>
+                          <Plus className="h-3.5 w-3.5" />
                           Add pile
                         </Button>
                       </form>
@@ -2299,6 +2537,7 @@ function App() {
                         });
                       }}
                     >
+                      <BookOpen className="h-3.5 w-3.5" />
                       Open note
                     </Button>
                   ) : null}
@@ -2310,15 +2549,15 @@ function App() {
                   ) : null}
                 </div>
               </CardHeader>
-              <CardContent className="mt-2">
+              <CardContent className="mt-2 flex min-h-0 flex-1 flex-col">
                 {extraPileError ? (
                   <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{extraPileError}</div>
                 ) : null}
                 {selectedSession && noteQuery.isLoading ? (
                   <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content…</div>
                 ) : selectedSession && noteQuery.data ? (
-                  <Tabs.Root value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
-                    <Tabs.List className="mb-2 inline-flex rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
+                  <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
+                    <Tabs.List className="mb-3 grid w-full grid-cols-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
                       {[
                         { value: "overview", label: "Overview" },
                         { value: "transcript", label: "Transcript" },
@@ -2334,7 +2573,7 @@ function App() {
                       ))}
                     </Tabs.List>
 
-                    <ScrollArea className="h-[min(56vh,560px)]">
+                    <ScrollArea className="min-h-0 flex-1">
                       <div className="pr-5 pb-1">
                         <Tabs.Content value="overview" className="outline-none">
                           <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
@@ -2357,28 +2596,9 @@ function App() {
             </Card>
       </div>
 
-      {error ||
-      sessionsQuery.error ||
-      searchQuery.error ||
-      statsQuery.error ||
-      graphQuery.error ||
-      categoryViewsQuery.error ||
-      noteQuery.error ||
-      todoQuery.error ||
-      extraPilesQuery.error ||
-      status?.backendValidationError ? (
-        <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {status?.backendValidationError ||
-            error ||
-            (sessionsQuery.error instanceof Error && sessionsQuery.error.message) ||
-            (searchQuery.error instanceof Error && searchQuery.error.message) ||
-            (statsQuery.error instanceof Error && statsQuery.error.message) ||
-            (graphQuery.error instanceof Error && graphQuery.error.message) ||
-            (categoryViewsQuery.error instanceof Error && categoryViewsQuery.error.message) ||
-            (noteQuery.error instanceof Error && noteQuery.error.message) ||
-            (todoQuery.error instanceof Error && todoQuery.error.message) ||
-            (extraPilesQuery.error instanceof Error && extraPilesQuery.error.message) ||
-            "Could not load the pile explorer."}
+      {issueMessage ? (
+        <div className="pile-workbench-error rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {issueMessage}
         </div>
       ) : null}
     </div>
