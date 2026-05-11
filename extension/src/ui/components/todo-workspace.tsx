@@ -21,6 +21,7 @@ type TodoWorkspaceProps = {
   onDraftChange: (value: string) => void;
   onAddTask: () => void;
   onToggleTask: (item: BackendTodoItem, done: boolean) => void;
+  onInspectTask?: (item: BackendTodoItem) => void;
 };
 
 export function TodoWorkspace({
@@ -32,7 +33,8 @@ export function TodoWorkspace({
   draft,
   onDraftChange,
   onAddTask,
-  onToggleTask
+  onToggleTask,
+  onInspectTask
 }: TodoWorkspaceProps) {
   const items = todo?.items ?? [];
   const activeItems = items.filter((item) => !item.done);
@@ -94,9 +96,9 @@ export function TodoWorkspace({
                 <ScrollArea className="h-[min(40vh,360px)] pr-4">
                   <div className="space-y-2">
                     {activeItems.map((item) => (
-                      <label
+                      <div
                         key={item.text}
-                        className={`flex cursor-pointer items-start gap-3 rounded-[8px] border px-3 py-3 transition ${taskCardTone(false)}`}
+                        className={`flex items-start gap-3 rounded-[8px] border px-3 py-3 transition ${taskCardTone(false)}`}
                       >
                         <input
                           type="checkbox"
@@ -104,8 +106,11 @@ export function TodoWorkspace({
                           onChange={(event) => onToggleTask(item, event.target.checked)}
                           className="mt-1 h-4 w-4 shrink-0 accent-emerald-600"
                         />
-                        <span className="break-words text-sm leading-6">{item.text}</span>
-                      </label>
+                        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onInspectTask?.(item)}>
+                          <span className="break-words text-sm leading-6">{item.text}</span>
+                          {item.account_label ? <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">{item.account_label}</span> : null}
+                        </button>
+                      </div>
                     ))}
                     {!activeItems.length ? <p className="text-sm leading-6 text-[var(--color-ink-soft)]">No active tasks in the shared list.</p> : null}
                   </div>
@@ -120,9 +125,9 @@ export function TodoWorkspace({
                 <ScrollArea className="h-[min(40vh,360px)] pr-4">
                   <div className="space-y-2">
                     {completedItems.map((item) => (
-                      <label
+                      <div
                         key={item.text}
-                        className={`flex cursor-pointer items-start gap-3 rounded-[8px] border px-3 py-3 transition ${taskCardTone(true)}`}
+                        className={`flex items-start gap-3 rounded-[8px] border px-3 py-3 transition ${taskCardTone(true)}`}
                       >
                         <input
                           type="checkbox"
@@ -130,8 +135,11 @@ export function TodoWorkspace({
                           onChange={(event) => onToggleTask(item, event.target.checked)}
                           className="mt-1 h-4 w-4 shrink-0 accent-emerald-600"
                         />
-                        <span className="break-words text-sm leading-6 line-through">{item.text}</span>
-                      </label>
+                        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onInspectTask?.(item)}>
+                          <span className="break-words text-sm leading-6 line-through">{item.text}</span>
+                          {item.account_label ? <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">{item.account_label}</span> : null}
+                        </button>
+                      </div>
                     ))}
                     {!completedItems.length ? <p className="text-sm leading-6 text-[var(--color-ink-soft)]">Checked-off tasks stay here until you reopen them.</p> : null}
                   </div>

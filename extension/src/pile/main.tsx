@@ -87,7 +87,7 @@ import { mountApp } from "../ui/boot";
 import { Badge } from "../ui/components/badge";
 import { Button } from "../ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/components/card";
-import { CategoryWorkspace } from "../ui/components/category-workspaces";
+import { CategoryWorkspace, type InformationDetail } from "../ui/components/category-workspaces";
 import { PileGraph, type PileGraphDensity, type PileGraphFocusMode, type PileGraphSelection } from "../ui/components/pile-graph";
 import { ScrollArea } from "../ui/components/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/components/select";
@@ -101,6 +101,7 @@ type RouteState = {
   pile: BuiltInPileSlug;
   q: string;
   provider: ProviderName | null;
+  accountKey: string | null;
   sort: PileSortMode;
   view: PileWorkspaceView;
   panel: PilePanelView;
@@ -127,6 +128,7 @@ function readRouteState(): RouteState {
     pile: parsePile(params.get("pile")),
     q: params.get("q")?.trim() ?? "",
     provider: parseProvider(params.get("provider")),
+    accountKey: params.get("account")?.trim() ?? null,
     sort: parseSortMode(params.get("sort")),
     view: parsePileWorkspaceView(params.get("view")),
     panel: parsePilePanel(params.get("panel")),
@@ -149,6 +151,11 @@ function writeRouteState(state: RouteState, push = true): void {
     url.searchParams.set("provider", state.provider);
   } else {
     url.searchParams.delete("provider");
+  }
+  if (state.accountKey?.trim()) {
+    url.searchParams.set("account", state.accountKey.trim());
+  } else {
+    url.searchParams.delete("account");
   }
   if (state.sort !== "recent") {
     url.searchParams.set("sort", state.sort);
@@ -211,6 +218,7 @@ function createEmptyStats(pile: BuiltInPileSlug): BackendPileStats {
     notes_with_todo_summary: 0,
     built_in_pile_counts: [{ pile_slug: pile, count: 0 }],
     provider_counts: [],
+    account_counts: [],
     activity: [],
     top_tags: [],
     top_entities: [],
@@ -256,6 +264,18 @@ function searchMatchMap(search: BackendSearchResponse | undefined): Map<string, 
   return matches;
 }
 
+function sessionAccountKey(session: BackendSessionListItem): string {
+  return session.account_key || `${session.provider}:default`;
+}
+
+function sessionAccountLabel(session: BackendSessionListItem): string {
+  if (session.account_label) {
+    return session.account_label;
+  }
+  const suffix = sessionAccountKey(session).split(":").slice(1).join(":");
+  return suffix && suffix !== "default" ? suffix : `${providerLabels[session.provider]} account`;
+}
+
 function signalGroups(stats: BackendPileStats): {
   primary: Array<{ label: string; count: number }>;
   secondary: Array<{ label: string; count: number }>;
@@ -299,6 +319,41 @@ function sessionPreviewText(
     return "Open this saved update to see how the shared checklist changed.";
   }
   return "Open to inspect this note.";
+}
+
+function sessionDetailKind(pile: string): InformationDetail["kind"] {
+  if (pile === "journal") {
+    return "Journal";
+  }
+  if (pile === "ideas") {
+    return "Idea";
+  }
+  if (pile === "todo") {
+    return "Todo";
+  }
+  if (pile === "factual") {
+    return "Fact";
+  }
+  return "Content";
+}
+
+function sessionInformationDetail(
+  session: BackendSessionListItem,
+  match: { snippet: string; kind: string } | undefined,
+  pile: string
+): InformationDetail {
+  return {
+    kind: sessionDetailKind(pile),
+    title: titleFromSession(session),
+    summary: sessionPreviewText(session, match, pile),
+    accountKey: session.account_key,
+    accountLabel: sessionAccountLabel(session),
+    provider: session.provider,
+    date: session.updated_at,
+    sourceTitle: titleFromSession(session),
+    sessionIds: [session.id],
+    chips: [providerLabels[session.provider], displayPileLabel(session.pile_slug ?? pile), ...(session.extra_piles ?? [])]
+  };
 }
 
 function formatBucketLabel(bucket: string): string {
@@ -565,6 +620,7 @@ function App() {
   const { settings, status, loading, error } = useExtensionBootstrap();
   const [route, setRoute] = useState<RouteState>(readRouteState);
   const [graphFocus, setGraphFocus] = useState<GraphFocus | null>(null);
+  const [informationDetail, setInformationDetail] = useState<InformationDetail | null>(null);
   const [graphInspect, setGraphInspect] = useState<PileGraphSelection | null>(null);
   const [readerTab, setReaderTab] = useState<"overview" | "transcript" | "markdown">("overview");
   const [groupingMode, setGroupingMode] = useState<GraphGroupingMode>("community");
@@ -592,6 +648,7 @@ function App() {
     const handlePopState = (): void => {
       setRoute(readRouteState());
       setGraphFocus(null);
+      setInformationDetail(null);
       setGraphInspect(null);
     };
 
@@ -610,7 +667,24 @@ function App() {
   }
 
   const sessionsQuery = useQuery({
-    queryKey: ["pile-sessions", settings?.backendUrl, settings?.backendToken, route.pile, route.provider, route.extraPile],
+    queryKey: ["pile-sessions", settings?.backendUrl, settings?.backendToken, route.pile, route.provider, route.accountKey, route.extraPile],
+    queryFn: () =>
+      fetchSessions(
+        settings as ExtensionSettings,
+        route.provider || route.accountKey || route.extraPile
+          ? {
+              pile: isCustomScope ? undefined : route.pile,
+              provider: route.provider ?? undefined,
+              accountKey: route.accountKey ?? undefined,
+              extraPile: route.extraPile ?? undefined
+            }
+          : { pile: route.pile }
+      ),
+    enabled: Boolean(settings && !status?.backendValidationError)
+  });
+
+  const accountSessionsQuery = useQuery({
+    queryKey: ["pile-account-sessions", settings?.backendUrl, settings?.backendToken, route.pile, route.provider, route.extraPile],
     queryFn: () =>
       fetchSessions(
         settings as ExtensionSettings,
@@ -626,10 +700,11 @@ function App() {
   });
 
   const extraPilesQuery = useQuery({
-    queryKey: ["session-extra-piles", settings?.backendUrl, settings?.backendToken, route.provider, isCustomScope ? null : route.pile],
+    queryKey: ["session-extra-piles", settings?.backendUrl, settings?.backendToken, route.provider, route.accountKey, isCustomScope ? null : route.pile],
     queryFn: () =>
       fetchExtraPiles(settings as ExtensionSettings, {
         provider: route.provider ?? undefined,
+        accountKey: route.accountKey ?? undefined,
         pile: isCustomScope ? undefined : route.pile
       }),
     enabled: Boolean(settings && !status?.backendValidationError)
@@ -648,6 +723,7 @@ function App() {
       settings?.backendToken,
       route.pile,
       route.provider,
+      route.accountKey,
       route.extraPile,
       debouncedQuery
     ],
@@ -655,6 +731,7 @@ function App() {
       fetchExplorerSearch(settings as ExtensionSettings, debouncedQuery, {
         pile: isCustomScope ? undefined : route.pile,
         provider: route.provider ?? undefined,
+        accountKey: route.accountKey ?? undefined,
         extraPile: route.extraPile ?? undefined,
         limit: 80
       }),
@@ -663,6 +740,25 @@ function App() {
 
   const matches = useMemo(() => searchMatchMap(searchQuery.data), [searchQuery.data]);
   const allSessions = sessionsQuery.data ?? [];
+  const accountScopeSessions = accountSessionsQuery.data ?? [];
+  const accountOptions = useMemo(() => {
+    const counts = new Map<string, { key: string; label: string; provider: ProviderName; count: number }>();
+    for (const session of accountScopeSessions) {
+      const key = sessionAccountKey(session);
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+      counts.set(key, {
+        key,
+        label: sessionAccountLabel(session),
+        provider: session.provider,
+        count: 1
+      });
+    }
+    return Array.from(counts.values()).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  }, [accountScopeSessions]);
   const preBucketSessions = useMemo(() => {
     const base = sortSessions(allSessions, route.sort);
     if (!debouncedQuery.trim()) {
@@ -686,6 +782,15 @@ function App() {
     return preBucketSessions.filter((session) => session.updated_at.startsWith(route.bucket as string));
   }, [preBucketSessions, route.bucket]);
 
+  useEffect(() => {
+    if (!route.accountKey || accountSessionsQuery.isLoading || !accountOptions.length) {
+      return;
+    }
+    if (!accountOptions.some((account) => account.key === route.accountKey)) {
+      updateRoute({ accountKey: null, note: null }, false);
+    }
+  }, [accountOptions, accountSessionsQuery.isLoading, route.accountKey]);
+
   const scopedSessionIds = debouncedQuery.trim() || route.bucket ? visibleSessions.map((session) => session.id) : undefined;
 
   const statsQuery = useQuery({
@@ -695,6 +800,7 @@ function App() {
       settings?.backendToken,
       route.pile,
       route.provider,
+      route.accountKey,
       route.extraPile,
       scopedSessionIds?.join("|") ?? "*"
     ],
@@ -703,9 +809,10 @@ function App() {
         ? fetchCustomPileStats(
             settings as ExtensionSettings,
             route.extraPile as string,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -713,9 +820,10 @@ function App() {
         : fetchPileStats(
             settings as ExtensionSettings,
             route.pile,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -730,6 +838,7 @@ function App() {
       settings?.backendToken,
       route.pile,
       route.provider,
+      route.accountKey,
       route.extraPile,
       scopedSessionIds?.join("|") ?? "*"
     ],
@@ -738,9 +847,10 @@ function App() {
         ? fetchCustomPileGraph(
             settings as ExtensionSettings,
             route.extraPile as string,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -748,9 +858,10 @@ function App() {
         : fetchPileGraph(
             settings as ExtensionSettings,
             route.pile,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -765,6 +876,7 @@ function App() {
       settings?.backendToken,
       route.pile,
       route.provider,
+      route.accountKey,
       route.extraPile,
       scopedSessionIds?.join("|") ?? "*"
     ],
@@ -773,9 +885,10 @@ function App() {
         ? fetchCustomPileViews(
             settings as ExtensionSettings,
             route.extraPile as string,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -783,9 +896,10 @@ function App() {
         : fetchPileViews(
             settings as ExtensionSettings,
             route.pile,
-            route.provider || scopedSessionIds
+            route.provider || route.accountKey || scopedSessionIds
               ? {
                   provider: route.provider ?? undefined,
+                  accountKey: route.accountKey ?? undefined,
                   sessionIds: scopedSessionIds
                 }
               : undefined
@@ -915,9 +1029,10 @@ function App() {
         .slice(0, 120),
     [filteredGraph.nodes]
   );
-  const pathFilterOptions = route.provider || scopedSessionIds
+  const pathFilterOptions = route.provider || route.accountKey || scopedSessionIds
     ? {
         provider: route.provider ?? undefined,
+        accountKey: route.accountKey ?? undefined,
         sessionIds: scopedSessionIds
       }
     : undefined;
@@ -928,6 +1043,7 @@ function App() {
       settings?.backendToken,
       route.pile,
       route.provider,
+      route.accountKey,
       route.extraPile,
       scopedSessionIds?.join("|") ?? "*",
       pathSourceId,
@@ -963,6 +1079,13 @@ function App() {
     { key: "pile", label: isCustomScope ? "Default pile" : "Pile", value: pileLabels[activeDisplayCategory] },
     route.extraPile ? { key: "extra-pile", label: "Collection", value: route.extraPile } : null,
     route.provider ? { key: "provider", label: "Provider", value: providerLabels[route.provider] } : null,
+    route.accountKey
+      ? {
+          key: "account",
+          label: "Account",
+          value: accountOptions.find((account) => account.key === route.accountKey)?.label ?? route.accountKey
+        }
+      : null,
     route.q ? { key: "query", label: "Query", value: route.q } : null,
     route.bucket ? { key: "bucket", label: "Time", value: formatBucketLabel(route.bucket) } : null,
     activeIdeaProjectGroup ? { key: "idea-project", label: "Project", value: activeIdeaProjectGroup.label } : null,
@@ -1040,6 +1163,7 @@ function App() {
 
   function handlePileSwitch(pile: BuiltInPileSlug): void {
     setGraphFocus(null);
+    setInformationDetail(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
     updateRoute({ pile, note: null, bucket: null, project: null, view: "atlas", panel: "workspace", extraPile: null }, true);
@@ -1047,14 +1171,16 @@ function App() {
 
   function handleExtraPileSwitch(name: string): void {
     setGraphFocus(null);
+    setInformationDetail(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
     updateRoute({ extraPile: name, note: null, bucket: null, project: null, view: "atlas", panel: "workspace" }, true);
   }
 
-  function activateFocus(label: string, sessionIds: string[], nextView?: PileWorkspaceView): void {
+  function activateFocus(label: string, sessionIds: string[], nextView?: PileWorkspaceView, detail?: InformationDetail): void {
     setGraphInspect(null);
     setGraphFocus({ label, sessionIds });
+    setInformationDetail(detail ?? null);
     const nextId = visibleSessions.find((item) => sessionIds.includes(item.id))?.id ?? sessionIds[0] ?? null;
     updateRoute({ note: nextId, view: nextView ?? route.view }, false);
   }
@@ -1063,17 +1189,31 @@ function App() {
     activateFocus(label, sessionIds);
   }
 
+  function inspectTodoItem(item: BackendTodoItem): void {
+    setInformationDetail({
+      kind: "Todo",
+      title: item.text,
+      summary: item.done ? "Completed task in the shared checklist." : "Active task in the shared checklist.",
+      accountKey: item.account_key,
+      accountLabel: item.account_label ?? "Shared checklist",
+      sessionIds: [],
+      chips: [item.done ? "Completed" : "Active"]
+    });
+  }
+
   function handleBucketToggle(bucket: string): void {
     setGraphFocus(null);
+    setInformationDetail(null);
     setGraphInspect(null);
     updateRoute({ bucket: route.bucket === bucket ? null : bucket, note: null }, true);
   }
 
   function clearScope(): void {
     setGraphFocus(null);
+    setInformationDetail(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, project: null, note: null, view: "atlas", panel: "workspace", extraPile: null }, true);
+    updateRoute({ q: "", provider: null, accountKey: null, sort: "recent", bucket: null, project: null, note: null, view: "atlas", panel: "workspace", extraPile: null }, true);
   }
 
   function handlePathFocus(path: BackendExplorerGraphPath): void {
@@ -1980,8 +2120,9 @@ function App() {
                       value={route.provider ?? "__all__"}
                       onValueChange={(value) => {
                         setGraphFocus(null);
+                        setInformationDetail(null);
                         setGraphInspect(null);
-                        updateRoute({ provider: value === "__all__" ? null : (value as ProviderName), note: null }, true);
+                        updateRoute({ provider: value === "__all__" ? null : (value as ProviderName), accountKey: null, note: null }, true);
                       }}
                     >
                       <SelectTrigger className="h-8 text-xs">
@@ -1992,6 +2133,30 @@ function App() {
                         <SelectItem value="chatgpt" className="py-1.5 text-xs">ChatGPT</SelectItem>
                         <SelectItem value="gemini" className="py-1.5 text-xs">Gemini</SelectItem>
                         <SelectItem value="grok" className="py-1.5 text-xs">Grok</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Select
+                      value={route.accountKey ?? "__all__"}
+                      onValueChange={(value) => {
+                        setGraphFocus(null);
+                        setInformationDetail(null);
+                        setGraphInspect(null);
+                        updateRoute({ accountKey: value === "__all__" ? null : value, note: null }, true);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__" className="py-1.5 text-xs">All accounts</SelectItem>
+                        {accountOptions.map((account) => (
+                          <SelectItem key={account.key} value={account.key} className="py-1.5 text-xs">
+                            {account.label} · {formatNumber(account.count)}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -2019,6 +2184,7 @@ function App() {
                       variant="ghost"
                       onClick={() => {
                         setGraphFocus(null);
+                        setInformationDetail(null);
                         setGraphInspect(null);
                       }}
                       className="h-8 px-2.5 text-xs"
@@ -2160,14 +2326,19 @@ function App() {
                           <button
                             key={session.id}
                             type="button"
-                            onClick={() => updateRoute({ note: session.id, panel: "reader" }, false)}
+                            onClick={() => {
+                              setGraphFocus({ label: titleFromSession(session), sessionIds: [session.id] });
+                              setInformationDetail(sessionInformationDetail(session, match, session.pile_slug ?? activeDisplayCategory));
+                              updateRoute({ note: session.id }, false);
+                            }}
                             className={`rounded-[8px] border p-3 text-left transition ${
                               isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                             }`}
                           >
                             <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
                               <span className="min-w-0 truncate text-sm font-semibold">{titleFromSession(session)}</span>
-                              <span className="shrink-0">
+                              <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                                <Badge tone="neutral">{sessionAccountLabel(session)}</Badge>
                                 <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
                               </span>
                             </div>
@@ -2206,6 +2377,7 @@ function App() {
                         {noteQuery.data
                           ? [
                               providerLabels[noteQuery.data.provider],
+                              sessionAccountLabel(noteQuery.data),
                               displayPileLabel(noteQuery.data.pile_slug ?? route.pile),
                               formatLongDate(noteQuery.data.updated_at),
                               `${formatNumber(noteQuery.data.word_count)} words`
@@ -2228,6 +2400,7 @@ function App() {
                               pile: selectedSession.pile_slug ?? route.pile,
                               q: route.q,
                               provider: route.provider,
+                              accountKey: route.accountKey,
                               sort: route.sort,
                               extraPile: route.extraPile
                             });
@@ -2299,6 +2472,7 @@ function App() {
                   onDraftChange={setTodoDraft}
                   onAddTask={() => void handleTodoAdd()}
                   onToggleTask={(item, done) => void handleTodoToggle(item, done)}
+                  onInspectTask={inspectTodoItem}
                 />
               ) : usesCategoryWorkspace ? (
                 <CategoryWorkspace
@@ -2634,6 +2808,74 @@ function App() {
           </Card>
         </div>
       </div>
+
+      {informationDetail ? (
+        <div className="information-detail-backdrop" role="dialog" aria-modal="true" aria-label={`${informationDetail.kind} detail`}>
+          <div className="information-detail-panel">
+            <div className="information-detail-header">
+              <div className="min-w-0">
+                <div className="information-detail-kicker">
+                  {[informationDetail.kind, informationDetail.accountLabel, informationDetail.provider ? providerLabels[informationDetail.provider] : null, informationDetail.date ? formatCompactDate(informationDetail.date) : null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                <h2>{informationDetail.title}</h2>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setInformationDetail(null)} aria-label="Close detail">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {informationDetail.summary ? <p className="information-detail-summary">{informationDetail.summary}</p> : null}
+
+            {informationDetail.chips?.length ? (
+              <div className="information-detail-chips">
+                {informationDetail.chips.slice(0, 14).map((chip) => (
+                  <span key={chip}>{chip}</span>
+                ))}
+              </div>
+            ) : null}
+
+            {informationDetail.sections?.some((section) => section.body || section.items?.length) ? (
+              <div className="information-detail-sections">
+                {informationDetail.sections
+                  .filter((section) => section.body || section.items?.length)
+                  .map((section) => (
+                    <section key={section.title}>
+                      <h3>{section.title}</h3>
+                      {section.body ? <p>{section.body}</p> : null}
+                      {section.items?.length ? (
+                        <ul>
+                          {section.items.slice(0, 8).map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </section>
+                  ))}
+              </div>
+            ) : null}
+
+            <div className="information-detail-actions">
+              {informationDetail.sessionIds[0] ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    updateRoute({ note: informationDetail.sessionIds[0], panel: "reader" }, true);
+                    setInformationDetail(null);
+                  }}
+                >
+                  <BookOpen className="h-4 w-4" />
+                  Source note
+                </Button>
+              ) : null}
+              <Button variant="ghost" onClick={() => setInformationDetail(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {issueMessage ? (
         <div className="pile-workbench-error rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

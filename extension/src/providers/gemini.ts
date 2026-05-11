@@ -1,4 +1,5 @@
 import type { CapturedNetworkEvent, NormalizedMessage, NormalizedSessionSnapshot } from "../shared/types";
+import { normalizeProviderAccount } from "../shared/accounts";
 import type { IProviderScraper } from "./provider";
 import {
   coerceOccurredAt,
@@ -156,7 +157,11 @@ export class GeminiScraper implements IProviderScraper {
           findStringByKeys(requestCandidates, ["externalSessionId", "external_session_id"]) ??
           ""
       ) ?? null;
-    const accountKey = geminiAccountKeyFromPageUrl(event.pageUrl);
+    const accountKey =
+      findStringByKeys(responseCandidates, ["accountKey", "account_key"]) ??
+      findStringByKeys(requestCandidates, ["accountKey", "account_key"]) ??
+      geminiAccountKeyFromPageUrl(event.pageUrl);
+    const account = normalizeProviderAccount(this.provider, accountKey, `Gemini ${accountKey}`);
     const conversationId =
       normalizeGeminiConversationId(findStringByKeys(responseCandidates, ["conversationId", "conversation_id", "chat_id"])) ??
       normalizeGeminiConversationId(findStringByKeys(requestCandidates, ["conversationId", "conversation_id", "chat_id"])) ??
@@ -183,6 +188,8 @@ export class GeminiScraper implements IProviderScraper {
       return {
         provider: this.provider,
         externalSessionId,
+        accountKey: account.accountKey,
+        accountLabel: account.accountLabel,
         title,
         sourceUrl: event.pageUrl,
         capturedAt: event.capturedAt,
@@ -223,6 +230,8 @@ export class GeminiScraper implements IProviderScraper {
     return {
       provider: this.provider,
       externalSessionId,
+      accountKey: account.accountKey,
+      accountLabel: account.accountLabel,
       title,
       sourceUrl: event.pageUrl,
       capturedAt: event.capturedAt,

@@ -1,4 +1,5 @@
 import type { CapturedNetworkEvent, NormalizedMessage, NormalizedSessionSnapshot } from "../shared/types";
+import { normalizeProviderAccount, scopeExternalSessionIdByAccount } from "../shared/accounts";
 import type { IProviderScraper } from "./provider";
 import {
   coerceOccurredAt,
@@ -44,6 +45,16 @@ function conversationIdFromCapturedUrl(url: URL): string | undefined {
 
   const pageScopedMatch = url.pathname.match(/^\/c\/([^/]+)/);
   return pageScopedMatch?.[1] ? decodeURIComponent(pageScopedMatch[1]) : undefined;
+}
+
+function accountCandidateFromStructured(values: unknown[]): { key?: string; label?: string } {
+  const label =
+    findStringByKeys(values, ["email", "emailAddress", "email_address", "username", "displayName", "display_name"]) ??
+    undefined;
+  const key =
+    findStringByKeys(values, ["account_id", "accountId", "user_id", "userId", "workspace_id", "workspaceId"]) ??
+    label;
+  return { key, label };
 }
 
 function firstString(...values: unknown[]): string | undefined {
@@ -192,14 +203,18 @@ export class GrokScraper implements IProviderScraper {
     if (responseCandidates.some(isGrokConversationListPayload)) {
       return null;
     }
+    const accountCandidate = accountCandidateFromStructured(structured);
+    const account = normalizeProviderAccount(this.provider, accountCandidate.key, accountCandidate.label);
 
     const messages: NormalizedMessage[] = [];
     let title = findStringByKeys(structured, ["title", "conversationTitle"]);
-    const externalSessionId =
+    const externalSessionId = scopeExternalSessionIdByAccount(
       findStringByKeys(structured, ["conversationId", "conversation_id"]) ??
       conversationIdFromCapturedUrl(capturedUrl) ??
       sessionIdFromPageUrl(event.pageUrl) ??
-      stableId("grok-session", event.pageUrl);
+      stableId("grok-session", event.pageUrl),
+      account.accountKey
+    );
 
     const explicitMessages = dedupeMessages(
       responseCandidates.flatMap((candidate) => explicitMessagesFromCandidate(candidate, externalSessionId))
@@ -208,6 +223,8 @@ export class GrokScraper implements IProviderScraper {
       return {
         provider: this.provider,
         externalSessionId,
+        accountKey: account.accountKey,
+        accountLabel: account.accountLabel,
         title,
         sourceUrl: event.pageUrl,
         capturedAt: event.capturedAt,
@@ -271,6 +288,8 @@ export class GrokScraper implements IProviderScraper {
     return {
       provider: this.provider,
       externalSessionId,
+      accountKey: account.accountKey,
+      accountLabel: account.accountLabel,
       title,
       sourceUrl: event.pageUrl,
       capturedAt: event.capturedAt,

@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.models import ChatSession, IdeaProject, ProviderName, BuiltInPileSlug
 from app.schemas.explorer import (
+    AccountCount,
     ActivityBucket,
     BuiltInPileCount,
     FactualBacklogItem,
@@ -38,6 +39,7 @@ from app.schemas.explorer import (
     LabelCount,
     ProviderCount,
 )
+from app.services.accounts import session_account_key, session_account_label, session_matches_account
 from app.services.graph import entity_id, entity_note_path
 from app.services.extra_piles import has_extra_pile, summarize_extra_piles, visible_custom_tags
 from app.services.idea_projects import IdeaProjectService, best_project_match_for_text, slugify_project_name
@@ -338,6 +340,8 @@ def _session_evidence(
         session_id=session.id,
         title=session.title,
         provider=session.provider,
+        account_key=session_account_key(session),
+        account_label=session_account_label(session),
         updated_at=session.updated_at,
         note_path=session.markdown_path,
         triplet_id=getattr(triplet, "id", None),
@@ -357,8 +361,9 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileStats:
-        sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions(category, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_stats("default", category.value, sessions, fallback_category=category)
 
     async def custom_category_stats(
@@ -367,8 +372,9 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileStats:
-        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_stats("custom", name, sessions, fallback_category=self._dominant_category(sessions))
 
     async def category_graph(
@@ -377,8 +383,9 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileGraph:
-        sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions(category, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_graph("default", category.value, sessions, fallback_category=category)
 
     async def category_views(
@@ -387,9 +394,10 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileViews:
-        sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
-        related_sessions = await self._all_sessions(provider=provider) if category == BuiltInPileSlug.FACTUAL else []
+        sessions = await self._sessions(category, session_ids=session_ids, provider=provider, account_key=account_key)
+        related_sessions = await self._all_sessions(provider=provider, account_key=account_key) if category == BuiltInPileSlug.FACTUAL else []
         idea_projects = await IdeaProjectService(self.db).list_projects() if category == BuiltInPileSlug.IDEAS else None
         return self._build_views(
             "default",
@@ -406,8 +414,9 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileGraph:
-        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_graph("custom", name, sessions, fallback_category=self._dominant_category(sessions))
 
     async def custom_category_views(
@@ -416,10 +425,11 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileViews:
-        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider, account_key=account_key)
         dominant = self._dominant_category(sessions)
-        related_sessions = await self._all_sessions(provider=provider) if dominant == BuiltInPileSlug.FACTUAL else []
+        related_sessions = await self._all_sessions(provider=provider, account_key=account_key) if dominant == BuiltInPileSlug.FACTUAL else []
         idea_projects = await IdeaProjectService(self.db).list_projects() if dominant == BuiltInPileSlug.IDEAS else None
         return self._build_views(
             "custom",
@@ -438,8 +448,9 @@ class ExplorerService:
         target: str,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileGraphPath:
-        sessions = await self._sessions(category, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions(category, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_graph_path("default", category.value, sessions, source=source, target=target, fallback_category=category)
 
     async def custom_category_graph_path(
@@ -450,8 +461,9 @@ class ExplorerService:
         target: str,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> PileGraphPath:
-        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider)
+        sessions = await self._sessions_for_extra_pile(name, session_ids=session_ids, provider=provider, account_key=account_key)
         return self._build_graph_path(
             "custom",
             name,
@@ -467,6 +479,7 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> list[ChatSession]:
         statement = (
             select(ChatSession)
@@ -483,7 +496,8 @@ class ExplorerService:
             statement = statement.where(ChatSession.provider == provider)
 
         result = await self.db.execute(statement)
-        return list(result.scalars().unique().all())
+        sessions = list(result.scalars().unique().all())
+        return [session for session in sessions if session_matches_account(session, account_key)]
 
     async def _sessions_for_extra_pile(
         self,
@@ -491,6 +505,7 @@ class ExplorerService:
         *,
         session_ids: list[str] | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> list[ChatSession]:
         statement = (
             select(ChatSession)
@@ -507,12 +522,17 @@ class ExplorerService:
 
         result = await self.db.execute(statement)
         sessions = list(result.scalars().unique().all())
-        return [session for session in sessions if has_extra_pile(session.custom_tags, name)]
+        return [
+            session
+            for session in sessions
+            if has_extra_pile(session.custom_tags, name) and session_matches_account(session, account_key)
+        ]
 
     async def _all_sessions(
         self,
         *,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
     ) -> list[ChatSession]:
         statement = (
             select(ChatSession)
@@ -526,7 +546,8 @@ class ExplorerService:
         if provider:
             statement = statement.where(ChatSession.provider == provider)
         result = await self.db.execute(statement)
-        return list(result.scalars().unique().all())
+        sessions = list(result.scalars().unique().all())
+        return [session for session in sessions if session_matches_account(session, account_key)]
 
     def extra_pile_summaries(self, sessions: list[ChatSession]) -> list[tuple[str, int]]:
         return summarize_extra_piles([session.custom_tags for session in sessions])
@@ -548,6 +569,16 @@ class ExplorerService:
         provider_counts = [
             ProviderCount(provider=provider, count=count)
             for provider, count in sorted(Counter(session.provider for session in sessions).items(), key=lambda item: item[0].value)
+        ]
+        account_counts = [
+            AccountCount(account_key=key, account_label=label, provider=provider, count=count)
+            for (key, label, provider), count in sorted(
+                Counter(
+                    (session_account_key(session), session_account_label(session), session.provider)
+                    for session in sessions
+                ).items(),
+                key=lambda item: (-item[1], item[0][1].lower()),
+            )
         ]
         built_in_pile_counts = [
             BuiltInPileCount(pile_slug=pile, count=count)
@@ -598,6 +629,7 @@ class ExplorerService:
             notes_with_todo_summary=sum(1 for session in sessions if (session.todo_summary or "").strip()),
             built_in_pile_counts=built_in_pile_counts,
             provider_counts=provider_counts,
+            account_counts=account_counts,
             activity=activity,
             top_tags=top_tags,
             top_entities=top_entities,
@@ -653,6 +685,8 @@ class ExplorerService:
                 session_id=session.id,
                 title=session.title,
                 provider=session.provider,
+                account_key=session_account_key(session),
+                account_label=session_account_label(session),
                 updated_at=session.updated_at,
                 occurred_on=date or None,
                 entry=entry,
@@ -803,6 +837,8 @@ class ExplorerService:
                     session_id=session.id,
                     title=session.title,
                     provider=session.provider,
+                    account_key=session_account_key(session),
+                    account_label=session_account_label(session),
                     updated_at=session.updated_at,
                     thread=_clean_label(payload.get("thread_hint")) or None,
                     project_slug=project_slug,
@@ -1069,6 +1105,8 @@ class ExplorerService:
                     session_id=session.id,
                     title=session.title,
                     provider=session.provider,
+                    account_key=session_account_key(session),
+                    account_label=session_account_label(session),
                     updated_at=session.updated_at,
                     learned_on=_date_label(session) or None,
                     summary=summary,
@@ -1110,6 +1148,8 @@ class ExplorerService:
                     title=session.title,
                     pile_slug=session.built_in_pile,
                     provider=session.provider,
+                    account_key=session_account_key(session),
+                    account_label=session_account_label(session),
                     matched_terms=matches[:6],
                 )
             )

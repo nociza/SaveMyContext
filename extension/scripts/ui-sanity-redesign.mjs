@@ -234,6 +234,15 @@ const sessions = [
   }
 ];
 
+const accountByProvider = {
+  chatgpt: { account_key: "chatgpt:work", account_label: "Work account" },
+  gemini: { account_key: "gemini:u0", account_label: "Gemini u0" },
+  grok: { account_key: "grok:personal", account_label: "Personal account" }
+};
+for (const session of sessions) {
+  Object.assign(session, accountByProvider[session.provider] ?? { account_key: `${session.provider}:default`, account_label: `${session.provider} account` });
+}
+
 const notes = Object.fromEntries(
   sessions.map((session, index) => [
     session.id,
@@ -684,6 +693,8 @@ function buildPileViews(url) {
       session_id: session.id,
       title: session.title,
       provider: session.provider,
+      account_key: session.account_key,
+      account_label: session.account_label,
       updated_at: session.updated_at,
       occurred_on: session.updated_at.slice(0, 10),
       entry: journalProfiles[session.id]?.entry ?? session.share_post,
@@ -775,6 +786,8 @@ function buildPileViews(url) {
       session_id: session.id,
       title: session.title,
       provider: session.provider,
+      account_key: session.account_key,
+      account_label: session.account_label,
       updated_at: session.updated_at,
       thread: ideaProfiles[session.id]?.thread ?? "Unthreaded",
       project_slug: ideaProfiles[session.id]?.project_slug ?? "product-thinking",
@@ -848,6 +861,8 @@ function buildPileViews(url) {
     title: session.title,
     pile_slug: session.category,
     provider: session.provider,
+    account_key: session.account_key,
+    account_label: session.account_label,
     matched_terms: [session.custom_tags?.[0] ?? "context", ...(session.extra_piles ?? []).slice(0, 2)]
   }));
 
@@ -858,6 +873,8 @@ function buildPileViews(url) {
       session_id: session.id,
       title: session.title,
       provider: session.provider,
+      account_key: session.account_key,
+      account_label: session.account_label,
       updated_at: session.updated_at,
       learned_on: session.updated_at.slice(0, 10),
       summary: session.share_post,
@@ -1245,6 +1262,12 @@ async function main() {
       throw error;
     }
     await atlasPage.locator("text=Context engineering notes").first().waitFor();
+    await atlasPage.locator("text=All accounts").first().waitFor();
+    await atlasPage.getByRole("button", { name: /Context engineering notes/i }).first().click();
+    await atlasPage.getByRole("dialog", { name: /Fact detail/i }).waitFor();
+    await atlasPage.locator("text=Work account").first().waitFor();
+    await atlasPage.screenshot({ path: "/tmp/smc-category-detail-redesign.png", fullPage: true });
+    await atlasPage.getByRole("button", { name: "Close detail" }).click();
     await atlasPage.screenshot({ path: "/tmp/smc-category-atlas-redesign.png", fullPage: true });
     console.log("atlas-done");
 
@@ -1360,6 +1383,7 @@ async function main() {
         popup: "/tmp/smc-popup-redesign.png",
         dashboard: "/tmp/smc-dashboard-ops-redesign.png",
         atlas: "/tmp/smc-category-atlas-redesign.png",
+        detail: "/tmp/smc-category-detail-redesign.png",
         ideas: "/tmp/smc-category-ideas-redesign.png",
         ideaMap: "/tmp/smc-category-ideas-map-redesign.png",
         ideaClaims: "/tmp/smc-category-ideas-claims-redesign.png",

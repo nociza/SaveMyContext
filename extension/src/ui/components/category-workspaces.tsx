@@ -19,13 +19,28 @@ import type {
   BackendJournalTimelineItem,
   BackendPileViews,
   BackendSessionListItem,
-  BuiltInPileSlug
+  BuiltInPileSlug,
+  ProviderName
 } from "../../shared/types";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { ScrollArea } from "./scroll-area";
 
-type FocusHandler = (label: string, sessionIds: string[], nextView?: PileWorkspaceView) => void;
+export type InformationDetail = {
+  kind: "Content" | "Fact" | "Idea" | "Journal" | "Todo";
+  title: string;
+  summary?: string | null;
+  accountKey?: string | null;
+  accountLabel?: string | null;
+  provider?: ProviderName | null;
+  date?: string | null;
+  sourceTitle?: string | null;
+  sessionIds: string[];
+  chips?: string[];
+  sections?: Array<{ title: string; body?: string | null; items?: string[] }>;
+};
+
+type FocusHandler = (label: string, sessionIds: string[], nextView?: PileWorkspaceView, detail?: InformationDetail) => void;
 
 type CategoryWorkspaceProps = {
   pile: BuiltInPileSlug;
@@ -68,6 +83,75 @@ function initialLetters(value: string): string {
 
 function uniqueValues(values: Array<string | null | undefined>): string[] {
   return Array.from(new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))));
+}
+
+function providerAccountLabel(provider?: ProviderName | null, accountLabel?: string | null): string | null {
+  if (accountLabel?.trim()) {
+    return accountLabel.trim();
+  }
+  return provider ? `${providerLabels[provider]} account` : null;
+}
+
+function journalDetail(item: BackendJournalTimelineItem, sessions: BackendSessionListItem[]): InformationDetail {
+  const title = item.title || sessionTitle(item.session_id, sessions);
+  const chips = uniqueValues([...(item.people ?? []), ...(item.locations ?? []), ...(item.activities ?? []), ...(item.entities ?? [])]);
+  return {
+    kind: "Journal",
+    title,
+    summary: item.entry,
+    accountKey: item.account_key,
+    accountLabel: providerAccountLabel(item.provider, item.account_label),
+    provider: item.provider,
+    date: item.occurred_on || item.updated_at,
+    sourceTitle: title,
+    sessionIds: [item.session_id],
+    chips,
+    sections: [
+      { title: "People", items: item.people },
+      { title: "Places", items: item.locations.length ? item.locations : item.travel_path },
+      { title: "Activities", items: item.activities }
+    ]
+  };
+}
+
+function ideaDetail(node: BackendIdeaEvolutionNode): InformationDetail {
+  return {
+    kind: "Idea",
+    title: node.core_idea,
+    summary: ideaNodeSummary(node),
+    accountKey: node.account_key,
+    accountLabel: providerAccountLabel(node.provider, node.account_label),
+    provider: node.provider,
+    date: node.updated_at,
+    sourceTitle: node.title,
+    sessionIds: [node.session_id],
+    chips: uniqueValues([ideaProjectLabel(node), node.thread, ...(node.related_facts ?? [])]).slice(0, 10),
+    sections: [
+      { title: "Reasoning", items: node.reasoning_steps },
+      { title: "Claims", items: node.claims.map((claim) => `${claim.attributed_to}: ${claim.idea}`) },
+      { title: "Next steps", items: node.next_steps }
+    ]
+  };
+}
+
+function factualDetail(item: BackendFactualBacklogItem): InformationDetail {
+  return {
+    kind: "Fact",
+    title: item.title || "Factual note",
+    summary: item.summary || item.context,
+    accountKey: item.account_key,
+    accountLabel: providerAccountLabel(item.provider, item.account_label),
+    provider: item.provider,
+    date: item.learned_on || item.updated_at,
+    sourceTitle: item.title,
+    sessionIds: [item.session_id],
+    chips: uniqueValues([...(item.keywords ?? []), ...(item.entities ?? [])]).slice(0, 12),
+    sections: [
+      { title: "Entities", items: item.entities },
+      { title: "Keywords", items: item.keywords },
+      { title: "Linked from", items: (item.linked_from ?? []).map((source) => source.title || "Linked source") }
+    ]
+  };
 }
 
 function sortedIdeaNodes(nodes: BackendIdeaEvolutionNode[]): BackendIdeaEvolutionNode[] {
@@ -129,7 +213,15 @@ function GroupList({
             <button
               key={group.label}
               type="button"
-              onClick={() => onFocus(group.label, sessionIds)}
+              onClick={() =>
+                onFocus(group.label, sessionIds, undefined, {
+                  kind: "Content",
+                  title: group.label,
+                  summary: snippet,
+                  sessionIds,
+                  chips: [title, `${group.count} notes`, ...group.dates]
+                })
+              }
               className="w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2.5 text-left transition hover:bg-[var(--color-paper-sunken)]"
             >
               <div className="flex items-start justify-between gap-3">
@@ -177,7 +269,7 @@ function JournalDayTimeline({
             <button
               key={item.session_id}
               type="button"
-              onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id])}
+              onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id], undefined, journalDetail(item, sessions))}
               className="journal-day-card"
               style={{ "--day-index": index } as CSSProperties}
             >
@@ -186,7 +278,7 @@ function JournalDayTimeline({
               <span className="journal-day-entry">{item.entry}</span>
               <span className="journal-day-meta">
                 {item.mood ? `${item.mood} · ` : ""}
-                {labels.slice(0, 3).join(" · ") || "Journal note"}
+                {[providerAccountLabel(item.provider, item.account_label), labels.slice(0, 3).join(" · ") || "Journal note"].filter(Boolean).join(" · ")}
               </span>
             </button>
           );
@@ -200,7 +292,7 @@ function JournalDayTimeline({
               <div className="eyebrow">Latest day</div>
               <h3>{featured.title || sessionTitle(featured.session_id, sessions)}</h3>
             </div>
-            {featured.mood ? <Badge tone="neutral">{featured.mood}</Badge> : null}
+            {providerAccountLabel(featured.provider, featured.account_label) ? <Badge tone="neutral">{providerAccountLabel(featured.provider, featured.account_label)}</Badge> : featured.mood ? <Badge tone="neutral">{featured.mood}</Badge> : null}
           </div>
           <p>{featured.entry}</p>
           <div className="journal-chip-row">
@@ -218,7 +310,7 @@ function JournalDayTimeline({
             <button
               key={item.session_id}
               type="button"
-              onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id])}
+              onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id], undefined, journalDetail(item, sessions))}
               className="journal-rail-event"
             >
               <span className="journal-rail-dot" />
@@ -305,7 +397,7 @@ function JournalPlaceMap({
                     key={item.session_id}
                     type="button"
                     className="journal-route-card"
-                    onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id], "story")}
+                    onClick={() => onFocus(item.title || sessionTitle(item.session_id, sessions), [item.session_id], "story", journalDetail(item, sessions))}
                   >
                     <span>{shortDate(item.occurred_on || item.updated_at)}</span>
                     <strong>{item.title || sessionTitle(item.session_id, sessions)}</strong>
@@ -377,7 +469,7 @@ function JournalPeopleBoard({
             .filter((item) => item.people.length || item.activities.length)
             .slice(-7)
             .map((item) => (
-              <button key={item.session_id} type="button" onClick={() => onFocus(item.title || "Journal note", [item.session_id], "ops")}>
+              <button key={item.session_id} type="button" onClick={() => onFocus(item.title || "Journal note", [item.session_id], "ops", journalDetail(item, []))}>
                 <span>{shortDate(item.occurred_on || item.updated_at)}</span>
                 <strong>{item.people.slice(0, 3).join(", ") || item.title || "Journal note"}</strong>
                 <em>{item.activities.slice(0, 3).join(" · ") || item.entry}</em>
@@ -457,7 +549,7 @@ function IdeaInsightCard({
   return (
     <button
       type="button"
-      onClick={() => onFocus(node.core_idea, [node.session_id])}
+      onClick={() => onFocus(node.core_idea, [node.session_id], undefined, ideaDetail(node))}
       className="idea-insight-card"
     >
       <span className="idea-card-kicker">{ideaProjectLabel(node)} · {node.thread || "Unthreaded"} · {formatCompactDate(node.updated_at)}</span>
@@ -465,6 +557,7 @@ function IdeaInsightCard({
       <span>{ideaNodeSummary(node)}</span>
       <div className="idea-card-footer">
         {node.provider ? <Badge tone="neutral">{providerLabels[node.provider]}</Badge> : null}
+        {providerAccountLabel(node.provider, node.account_label) ? <Badge tone="neutral">{providerAccountLabel(node.provider, node.account_label)}</Badge> : null}
         {claims.length ? <Badge tone="info">{claims.length} claims</Badge> : null}
         {node.next_steps.length ? <Badge tone="neutral">{node.next_steps.length} next</Badge> : null}
       </div>
@@ -584,7 +677,7 @@ function IdeaMindMap({
             type="button"
             className="idea-map-node"
             style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            onClick={() => onFocus(point.node.core_idea, [point.node.session_id], "atlas")}
+            onClick={() => onFocus(point.node.core_idea, [point.node.session_id], "atlas", ideaDetail(point.node))}
           >
             <span>{point.node.thread || "Idea"}</span>
             <strong>{point.node.core_idea}</strong>
@@ -629,7 +722,7 @@ function IdeaEvolutionTimeline({
                 type="button"
                 className="idea-evolution-step"
                 style={{ "--step-index": index } as CSSProperties}
-                onClick={() => onFocus(node.core_idea, [node.session_id], "atlas")}
+                onClick={() => onFocus(node.core_idea, [node.session_id], "atlas", ideaDetail(node))}
               >
                 <span className="idea-step-date">{shortDate(node.updated_at)}</span>
                 <span className="idea-step-project">{ideaProjectLabel(node)} · {node.thread || "Unthreaded"}</span>
@@ -679,7 +772,7 @@ function IdeaAttributionBoard({
         <ScrollArea className="mt-3 h-[min(58vh,620px)] pr-4">
           <div className="idea-claim-stack">
             {claims.map(({ id, node, claim }) => (
-              <button key={id} type="button" onClick={() => onFocus(claim.idea, [node.session_id], "ops")}>
+              <button key={id} type="button" onClick={() => onFocus(claim.idea, [node.session_id], "ops", ideaDetail(node))}>
                 <span>{claim.attributed_to} · {claim.stance}</span>
                 <strong>{claim.idea}</strong>
                 {claim.evidence ? <em>{claim.evidence}</em> : null}
@@ -725,7 +818,7 @@ function IdeaAttributionBoard({
         </div>
         <div className="idea-next-list">
           {nextSteps.slice(0, 8).map(({ node, step }) => (
-            <button key={`${node.id}:${step}`} type="button" onClick={() => onFocus(step, [node.session_id], "ops")}>
+            <button key={`${node.id}:${step}`} type="button" onClick={() => onFocus(step, [node.session_id], "ops", ideaDetail(node))}>
               <span>{ideaProjectLabel(node)}</span>
               <strong>{step}</strong>
             </button>
@@ -794,14 +887,25 @@ function LinkedSourceList({
           <button
             key={item.session_id}
             type="button"
-            onClick={() => onFocus(item.title || "Linked source", [item.session_id])}
+            onClick={() =>
+              onFocus(item.title || "Linked source", [item.session_id], undefined, {
+                kind: "Content",
+                title: item.title || "Linked source",
+                summary: (item.matched_terms ?? []).join(", "),
+                accountKey: item.account_key,
+                accountLabel: providerAccountLabel(item.provider, item.account_label),
+                provider: item.provider,
+                sessionIds: [item.session_id],
+                chips: item.matched_terms
+              })
+            }
             className="w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-2.5 text-left transition hover:bg-[var(--color-paper-sunken)]"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold text-[var(--color-ink)]">{item.title || "Linked source"}</div>
                 <div className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-                  {displayPileLabel(item.pile_slug)}{item.provider ? ` · ${providerLabels[item.provider]}` : ""}
+                  {displayPileLabel(item.pile_slug)}{item.provider ? ` · ${providerLabels[item.provider]}` : ""}{providerAccountLabel(item.provider, item.account_label) ? ` · ${providerAccountLabel(item.provider, item.account_label)}` : ""}
                 </div>
               </div>
               <Badge tone="neutral">{matchedTerms.length}</Badge>
@@ -830,7 +934,7 @@ function FactualItem({
   return (
     <button
       type="button"
-      onClick={() => onFocus(item.title || "Factual note", [item.session_id])}
+      onClick={() => onFocus(item.title || "Factual note", [item.session_id], undefined, factualDetail(item))}
       className="w-full rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]"
     >
       <div className="flex items-start justify-between gap-3">
@@ -840,7 +944,10 @@ function FactualItem({
           </div>
           <div className="mt-1 truncate text-base font-semibold text-[var(--color-ink)]">{item.title || "Factual note"}</div>
         </div>
-        <Badge tone="info">{item.triplet_count} facts</Badge>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          {providerAccountLabel(item.provider, item.account_label) ? <Badge tone="neutral">{providerAccountLabel(item.provider, item.account_label)}</Badge> : null}
+          <Badge tone="info">{item.triplet_count} facts</Badge>
+        </div>
       </div>
       {item.summary || item.context ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--color-ink-soft)]">{item.summary || item.context}</p> : null}
       <div className="mt-3 flex flex-wrap gap-1.5">

@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.models import ChatMessage, ChatSession, SyncEvent
 from app.models.base import utcnow
 from app.schemas.ingest import IngestDiffRequest
+from app.services.accounts import normalize_account_key, normalize_account_label
 from app.services.markdown import MarkdownExporter
 from app.services.processing import SessionProcessor
 from app.services.processing_worker import uses_extension_browser_processing
@@ -121,9 +122,12 @@ class IngestService:
         result = await self.db.execute(statement)
         session = result.scalar_one_or_none()
         if session is None:
+            account_key = normalize_account_key(payload.provider, payload.account_key, payload.external_session_id)
             session = ChatSession(
                 provider=payload.provider,
                 external_session_id=payload.external_session_id,
+                account_key=account_key,
+                account_label=normalize_account_label(payload.provider, account_key, payload.account_label),
                 title=payload.title,
                 source_url=payload.source_url,
                 custom_tags=sorted(set(payload.custom_tags)),
@@ -133,6 +137,9 @@ class IngestService:
             await self.db.flush()
             return session
 
+        account_key = normalize_account_key(payload.provider, payload.account_key or session.account_key, payload.external_session_id)
+        session.account_key = account_key
+        session.account_label = normalize_account_label(payload.provider, account_key, payload.account_label or session.account_label)
         if payload.title:
             session.title = payload.title
         if payload.source_url:

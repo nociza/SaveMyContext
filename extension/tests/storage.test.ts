@@ -81,7 +81,9 @@ describe("storage", () => {
         discardWords: ["loom"],
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
-        contextSuggestionsFloatingButtonEnabled: true
+        contextSuggestionsFloatingButtonEnabled: true,
+        accountCaptureMode: "all",
+        enabledAccountKeys: {}
       }
     });
     const local = createStorageArea({
@@ -160,7 +162,9 @@ describe("storage", () => {
         discardWords: ["loom"],
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
-        contextSuggestionsFloatingButtonEnabled: true
+        contextSuggestionsFloatingButtonEnabled: true,
+        accountCaptureMode: "all",
+        enabledAccountKeys: {}
       }
     });
     expect(local.set).toHaveBeenCalledWith({
@@ -181,7 +185,9 @@ describe("storage", () => {
         discardWords: ["loom"],
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
-        contextSuggestionsFloatingButtonEnabled: true
+        contextSuggestionsFloatingButtonEnabled: true,
+        accountCaptureMode: "all",
+        enabledAccountKeys: {}
       }
     });
   });

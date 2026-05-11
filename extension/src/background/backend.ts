@@ -103,6 +103,8 @@ function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
 function normalizeSessionListItem<TSession extends BackendSessionListItem>(session: TSession): TSession {
   return {
     ...session,
+    account_key: session.account_key ?? `${session.provider}:default`,
+    account_label: session.account_label ?? `${session.provider} account`,
     custom_tags: arrayOrEmpty(session.custom_tags),
     extra_piles: arrayOrEmpty(session.extra_piles)
   };
@@ -165,6 +167,7 @@ function normalizePileStats(stats: BackendPileStats, fallbackPile: BuiltInPileSl
     notes_with_todo_summary: stats.notes_with_todo_summary ?? 0,
     built_in_pile_counts: arrayOrEmpty(stats.built_in_pile_counts),
     provider_counts: arrayOrEmpty(stats.provider_counts),
+    account_counts: arrayOrEmpty(stats.account_counts),
     activity: arrayOrEmpty(stats.activity),
     top_tags: arrayOrEmpty(stats.top_tags),
     top_entities: arrayOrEmpty(stats.top_entities),
@@ -181,7 +184,11 @@ function normalizeExplorerGraphNode(node: BackendExplorerGraphNode): BackendExpl
     degree: node.degree ?? 0,
     centrality: node.centrality ?? 0,
     evidence_count: node.evidence_count ?? evidence.length,
-    evidence
+    evidence: evidence.map((item) => ({
+      ...item,
+      account_key: item.account_key ?? null,
+      account_label: item.account_label ?? null
+    }))
   };
 }
 
@@ -193,7 +200,11 @@ function normalizeExplorerGraphEdge(edge: BackendExplorerGraphEdge): BackendExpl
     session_ids: arrayOrEmpty(edge.session_ids),
     predicate_count: edge.predicate_count ?? 1,
     evidence_count: edge.evidence_count ?? evidence.length,
-    evidence
+    evidence: evidence.map((item) => ({
+      ...item,
+      account_key: item.account_key ?? null,
+      account_label: item.account_label ?? null
+    }))
   };
 }
 
@@ -974,6 +985,7 @@ export async function fetchSessions(
   settings: ExtensionSettings,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     pile?: string;
     extraPile?: string;
   },
@@ -982,6 +994,9 @@ export async function fetchSessions(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   if (filters?.pile) {
     search.set("pile", filters.pile);
@@ -1015,6 +1030,7 @@ export async function fetchPileStats(
   pile: BuiltInPileSlug,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1022,6 +1038,9 @@ export async function fetchPileStats(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1040,6 +1059,7 @@ export async function fetchCustomPileStats(
   name: string,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1047,6 +1067,9 @@ export async function fetchCustomPileStats(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1065,6 +1088,7 @@ export async function fetchPileGraph(
   pile: BuiltInPileSlug,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1072,6 +1096,9 @@ export async function fetchPileGraph(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1090,6 +1117,7 @@ export async function fetchPileViews(
   pile: BuiltInPileSlug,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1097,6 +1125,9 @@ export async function fetchPileViews(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1115,6 +1146,7 @@ export async function fetchCustomPileGraph(
   name: string,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1122,6 +1154,9 @@ export async function fetchCustomPileGraph(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1140,6 +1175,7 @@ export async function fetchCustomPileViews(
   name: string,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1147,6 +1183,9 @@ export async function fetchCustomPileViews(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1167,6 +1206,7 @@ export async function fetchPileGraphPath(
   target: string,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1174,6 +1214,9 @@ export async function fetchPileGraphPath(
   const search = new URLSearchParams({ source, target });
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1193,6 +1236,7 @@ export async function fetchCustomPileGraphPath(
   target: string,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     sessionIds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1200,6 +1244,9 @@ export async function fetchCustomPileGraphPath(
   const search = new URLSearchParams({ source, target });
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   for (const sessionId of filters?.sessionIds ?? []) {
     search.append("session_id", sessionId);
@@ -1219,6 +1266,7 @@ export async function fetchExplorerSearch(
     limit?: number;
     pile?: string;
     provider?: ProviderName;
+    accountKey?: string;
     extraPile?: string;
     kinds?: string[];
   },
@@ -1234,6 +1282,9 @@ export async function fetchExplorerSearch(
   if (options?.provider) {
     search.set("provider", options.provider);
   }
+  if (options?.accountKey) {
+    search.set("account_key", options.accountKey);
+  }
   if (options?.extraPile) {
     search.set("extra_pile", options.extraPile);
   }
@@ -1247,6 +1298,7 @@ export async function fetchExtraPiles(
   settings: ExtensionSettings,
   filters?: {
     provider?: ProviderName;
+    accountKey?: string;
     pile?: string;
   },
   capabilities?: BackendCapabilities
@@ -1254,6 +1306,9 @@ export async function fetchExtraPiles(
   const search = new URLSearchParams();
   if (filters?.provider) {
     search.set("provider", filters.provider);
+  }
+  if (filters?.accountKey) {
+    search.set("account_key", filters.accountKey);
   }
   if (filters?.pile) {
     search.set("pile", filters.pile);
@@ -1293,6 +1348,7 @@ export async function fetchKnowledgeSearch(
   limit = 8,
   options?: {
     provider?: ProviderName;
+    accountKey?: string;
     kinds?: string[];
   },
   capabilities?: BackendCapabilities
@@ -1303,6 +1359,9 @@ export async function fetchKnowledgeSearch(
   });
   if (options?.provider) {
     search.set("provider", options.provider);
+  }
+  if (options?.accountKey) {
+    search.set("account_key", options.accountKey);
   }
   for (const kind of options?.kinds ?? []) {
     search.append("kind", kind);

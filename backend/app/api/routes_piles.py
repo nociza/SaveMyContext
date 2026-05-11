@@ -287,6 +287,7 @@ async def get_pile(
 async def pile_stats(
     slug: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -302,13 +303,14 @@ async def pile_stats(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Stats are only available for built-in piles in this release.",
         )
-    return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/{slug}/graph", response_model=PileGraph)
 async def pile_graph(
     slug: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -324,13 +326,14 @@ async def pile_graph(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Graph is only available for built-in piles in this release.",
     )
-    return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/{slug}/views", response_model=PileViews)
 async def pile_views(
     slug: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -346,7 +349,7 @@ async def pile_views(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Category views are only available for built-in piles in this release.",
         )
-    return await ExplorerService(db).category_views(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_views(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/{slug}/graph/path", response_model=PileGraphPath)
@@ -355,6 +358,7 @@ async def pile_graph_path(
     source: str = Query(min_length=1),
     target: str = Query(min_length=1),
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -376,6 +380,7 @@ async def pile_graph_path(
         target=target,
         session_ids=session_id,
         provider=provider,
+        account_key=account_key,
     )
 
 

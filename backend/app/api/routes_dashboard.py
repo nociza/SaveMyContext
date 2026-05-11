@@ -84,6 +84,7 @@ async def search(
     pile: str | None = Query(default=None),
     category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     extra_pile: str | None = Query(default=None),
     kind: list[str] | None = Query(default=None),
     include_discarded: bool = Query(default=False),
@@ -95,6 +96,7 @@ async def search(
         limit=limit,
         pile=pile or (category.value if category else None),
         provider=provider,
+        account_key=account_key,
         extra_pile=extra_pile,
         kinds=set(kind) if kind else None,
         include_discarded=include_discarded or pile == BuiltInPileSlug.DISCARDED.value or category == BuiltInPileSlug.DISCARDED,
@@ -105,33 +107,36 @@ async def search(
 async def category_stats(
     category: BuiltInPileSlug,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileStats:
-    return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_stats(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/categories/{category}/graph", response_model=PileGraph)
 async def category_graph(
     category: BuiltInPileSlug,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileGraph:
-    return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_graph(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/categories/{category}/views", response_model=PileViews)
 async def category_views(
     category: BuiltInPileSlug,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileViews:
-    return await ExplorerService(db).category_views(category, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).category_views(category, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/categories/{category}/graph/path", response_model=PileGraphPath)
@@ -140,6 +145,7 @@ async def category_graph_path(
     source: str = Query(min_length=1),
     target: str = Query(min_length=1),
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -150,6 +156,7 @@ async def category_graph_path(
         target=target,
         session_ids=session_id,
         provider=provider,
+        account_key=account_key,
     )
 
 
@@ -158,11 +165,12 @@ async def category_graph_path(
 async def extra_pile_stats(
     name: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileStats:
-    return await ExplorerService(db).custom_category_stats(name, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).custom_category_stats(name, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/extra-piles/{name}/graph", response_model=PileGraph)
@@ -170,11 +178,12 @@ async def extra_pile_stats(
 async def extra_pile_graph(
     name: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileGraph:
-    return await ExplorerService(db).custom_category_graph(name, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).custom_category_graph(name, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/extra-piles/{name}/views", response_model=PileViews)
@@ -182,11 +191,12 @@ async def extra_pile_graph(
 async def extra_pile_views(
     name: str,
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
 ) -> PileViews:
-    return await ExplorerService(db).custom_category_views(name, session_ids=session_id, provider=provider)
+    return await ExplorerService(db).custom_category_views(name, session_ids=session_id, provider=provider, account_key=account_key)
 
 
 @router.get("/extra-piles/{name}/graph/path", response_model=PileGraphPath)
@@ -196,6 +206,7 @@ async def extra_pile_graph_path(
     source: str = Query(min_length=1),
     target: str = Query(min_length=1),
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     session_id: list[str] | None = Query(default=None),
     _: AuthContext = Depends(require_scope("read")),
     db: AsyncSession = Depends(get_db_session),
@@ -206,6 +217,7 @@ async def extra_pile_graph_path(
         target=target,
         session_ids=session_id,
         provider=provider,
+        account_key=account_key,
     )
 
 

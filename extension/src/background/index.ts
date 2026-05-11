@@ -132,6 +132,38 @@ function formatProviderList(providers: ProviderName[] | undefined, fallback: Pro
   return names.length ? names.join(", ") : "provider";
 }
 
+function normalizeAccountFilterValue(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function accountAllowedBySettings(
+  settings: ExtensionSettings,
+  snapshot: NormalizedSessionSnapshot
+): { allowed: boolean; reason: string } {
+  if (settings.accountCaptureMode !== "include") {
+    return { allowed: true, reason: `Captured from ${snapshot.accountLabel}.` };
+  }
+
+  const allowedValues = (settings.enabledAccountKeys?.[snapshot.provider] ?? [])
+    .map(normalizeAccountFilterValue)
+    .filter(Boolean);
+  if (!allowedValues.length) {
+    return { allowed: true, reason: `Account filter is enabled, but no ${formatProviderName(snapshot.provider)} accounts are listed.` };
+  }
+
+  const accountKey = normalizeAccountFilterValue(snapshot.accountKey);
+  const accountSuffix = accountKey.includes(":") ? accountKey.split(":").slice(1).join(":") : accountKey;
+  const accountLabel = normalizeAccountFilterValue(snapshot.accountLabel);
+  const candidates = new Set([accountKey, accountSuffix, accountLabel].filter(Boolean));
+  const allowed = allowedValues.some((value) => candidates.has(value) || candidates.has(`${snapshot.provider}:${value}`));
+  return {
+    allowed,
+    reason: allowed
+      ? `Captured from allowed account ${snapshot.accountLabel}.`
+      : `Skipped because ${snapshot.accountLabel} is not in the allowed ${formatProviderName(snapshot.provider)} account list.`
+  };
+}
+
 function rememberActiveChatContext(tabId: number, snapshot: NormalizedSessionSnapshot, pageUrl: string): void {
   const messages = snapshot.messages
     .slice(Math.max(snapshot.messages.length - 10, 0))
@@ -145,6 +177,8 @@ function rememberActiveChatContext(tabId: number, snapshot: NormalizedSessionSna
   activeChatContextsByTabId.set(tabId, {
     provider: snapshot.provider,
     externalSessionId: snapshot.externalSessionId,
+    accountKey: snapshot.accountKey,
+    accountLabel: snapshot.accountLabel,
     title: snapshot.title,
     sourceUrl: snapshot.sourceUrl,
     pageUrl,
@@ -1859,6 +1893,25 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
   }
 
   const sessionKey = `${snapshot.provider}:${snapshot.externalSessionId}`;
+  const accountDecision = accountAllowedBySettings(settings, snapshot);
+  if (!accountDecision.allowed) {
+    const syncState = await getSessionSyncState(sessionKey);
+    await saveSessionSyncState(sessionKey, {
+      ...syncState,
+      indexingRuleDecision: "skipped",
+      indexingRuleReason: accountDecision.reason
+    });
+    await setExtensionStatus({
+      backendUrl: settings.backendUrl.replace(/\/$/, ""),
+      lastProvider: snapshot.provider,
+      lastSessionKey: sessionKey,
+      lastIndexingDecision: "skipped",
+      lastIndexingReason: accountDecision.reason,
+      lastError: null,
+      autoSyncHistory: settings.autoSyncHistory
+    });
+    return;
+  }
   const syncState = await getSessionSyncState(sessionKey);
   const indexingDecision = evaluateIndexingRules(settings, snapshot);
   const indexingFingerprint = indexingRulesFingerprint(settings);

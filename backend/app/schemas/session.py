@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import MessageRole, ProviderName
+from app.services.accounts import session_account_key, session_account_label
 from app.services.extra_piles import RESERVED_PILE_NAMES, extract_extra_piles, normalize_extra_pile_name, visible_custom_tags
 from app.services.piles import pile_slug_for_category
 
@@ -41,6 +42,8 @@ class SessionListItem(BaseModel):
     id: str
     provider: ProviderName
     external_session_id: str
+    account_key: str
+    account_label: str
     title: str | None
     pile_slug: str | None = None
     is_discarded: bool = False
@@ -93,6 +96,8 @@ def build_session_list_item(session) -> SessionListItem:  # type: ignore[no-unty
         id=session.id,
         provider=session.provider,
         external_session_id=session.external_session_id,
+        account_key=session_account_key(session),
+        account_label=session_account_label(session),
         title=session.title,
         pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
         is_discarded=session.is_discarded,

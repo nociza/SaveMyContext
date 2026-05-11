@@ -32,6 +32,12 @@ const contextSuggestionsEnabledInput = document.querySelector<HTMLInputElement>(
 const contextSuggestionsFloatingButtonEnabledInput = document.querySelector<HTMLInputElement>(
   "#context-suggestions-floating-button-enabled"
 );
+const accountCaptureIncludeInput = document.querySelector<HTMLInputElement>("#account-capture-include");
+const accountAllowInputs = {
+  chatgpt: document.querySelector<HTMLInputElement>("#account-allow-chatgpt"),
+  gemini: document.querySelector<HTMLInputElement>("#account-allow-gemini"),
+  grok: document.querySelector<HTMLInputElement>("#account-allow-grok")
+};
 const indexingModeInput = document.querySelector<HTMLInputElement>("#indexing-mode-trigger");
 const triggerWordsInput = document.querySelector<HTMLInputElement>("#trigger-words");
 const blacklistWordsInput = document.querySelector<HTMLInputElement>("#blacklist-words");
@@ -75,6 +81,21 @@ function formatProviderName(provider: ProviderName): string {
 function formatProviderList(providers: ProviderName[] | undefined, fallback: ProviderName | undefined): string {
   const names = (providers?.length ? providers : fallback ? [fallback] : []).map(formatProviderName);
   return names.length ? names.join(", ") : "provider";
+}
+
+function normalizeAccountAllowList(input: string | string[] | undefined): string[] {
+  const values = Array.isArray(input) ? input : typeof input === "string" ? input.split(/[,\n]/) : [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const cleaned = value.trim().toLowerCase();
+    if (!cleaned || seen.has(cleaned)) {
+      continue;
+    }
+    seen.add(cleaned);
+    normalized.push(cleaned);
+  }
+  return normalized;
 }
 
 function formatDate(value?: string): string {
@@ -197,6 +218,15 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
     contextSuggestionsFloatingButtonEnabledInput.checked = settings.contextSuggestionsFloatingButtonEnabled;
     contextSuggestionsFloatingButtonEnabledInput.disabled = !settings.contextSuggestionsEnabled;
   }
+  if (accountCaptureIncludeInput) {
+    accountCaptureIncludeInput.checked = settings.accountCaptureMode === "include";
+  }
+  for (const [provider, input] of Object.entries(accountAllowInputs)) {
+    if (input) {
+      input.value = (settings.enabledAccountKeys?.[provider as ProviderName] ?? []).join(", ");
+      input.disabled = settings.accountCaptureMode !== "include";
+    }
+  }
   if (indexingModeInput) {
     indexingModeInput.checked = settings.indexingMode === "trigger_word";
   }
@@ -312,6 +342,12 @@ form?.addEventListener("submit", async (event) => {
     selectionCaptureEnabled: selectionCaptureEnabledInput?.checked ?? false,
     contextSuggestionsEnabled: contextSuggestionsEnabledInput?.checked ?? false,
     contextSuggestionsFloatingButtonEnabled: contextSuggestionsFloatingButtonEnabledInput?.checked ?? true,
+    accountCaptureMode: accountCaptureIncludeInput?.checked ? "include" : "all",
+    enabledAccountKeys: {
+      chatgpt: normalizeAccountAllowList(accountAllowInputs.chatgpt?.value ?? ""),
+      gemini: normalizeAccountAllowList(accountAllowInputs.gemini?.value ?? ""),
+      grok: normalizeAccountAllowList(accountAllowInputs.grok?.value ?? "")
+    },
     indexingMode: indexingModeInput?.checked ? "trigger_word" : "all",
     triggerWords: [],
     blacklistWords: normalizeRuleWords(blacklistWordsInput?.value ?? ""),
@@ -420,6 +456,21 @@ contextSuggestionsEnabledInput?.addEventListener("change", () => {
 contextSuggestionsFloatingButtonEnabledInput?.addEventListener("change", () => {
   formDirty = true;
 });
+
+accountCaptureIncludeInput?.addEventListener("change", () => {
+  formDirty = true;
+  for (const input of Object.values(accountAllowInputs)) {
+    if (input) {
+      input.disabled = !accountCaptureIncludeInput.checked;
+    }
+  }
+});
+
+for (const input of Object.values(accountAllowInputs)) {
+  input?.addEventListener("input", () => {
+    formDirty = true;
+  });
+}
 
 indexingModeInput?.addEventListener("change", () => {
   formDirty = true;

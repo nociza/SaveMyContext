@@ -6,6 +6,8 @@ import type { CapturedNetworkEvent, NormalizedSessionSnapshot } from "../src/sha
 const snapshot: NormalizedSessionSnapshot = {
   provider: "chatgpt",
   externalSessionId: "session-1",
+  accountKey: "chatgpt:default",
+  accountLabel: "ChatGPT account",
   title: "Example",
   sourceUrl: "https://chatgpt.com/c/session-1",
   capturedAt: "2026-03-30T10:00:00.000Z",

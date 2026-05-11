@@ -1,4 +1,5 @@
 import type { CapturedNetworkEvent, NormalizedMessage, NormalizedSessionSnapshot } from "../shared/types";
+import { normalizeProviderAccount, scopeExternalSessionIdByAccount } from "../shared/accounts";
 import type { IProviderScraper } from "./provider";
 import {
   coerceOccurredAt,
@@ -35,6 +36,24 @@ function conversationIdFromCapturedUrl(url: URL): string | undefined {
 
   const pageMatch = url.pathname.match(/^\/c\/([^/]+)/);
   return pageMatch?.[1] ? decodeURIComponent(pageMatch[1]) : undefined;
+}
+
+function accountCandidateFromStructured(values: unknown[]): { key?: string; label?: string } {
+  const label =
+    findStringByKeys(values, ["email", "emailAddress", "email_address", "username", "displayName", "display_name"]) ??
+    undefined;
+  const key =
+    findStringByKeys(values, [
+      "account_id",
+      "accountId",
+      "user_id",
+      "userId",
+      "workspace_id",
+      "workspaceId",
+      "organization_id",
+      "organizationId"
+    ]) ?? label;
+  return { key, label };
 }
 
 function chatGPTContentType(record: JsonRecord): string | undefined {
@@ -261,11 +280,18 @@ export class ChatGPTScraper implements IProviderScraper {
       return null;
     }
 
-    const resolvedSessionId = externalSessionId ?? stableId("chatgpt-session", event.pageUrl);
+    const accountCandidate = accountCandidateFromStructured(structured);
+    const account = normalizeProviderAccount(this.provider, accountCandidate.key, accountCandidate.label);
+    const resolvedSessionId = scopeExternalSessionIdByAccount(
+      externalSessionId ?? stableId("chatgpt-session", event.pageUrl),
+      account.accountKey
+    );
 
     return {
       provider: this.provider,
       externalSessionId: resolvedSessionId,
+      accountKey: account.accountKey,
+      accountLabel: account.accountLabel,
       title,
       sourceUrl: event.pageUrl,
       capturedAt: event.capturedAt,

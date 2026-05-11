@@ -14,6 +14,8 @@ class SearchResult(BaseModel):
     entity_id: str | None = None
     pile_slug: str | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     extra_piles: list[str] = Field(default_factory=list)
     markdown_path: str | None = None
 

@@ -29,6 +29,8 @@ class ChatSession(TimestampMixin, Base):
         index=True,
     )
     external_session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    account_key: Mapped[str | None] = mapped_column(String(255), index=True)
+    account_label: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)
     markdown_path: Mapped[str | None] = mapped_column(Text)

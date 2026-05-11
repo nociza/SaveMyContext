@@ -44,6 +44,8 @@ export interface NormalizedMessage {
 export interface NormalizedSessionSnapshot {
   provider: ProviderName;
   externalSessionId: string;
+  accountKey: string;
+  accountLabel: string;
   title?: string;
   sourceUrl: string;
   capturedAt: string;
@@ -96,6 +98,8 @@ export interface ExtensionSettings {
   selectionCaptureEnabled: boolean;
   contextSuggestionsEnabled: boolean;
   contextSuggestionsFloatingButtonEnabled: boolean;
+  accountCaptureMode?: "all" | "include";
+  enabledAccountKeys?: Partial<Record<ProviderName, string[]>>;
 }
 
 export interface BackendCapabilities {
@@ -296,6 +300,8 @@ export interface BackendSessionListItem {
   id: string;
   provider: ProviderName;
   external_session_id: string;
+  account_key?: string | null;
+  account_label?: string | null;
   title?: string | null;
   pile_slug?: string | null;
   is_discarded?: boolean;
@@ -352,6 +358,13 @@ export interface BackendProviderCount {
   count: number;
 }
 
+export interface BackendAccountCount {
+  account_key: string;
+  account_label: string;
+  provider?: ProviderName | null;
+  count: number;
+}
+
 export interface BackendActivityBucket {
   bucket: string;
   count: number;
@@ -374,6 +387,7 @@ export interface BackendPileStats {
   notes_with_todo_summary: number;
   built_in_pile_counts: DashboardPileCount[];
   provider_counts: BackendProviderCount[];
+  account_counts?: BackendAccountCount[];
   activity: BackendActivityBucket[];
   top_tags: BackendLabelCount[];
   top_entities: BackendLabelCount[];
@@ -387,6 +401,8 @@ export interface BackendExplorerGraphNode {
   size: number;
   session_ids: string[];
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   pile_slug?: string | null;
   updated_at?: string | null;
   note_path?: string | null;
@@ -414,6 +430,8 @@ export interface BackendExplorerGraphEvidence {
   session_id: string;
   title?: string | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   updated_at?: string | null;
   note_path?: string | null;
   triplet_id?: string | null;
@@ -457,6 +475,8 @@ export interface BackendJournalTimelineItem {
   session_id: string;
   title?: string | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   updated_at?: string | null;
   occurred_on?: string | null;
   entry: string;
@@ -498,6 +518,8 @@ export interface BackendIdeaEvolutionNode {
   session_id: string;
   title?: string | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   updated_at?: string | null;
   thread?: string | null;
   project_slug?: string | null;
@@ -534,6 +556,8 @@ export interface BackendFactualLinkedSource {
   title?: string | null;
   pile_slug?: BuiltInPileSlug | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   matched_terms: string[];
 }
 
@@ -541,6 +565,8 @@ export interface BackendFactualBacklogItem {
   session_id: string;
   title?: string | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   updated_at?: string | null;
   learned_on?: string | null;
   summary?: string | null;
@@ -571,6 +597,8 @@ export interface BackendPileViews {
 export interface BackendTodoItem {
   text: string;
   done: boolean;
+  account_key?: string | null;
+  account_label?: string | null;
 }
 
 export interface BackendTodoGitStatus {
@@ -614,6 +642,8 @@ export interface BackendSearchResult {
   entity_id?: string | null;
   pile_slug?: string | null;
   provider?: ProviderName | null;
+  account_key?: string | null;
+  account_label?: string | null;
   extra_piles: string[];
   markdown_path?: string | null;
 }
@@ -711,6 +741,8 @@ export interface ActiveChatContextMessage {
 export interface ActiveChatContextSnapshot {
   provider: ProviderName;
   externalSessionId: string;
+  accountKey?: string;
+  accountLabel?: string;
   title?: string;
   sourceUrl: string;
   pageUrl: string;
@@ -799,6 +831,8 @@ export interface BackendIngestMessage {
 export interface BackendIngestPayload {
   provider: ProviderName;
   external_session_id: string;
+  account_key: string;
+  account_label: string;
   sync_mode: CaptureMode;
   title?: string;
   source_url: string;

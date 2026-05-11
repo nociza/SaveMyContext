@@ -38,7 +38,9 @@ export const defaultSettings: ExtensionSettings = {
   discardWords: ["loom"],
   selectionCaptureEnabled: false,
   contextSuggestionsEnabled: false,
-  contextSuggestionsFloatingButtonEnabled: true
+  contextSuggestionsFloatingButtonEnabled: true,
+  accountCaptureMode: "all",
+  enabledAccountKeys: {}
 };
 
 function mergeSettings(
@@ -67,7 +69,11 @@ function mergeSettings(
     contextSuggestionsEnabled:
       current.contextSuggestionsEnabled ?? defaultSettings.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
-      current.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled
+      current.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled,
+    accountCaptureMode: current.accountCaptureMode ?? defaultSettings.accountCaptureMode,
+    enabledAccountKeys: {
+      ...(current.enabledAccountKeys ?? defaultSettings.enabledAccountKeys)
+    }
   };
 }
 
@@ -85,7 +91,9 @@ function shouldPersistSettings(current: Partial<ExtensionSettings>): boolean {
     !current.discardWords ||
     current.selectionCaptureEnabled === undefined ||
     current.contextSuggestionsEnabled === undefined ||
-    current.contextSuggestionsFloatingButtonEnabled === undefined
+    current.contextSuggestionsFloatingButtonEnabled === undefined ||
+    current.accountCaptureMode === undefined ||
+    current.enabledAccountKeys === undefined
   ) {
     return true;
   }
@@ -117,7 +125,11 @@ function publicSettings(settings: ExtensionSettings | Partial<ExtensionSettings>
     contextSuggestionsEnabled:
       settings.contextSuggestionsEnabled ?? defaultSettings.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
-      settings.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled
+      settings.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled,
+    accountCaptureMode: settings.accountCaptureMode ?? defaultSettings.accountCaptureMode,
+    enabledAccountKeys: {
+      ...(settings.enabledAccountKeys ?? defaultSettings.enabledAccountKeys)
+    }
   };
 }
 
@@ -177,7 +189,9 @@ export async function saveSettings(update: Partial<ExtensionSettings>): Promise<
     selectionCaptureEnabled: update.selectionCaptureEnabled ?? current.selectionCaptureEnabled,
     contextSuggestionsEnabled: update.contextSuggestionsEnabled ?? current.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
-      update.contextSuggestionsFloatingButtonEnabled ?? current.contextSuggestionsFloatingButtonEnabled
+      update.contextSuggestionsFloatingButtonEnabled ?? current.contextSuggestionsFloatingButtonEnabled,
+    accountCaptureMode: update.accountCaptureMode ?? current.accountCaptureMode,
+    enabledAccountKeys: update.enabledAccountKeys ?? current.enabledAccountKeys
   };
   await chrome.storage.sync.set({
     [SETTINGS_KEY]: publicSettings(next)

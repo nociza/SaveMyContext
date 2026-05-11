@@ -17,6 +17,7 @@ from app.schemas.session import (
     build_session_list_item,
     build_session_read,
 )
+from app.services.accounts import session_matches_account
 from app.services.explorer import read_session_markdown, session_related_entities, session_word_count
 from app.services.extra_piles import has_extra_pile, merge_extra_piles, summarize_extra_piles
 from app.services.piles import category_for_pile_slug
@@ -41,6 +42,7 @@ async def _load_session(db: AsyncSession, session_id: str) -> ChatSession | None
 @router.get("/sessions", response_model=list[SessionListItem])
 async def list_sessions(
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     pile: str | None = Query(default=None),
     category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
     extra_pile: str | None = Query(default=None),
@@ -63,6 +65,8 @@ async def list_sessions(
     sessions = result.scalars().all()
     if extra_pile:
         sessions = [session for session in sessions if has_extra_pile(session.custom_tags, extra_pile)]
+    if account_key:
+        sessions = [session for session in sessions if session_matches_account(session, account_key)]
     return [build_session_list_item(session) for session in sessions]
 
 
@@ -101,6 +105,7 @@ async def get_session_note(
 @router.get("/user-categories", response_model=list[ExtraPileSummary], include_in_schema=False)
 async def list_extra_piles(
     provider: ProviderName | None = Query(default=None),
+    account_key: str | None = Query(default=None),
     pile: str | None = Query(default=None),
     category: BuiltInPileSlug | None = Query(default=None, include_in_schema=False),
     _: AuthContext = Depends(require_scope("read")),
@@ -118,7 +123,22 @@ async def list_extra_piles(
                 and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
             )
         )
-    tag_sets = list((await db.execute(statement)).scalars().all())
+    if account_key:
+        session_statement = select(ChatSession).order_by(ChatSession.updated_at.desc())
+        if provider:
+            session_statement = session_statement.where(ChatSession.provider == provider)
+        if target_pile:
+            fallback_pile = category_for_pile_slug(target_pile)
+            session_statement = session_statement.where(
+                or_(
+                    ChatSession.pile.has(Pile.slug == target_pile),
+                    and_(ChatSession.pile_id.is_(None), ChatSession.built_in_pile == fallback_pile),
+                )
+            )
+        sessions = [session for session in (await db.execute(session_statement)).scalars().all() if session_matches_account(session, account_key)]
+        tag_sets = [session.custom_tags for session in sessions]
+    else:
+        tag_sets = list((await db.execute(statement)).scalars().all())
     return [ExtraPileSummary(name=name, count=count) for name, count in summarize_extra_piles(tag_sets)]
 
 

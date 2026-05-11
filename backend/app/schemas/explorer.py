@@ -19,6 +19,13 @@ class ProviderCount(BaseModel):
     count: int
 
 
+class AccountCount(BaseModel):
+    account_key: str
+    account_label: str
+    provider: ProviderName | None = None
+    count: int
+
+
 class ActivityBucket(BaseModel):
     bucket: str
     count: int
@@ -41,6 +48,7 @@ class PileStats(BaseModel):
     notes_with_todo_summary: int
     built_in_pile_counts: list["BuiltInPileCount"]
     provider_counts: list[ProviderCount]
+    account_counts: list[AccountCount] = Field(default_factory=list)
     activity: list[ActivityBucket]
     top_tags: list[LabelCount]
     top_entities: list[LabelCount]
@@ -59,6 +67,8 @@ class ExplorerGraphNode(BaseModel):
     size: int
     session_ids: list[str]
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     pile_slug: BuiltInPileSlug | None = None
     updated_at: datetime | None = None
     note_path: str | None = None
@@ -86,6 +96,8 @@ class ExplorerGraphEvidence(BaseModel):
     session_id: str
     title: str | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     updated_at: datetime | None = None
     note_path: str | None = None
     triplet_id: str | None = None
@@ -129,6 +141,8 @@ class JournalTimelineItem(BaseModel):
     session_id: str
     title: str | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     updated_at: datetime | None = None
     occurred_on: str | None = None
     entry: str
@@ -170,6 +184,8 @@ class IdeaEvolutionNode(BaseModel):
     session_id: str
     title: str | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     updated_at: datetime | None = None
     thread: str | None = None
     project_slug: str | None = None
@@ -206,6 +222,8 @@ class FactualLinkedSource(BaseModel):
     title: str | None = None
     pile_slug: BuiltInPileSlug | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     matched_terms: list[str] = Field(default_factory=list)
 
 
@@ -213,6 +231,8 @@ class FactualBacklogItem(BaseModel):
     session_id: str
     title: str | None = None
     provider: ProviderName | None = None
+    account_key: str | None = None
+    account_label: str | None = None
     updated_at: datetime | None = None
     learned_on: str | None = None
     summary: str | None = None

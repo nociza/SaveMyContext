@@ -206,6 +206,35 @@
                 <span>Grok</span>
               </label>
             </div>
+
+            <label class="toggle">
+              <input id="account-capture-include" type="checkbox" />
+              <span class="toggle-body">
+                <span class="toggle-title">Only capture listed accounts</span>
+                <span class="toggle-help">
+                  Default is to capture every signed-in account and label each saved fact, idea, journal entry, and
+                  to-do with its account. Enable this when a provider profile should be ignored.
+                </span>
+              </span>
+            </label>
+
+            <div class="field-grid">
+              <label class="field">
+                <span class="field-label">ChatGPT accounts</span>
+                <input id="account-allow-chatgpt" name="account-allow-chatgpt" type="text" placeholder="work@example.com, chatgpt:default" />
+                <small>Comma-separated account keys, emails, or labels.</small>
+              </label>
+              <label class="field">
+                <span class="field-label">Gemini accounts</span>
+                <input id="account-allow-gemini" name="account-allow-gemini" type="text" placeholder="u0, gemini:u1" />
+                <small>Gemini account keys come from the <code>/u/0</code>, <code>/u/1</code> profile in the URL.</small>
+              </label>
+              <label class="field">
+                <span class="field-label">Grok accounts</span>
+                <input id="account-allow-grok" name="account-allow-grok" type="text" placeholder="personal, work@example.com" />
+                <small>Comma-separated account keys, emails, or labels.</small>
+              </label>
+            </div>
           </div>
         </section>
 

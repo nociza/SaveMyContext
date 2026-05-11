@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.models import ChatMessage, ChatSession, FactTriplet, Pile, ProviderName, SourceCapture
 from app.schemas.search import SearchResult, SearchResponse
 from app.services.agentic_search import ADKVaultSearchService, VaultSearchToolkit
+from app.services.accounts import session_account_key, session_account_label, session_matches_account
 from app.services.graph import entity_note_path
 from app.services.todo import TODO_TITLE, TodoListService
 from app.services.extra_piles import extract_extra_piles, has_extra_pile
@@ -88,6 +89,8 @@ def _merge_duplicate_results(primary: SearchResult, fallback: SearchResult) -> S
         entity_id=primary.entity_id or fallback.entity_id,
         pile_slug=primary.pile_slug or fallback.pile_slug,
         provider=primary.provider or fallback.provider,
+        account_key=primary.account_key or fallback.account_key,
+        account_label=primary.account_label or fallback.account_label,
         extra_piles=primary.extra_piles or fallback.extra_piles,
         markdown_path=primary.markdown_path or fallback.markdown_path,
     )
@@ -104,6 +107,7 @@ class SearchService:
         limit: int = 25,
         pile: str | None = None,
         provider: ProviderName | None = None,
+        account_key: str | None = None,
         extra_pile: str | None = None,
         kinds: set[str] | None = None,
         include_discarded: bool = False,
@@ -137,6 +141,8 @@ class SearchService:
         session_rows = (await self.db.execute(session_statement)).scalars().all()
         if extra_pile:
             session_rows = [session for session in session_rows if has_extra_pile(session.custom_tags, extra_pile)]
+        if account_key:
+            session_rows = [session for session in session_rows if session_matches_account(session, account_key)]
 
         triplet_statement = select(FactTriplet).options(selectinload(FactTriplet.session)).join(FactTriplet.session).where(
             or_(
@@ -161,6 +167,8 @@ class SearchService:
         triplet_rows = (await self.db.execute(triplet_statement)).scalars().all()
         if extra_pile:
             triplet_rows = [triplet for triplet in triplet_rows if triplet.session and has_extra_pile(triplet.session.custom_tags, extra_pile)]
+        if account_key:
+            triplet_rows = [triplet for triplet in triplet_rows if triplet.session and session_matches_account(triplet.session, account_key)]
         source_statement = select(SourceCapture).where(
             or_(
                 SourceCapture.title.ilike(pattern),
@@ -217,6 +225,8 @@ class SearchService:
                     session_id=session.id,
                     pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
                     provider=session.provider,
+                    account_key=session_account_key(session),
+                    account_label=session_account_label(session),
                     extra_piles=extract_extra_piles(session.custom_tags),
                     markdown_path=session.markdown_path,
                 )
@@ -240,6 +250,8 @@ class SearchService:
                         entity_id=entity,
                         pile_slug=session.pile.slug if session and session.pile else pile_slug_for_category(session.built_in_pile if session else None),
                         provider=session.provider if session else None,
+                        account_key=session_account_key(session) if session else None,
+                        account_label=session_account_label(session) if session else None,
                         extra_piles=extract_extra_piles(session.custom_tags) if session else [],
                         markdown_path=entity_note_path(entity),
                     )
@@ -295,6 +307,7 @@ class SearchService:
             limit=max(limit * 4, 24),
             pile=pile,
             provider=provider,
+            account_key=account_key,
             extra_pile=extra_pile,
             allowed_kinds=allowed_kinds,
             include_discarded=include_discarded,
@@ -309,6 +322,7 @@ class SearchService:
         limit: int,
         pile: str | None,
         provider: ProviderName | None,
+        account_key: str | None,
         extra_pile: str | None,
         allowed_kinds: set[str],
         include_discarded: bool,
@@ -338,6 +352,8 @@ class SearchService:
         session_rows = (await self.db.execute(session_statement)).scalars().all()
         if extra_pile:
             session_rows = [session for session in session_rows if has_extra_pile(session.custom_tags, extra_pile)]
+        if account_key:
+            session_rows = [session for session in session_rows if session_matches_account(session, account_key)]
 
         session_by_path: dict[str, ChatSession] = {}
         for session in session_rows:
@@ -382,6 +398,8 @@ class SearchService:
                         session_id=session.id,
                         pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
                         provider=session.provider,
+                        account_key=session_account_key(session),
+                        account_label=session_account_label(session),
                         extra_piles=extract_extra_piles(session.custom_tags),
                         markdown_path=session.markdown_path,
                     )

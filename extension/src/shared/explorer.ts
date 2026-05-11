@@ -68,6 +68,7 @@ export function pilePageUrl(state: {
   pile: BuiltInPileSlug;
   q?: string;
   provider?: ProviderName | null;
+  accountKey?: string | null;
   sort?: PileSortMode | null;
   view?: PileWorkspaceView | null;
   bucket?: string | null;
@@ -81,6 +82,9 @@ export function pilePageUrl(state: {
   }
   if (state.provider) {
     url.searchParams.set("provider", state.provider);
+  }
+  if (state.accountKey?.trim()) {
+    url.searchParams.set("account", state.accountKey.trim());
   }
   if (state.sort && state.sort !== "recent") {
     url.searchParams.set("sort", state.sort);
@@ -105,6 +109,7 @@ export function notePageUrl(state: {
   pile?: PileSlug | null;
   q?: string;
   provider?: ProviderName | null;
+  accountKey?: string | null;
   sort?: PileSortMode | null;
   extraPile?: string | null;
 }): string {
@@ -118,6 +123,9 @@ export function notePageUrl(state: {
   }
   if (state.provider) {
     url.searchParams.set("provider", state.provider);
+  }
+  if (state.accountKey?.trim()) {
+    url.searchParams.set("account", state.accountKey.trim());
   }
   if (state.sort && state.sort !== "recent") {
     url.searchParams.set("sort", state.sort);

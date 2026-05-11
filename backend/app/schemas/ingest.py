@@ -20,6 +20,8 @@ class IngestMessage(BaseModel):
 class IngestDiffRequest(BaseModel):
     provider: ProviderName
     external_session_id: str = Field(min_length=1, max_length=255)
+    account_key: str | None = Field(default=None, max_length=255)
+    account_label: str | None = Field(default=None, max_length=255)
     sync_mode: Literal["incremental", "full_snapshot"] = "incremental"
     title: str | None = None
     source_url: str | None = None

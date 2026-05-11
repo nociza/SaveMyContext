@@ -615,6 +615,118 @@
     background: var(--color-paper-raised);
   }
 
+  .information-detail-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 27, 44, 0.38);
+    padding: 18px;
+  }
+
+  .information-detail-panel {
+    width: min(760px, 100%);
+    max-height: min(82vh, 760px);
+    overflow: auto;
+    border-radius: 8px;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-paper-raised);
+    box-shadow: 0 26px 80px -42px rgba(15, 27, 44, 0.72);
+  }
+
+  .information-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    border-bottom: 1px solid var(--color-line);
+    padding: 18px 18px 14px;
+  }
+
+  .information-detail-kicker {
+    overflow-wrap: anywhere;
+    color: var(--color-ink-soft);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    line-height: 1.5;
+    text-transform: uppercase;
+  }
+
+  .information-detail-header h2 {
+    margin-top: 6px;
+    overflow-wrap: anywhere;
+    color: var(--color-ink);
+    font-size: clamp(20px, 3vw, 28px);
+    font-weight: 750;
+    line-height: 1.18;
+  }
+
+  .information-detail-summary {
+    padding: 18px 18px 0;
+    color: var(--color-ink);
+    font-size: 15px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  .information-detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 16px 18px 0;
+  }
+
+  .information-detail-chips span {
+    border-radius: 999px;
+    border: 1px solid var(--color-line);
+    background: var(--color-paper-sunken);
+    padding: 4px 8px;
+    color: var(--color-ink-soft);
+    font-size: 12px;
+  }
+
+  .information-detail-sections {
+    display: grid;
+    gap: 10px;
+    padding: 16px 18px 0;
+  }
+
+  .information-detail-sections section {
+    border-radius: 8px;
+    border: 1px solid var(--color-line);
+    background: var(--color-paper-sunken);
+    padding: 12px;
+  }
+
+  .information-detail-sections h3 {
+    color: var(--color-ink);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .information-detail-sections p,
+  .information-detail-sections li {
+    margin-top: 6px;
+    color: var(--color-ink-soft);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .information-detail-sections ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+  }
+
+  .information-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 18px;
+  }
+
   .journal-daily-workspace,
   .journal-place-workspace,
   .journal-people-workspace {

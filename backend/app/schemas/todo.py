@@ -8,6 +8,8 @@ from pydantic import BaseModel
 class TodoListItem(BaseModel):
     text: str
     done: bool = False
+    account_key: str | None = None
+    account_label: str | None = None
 
 
 class TodoGitStatus(BaseModel):

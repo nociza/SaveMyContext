@@ -26,6 +26,8 @@ export function buildIngestPayload(
   return {
     provider: snapshot.provider,
     external_session_id: snapshot.externalSessionId,
+    account_key: snapshot.accountKey,
+    account_label: snapshot.accountLabel,
     sync_mode: syncMode,
     title: snapshot.title,
     source_url: snapshot.sourceUrl,

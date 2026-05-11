@@ -38,6 +38,13 @@ def apply_schema_migrations(sync_connection) -> None:
             sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN pile_outputs JSON")
         if "segments" not in chat_columns:
             sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN segments JSON")
+        if "account_key" not in chat_columns:
+            sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN account_key VARCHAR(255)")
+            sync_connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_chat_sessions_account_key ON chat_sessions (account_key)"
+            )
+        if "account_label" not in chat_columns:
+            sync_connection.exec_driver_sql("ALTER TABLE chat_sessions ADD COLUMN account_label TEXT")
 
     if "source_captures" in table_names:
         capture_columns = {column["name"] for column in inspector.get_columns("source_captures")}
