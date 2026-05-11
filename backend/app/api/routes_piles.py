@@ -17,6 +17,10 @@ from app.schemas.pile import (
     DiscardedSessionsResponse,
     PileCreate,
     PileRead,
+    PileRestructureDueRequest,
+    PileRestructureDueResponse,
+    PileRestructureRequest,
+    PileRestructureResult,
     PileUpdate,
 )
 from app.schemas.session import SessionRead, build_session_read
@@ -25,6 +29,7 @@ from app.services.markdown import MarkdownExporter
 from app.services.pile_service import PileNotFoundError, PileService
 from app.services.piles import BUILT_IN_SLUG_TO_CATEGORY, PILE_ATTRIBUTES
 from app.services.processing import SessionProcessor
+from app.services.restructure import PileRestructureService
 
 
 router = APIRouter(prefix="/piles")
@@ -32,6 +37,7 @@ router = APIRouter(prefix="/piles")
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]*$")
+OPENROUTER_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.:/+-]*$")
 
 
 def _serialize(pile: Pile) -> PileRead:
@@ -70,7 +76,49 @@ def _validate_folder_label(label: str) -> str:
 def _validate_pipeline_config(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pipeline_config must be an object.")
-    return config
+    cleaned = dict(config)
+    if "llm_model" in cleaned:
+        cleaned["llm_model"] = _validate_openrouter_model(cleaned.get("llm_model"), field="pipeline_config.llm_model")
+    restructure = cleaned.get("restructure")
+    if isinstance(restructure, dict):
+        cleaned_restructure = dict(restructure)
+        if "llm_model" in cleaned_restructure:
+            cleaned_restructure["llm_model"] = _validate_openrouter_model(
+                cleaned_restructure.get("llm_model"),
+                field="pipeline_config.restructure.llm_model",
+            )
+        interval_days = cleaned_restructure.get("interval_days")
+        if interval_days is not None:
+            try:
+                cleaned_restructure["interval_days"] = max(1, min(int(interval_days), 365))
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="pipeline_config.restructure.interval_days must be an integer from 1 to 365.",
+                ) from exc
+        cleaned["restructure"] = cleaned_restructure
+    elif restructure is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="pipeline_config.restructure must be an object.",
+        )
+    return cleaned
+
+
+def _validate_openrouter_model(value: Any, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field} must be a string.")
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > 200 or not OPENROUTER_MODEL_RE.match(cleaned):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field} must be an OpenRouter model id like 'openai/gpt-4.1-mini'.",
+        )
+    return cleaned
 
 
 @router.get("", response_model=list[PileRead])
@@ -157,6 +205,52 @@ async def manually_discard_session(
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found after discard.")
     return build_session_read(refreshed)
+
+
+@router.post("/restructure", response_model=PileRestructureResult)
+async def restructure_all_piles(
+    payload: PileRestructureRequest,
+    _: AuthContext = Depends(require_scope("ingest")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileRestructureResult:
+    model = _validate_openrouter_model(payload.model, field="model")
+    return await PileRestructureService(db).restructure_all(
+        model=model,
+        limit=payload.limit,
+        include_discarded=payload.include_discarded,
+    )
+
+
+@router.post("/restructure/due", response_model=PileRestructureDueResponse)
+async def restructure_due_piles(
+    payload: PileRestructureDueRequest | None = None,
+    _: AuthContext = Depends(require_scope("ingest")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileRestructureDueResponse:
+    resolved = payload or PileRestructureDueRequest()
+    return await PileRestructureService(db).restructure_due(
+        limit_per_pile=resolved.limit_per_pile,
+        include_discarded=resolved.include_discarded,
+    )
+
+
+@router.post("/{slug}/restructure", response_model=PileRestructureResult)
+async def restructure_pile(
+    slug: str,
+    payload: PileRestructureRequest,
+    _: AuthContext = Depends(require_scope("ingest")),
+    db: AsyncSession = Depends(get_db_session),
+) -> PileRestructureResult:
+    model = _validate_openrouter_model(payload.model, field="model")
+    try:
+        return await PileRestructureService(db).restructure_pile(
+            slug,
+            model=model,
+            limit=payload.limit,
+            include_discarded=payload.include_discarded,
+        )
+    except PileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 async def _reload_session_for_response(db: AsyncSession, session_id: str) -> ChatSession | None:

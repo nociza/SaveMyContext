@@ -5,6 +5,7 @@ import {
   fetchNextProcessingTask,
   fetchProcessingStatus,
   redeemConnectionBundle,
+  runDuePileRestructures,
   saveSourceCaptureToBackend,
   updateKnowledgeStoragePath,
   validateBackendConfiguration
@@ -971,6 +972,16 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         processingWorkerModel: processing.worker_model,
         processingPendingCount: processing.pending_count,
         processingLastError: refreshedProcessingLastError(await getStatus(), processing.pending_count)
+      });
+      void runDuePileRestructures(
+        {
+          ...settings,
+          backendUrl: normalizedUrl
+        },
+        { limit_per_pile: 10 },
+        capabilities
+      ).catch((error) => {
+        console.debug("SaveMyContext due pile restructure skipped", error);
       });
       backendValidationLastKey = validationKey;
       backendValidationLastCompletedAt = Date.now();

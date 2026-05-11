@@ -14,7 +14,10 @@ import type {
   BackendGraphEdge,
   BackendGraphNode,
   BackendIdeaProjectRead,
+  BackendLLMOptions,
   BackendPileRead,
+  BackendPileRestructureDueResponse,
+  BackendPileRestructureResult,
   BackendPromptTemplateRead,
   BackendProcessingStatus,
   BackendSearchResponse,
@@ -445,6 +448,36 @@ export async function fetchProcessingStatus(
   return (await statusResponse.json()) as BackendProcessingStatus;
 }
 
+export async function fetchProcessingLLMs(
+  settings: ExtensionSettings,
+  options?: {
+    includeCatalog?: boolean;
+    limit?: number;
+  },
+  capabilities?: BackendCapabilities
+): Promise<BackendLLMOptions> {
+  const search = new URLSearchParams();
+  if (options?.includeCatalog) {
+    search.set("include_catalog", "true");
+  }
+  if (options?.limit) {
+    search.set("limit", String(options.limit));
+  }
+  const query = search.toString();
+  const response = await fetchBackendJson<BackendLLMOptions>(
+    settings,
+    `/processing/llms${query ? `?${query}` : ""}`,
+    capabilities
+  );
+  return {
+    ...response,
+    model_candidates: arrayOrEmpty(response.model_candidates),
+    suggested_models: arrayOrEmpty(response.suggested_models),
+    services: arrayOrEmpty(response.services),
+    openrouter_models: arrayOrEmpty(response.openrouter_models)
+  };
+}
+
 export async function fetchNextProcessingTask(
   settings: ExtensionSettings,
   capabilities?: BackendCapabilities
@@ -728,6 +761,87 @@ export async function deletePile(
     const details = await response.text();
     throw new Error(`Pile delete failed with ${response.status}: ${details.slice(0, 300)}`);
   }
+}
+
+export async function restructurePile(
+  settings: ExtensionSettings,
+  slug: string,
+  payload: {
+    model?: string;
+    limit?: number;
+    include_discarded?: boolean;
+  } = {},
+  capabilities?: BackendCapabilities
+): Promise<BackendPileRestructureResult> {
+  const response = await fetch(
+    backendApiUrl(settings, `/piles/${encodeURIComponent(slug)}/restructure`, capabilities),
+    {
+      method: "POST",
+      headers: buildBackendHeaders(settings),
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Pile restructure failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  const result = (await response.json()) as BackendPileRestructureResult;
+  return {
+    ...result,
+    session_ids: arrayOrEmpty(result.session_ids)
+  };
+}
+
+export async function restructureAllPiles(
+  settings: ExtensionSettings,
+  payload: {
+    model?: string;
+    limit?: number;
+    include_discarded?: boolean;
+  } = {},
+  capabilities?: BackendCapabilities
+): Promise<BackendPileRestructureResult> {
+  const response = await fetch(backendApiUrl(settings, "/piles/restructure", capabilities), {
+    method: "POST",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Base restructure failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  const result = (await response.json()) as BackendPileRestructureResult;
+  return {
+    ...result,
+    session_ids: arrayOrEmpty(result.session_ids)
+  };
+}
+
+export async function runDuePileRestructures(
+  settings: ExtensionSettings,
+  payload: {
+    limit_per_pile?: number;
+    include_discarded?: boolean;
+  } = {},
+  capabilities?: BackendCapabilities
+): Promise<BackendPileRestructureDueResponse> {
+  const response = await fetch(backendApiUrl(settings, "/piles/restructure/due", capabilities), {
+    method: "POST",
+    headers: buildBackendHeaders(settings),
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Due pile restructure failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  const result = (await response.json()) as BackendPileRestructureDueResponse;
+  return {
+    ...result,
+    results: arrayOrEmpty(result.results).map((item) => ({
+      ...item,
+      session_ids: arrayOrEmpty(item.session_ids)
+    }))
+  };
 }
 
 export async function updatePromptTemplate(

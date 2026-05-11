@@ -13,7 +13,12 @@ from app.schemas.processing_worker import SessionPipelineResult
 from app.services.idea_projects import IdeaProjectService
 from app.services.orchestrator import ProcessingOrchestrator, render_transcript
 from app.services.pile_service import PileService
-from app.services.piles import BUILT_IN_SLUG_TO_CATEGORY, CATEGORY_TO_BUILT_IN_SLUG, pipeline_prompt_addendum_from_config
+from app.services.piles import (
+    BUILT_IN_SLUG_TO_CATEGORY,
+    CATEGORY_TO_BUILT_IN_SLUG,
+    pipeline_llm_model_from_config,
+    pipeline_prompt_addendum_from_config,
+)
 from app.services.todo import TodoListService
 
 
@@ -24,9 +29,10 @@ MAX_USER_PILES_IN_CLASSIFIER_PROMPT = 8
 
 
 class SessionProcessor:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, *, llm_model: str | None = None) -> None:
         self.db = db
-        self.orchestrator = ProcessingOrchestrator(db=db)
+        self.llm_model = llm_model.strip() if isinstance(llm_model, str) and llm_model.strip() else None
+        self.orchestrator = ProcessingOrchestrator(db=db, llm_model=self.llm_model)
         self.piles = PileService(db)
         self.base_dir = TodoListService().base_dir
 
@@ -70,19 +76,21 @@ class SessionProcessor:
 
         if classification.pile == BuiltInPileSlug.JOURNAL:
             prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
+            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
             result = SessionPipelineResult(
                 pile=classification.pile,
                 classification_reason=classification.reason,
                 journal=await self._invoke_pipeline(
-                    self.orchestrator.journal,
+                    orchestrator.journal,
                     session.messages,
                     prompt_addendum=prompt_addendum,
                 ),
             )
         elif classification.pile == BuiltInPileSlug.FACTUAL:
             prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
+            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
             factual = await self._invoke_pipeline(
-                self.orchestrator.factual,
+                orchestrator.factual,
                 session.messages,
                 prompt_addendum=prompt_addendum,
             )
@@ -95,11 +103,12 @@ class SessionProcessor:
         elif classification.pile == BuiltInPileSlug.TODO:
             todo_markdown = TodoListService(base_dir=self.base_dir).read_markdown()
             prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
+            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
             result = SessionPipelineResult(
                 pile=classification.pile,
                 classification_reason=classification.reason,
                 todo=await self._invoke_pipeline(
-                    self.orchestrator.todo,
+                    orchestrator.todo,
                     session.messages,
                     todo_markdown,
                     prompt_addendum=prompt_addendum,
@@ -107,11 +116,12 @@ class SessionProcessor:
             )
         else:
             prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
+            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
             result = SessionPipelineResult(
                 pile=classification.pile,
                 classification_reason=classification.reason,
                 idea=await self._invoke_pipeline(
-                    self.orchestrator.ideas,
+                    orchestrator.ideas,
                     session.messages,
                     prompt_addendum=prompt_addendum,
                 ),
@@ -172,7 +182,8 @@ class SessionProcessor:
         attributes = list(target.attributes or [])
         config = target.pipeline_config or {}
         custom_addendum = pipeline_prompt_addendum_from_config(config)
-        outputs = await self.orchestrator.pile_outputs(
+        orchestrator = self._orchestrator_for_model(pipeline_llm_model_from_config(config))
+        outputs = await orchestrator.pile_outputs(
             session.messages,
             attributes=attributes,
             custom_prompt_addendum=custom_addendum,
@@ -219,6 +230,7 @@ class SessionProcessor:
         todo_service = TodoListService(base_dir=self.base_dir)
         current_todo = todo_service.read_markdown()
         built_in_prompt_addendums = await self._built_in_prompt_addendum_map()
+        built_in_llm_models = await self._built_in_llm_model_map()
 
         for segment in segments:
             slice_messages = messages[segment.start_index : segment.end_index + 1]
@@ -226,10 +238,11 @@ class SessionProcessor:
                 continue
             outputs: dict[str, object] = {}
             prompt_addendum = built_in_prompt_addendums.get(segment.pile_slug)
+            orchestrator = self._orchestrator_for_model(built_in_llm_models.get(segment.pile_slug))
 
             if segment.pile_slug == "journal":
                 journal = await self._invoke_pipeline(
-                    self.orchestrator.journal,
+                    orchestrator.journal,
                     slice_messages,
                     prompt_addendum=prompt_addendum,
                 )
@@ -238,7 +251,7 @@ class SessionProcessor:
                 journal_actions.extend(journal.action_items)
             elif segment.pile_slug == "factual":
                 factual = await self._invoke_pipeline(
-                    self.orchestrator.factual,
+                    orchestrator.factual,
                     slice_messages,
                     prompt_addendum=prompt_addendum,
                 )
@@ -248,7 +261,7 @@ class SessionProcessor:
                     factual_summaries.append(factual.summary)
             elif segment.pile_slug == "ideas":
                 idea = await self._invoke_pipeline(
-                    self.orchestrator.ideas,
+                    orchestrator.ideas,
                     slice_messages,
                     prompt_addendum=prompt_addendum,
                 )
@@ -261,7 +274,7 @@ class SessionProcessor:
                 share_posts.append(idea.share_post)
             elif segment.pile_slug == "todo":
                 todo = await self._invoke_pipeline(
-                    self.orchestrator.todo,
+                    orchestrator.todo,
                     slice_messages,
                     current_todo,
                     prompt_addendum=prompt_addendum,
@@ -347,6 +360,10 @@ class SessionProcessor:
         pile = await self.piles.resolve_pile_for_built_in_pile(built_in_pile)
         return pipeline_prompt_addendum_from_config(pile.pipeline_config if pile else None)
 
+    async def _llm_model_for_built_in_pile(self, built_in_pile: BuiltInPileSlug | None) -> str | None:
+        pile = await self.piles.resolve_pile_for_built_in_pile(built_in_pile)
+        return pipeline_llm_model_from_config(pile.pipeline_config if pile else None)
+
     async def _built_in_prompt_addendum_map(self) -> dict[str, str]:
         piles = await self.piles.list_piles()
         prompt_addendum_by_slug: dict[str, str] = {}
@@ -357,6 +374,23 @@ class SessionProcessor:
             if prompt_addendum:
                 prompt_addendum_by_slug[pile.slug] = prompt_addendum
         return prompt_addendum_by_slug
+
+    async def _built_in_llm_model_map(self) -> dict[str, str]:
+        piles = await self.piles.list_piles()
+        llm_model_by_slug: dict[str, str] = {}
+        for pile in piles:
+            if pile.slug not in BUILT_IN_SLUG_TO_CATEGORY:
+                continue
+            llm_model = pipeline_llm_model_from_config(pile.pipeline_config)
+            if llm_model:
+                llm_model_by_slug[pile.slug] = llm_model
+        return llm_model_by_slug
+
+    def _orchestrator_for_model(self, configured_model: str | None) -> ProcessingOrchestrator:
+        effective_model = self.llm_model or (configured_model.strip() if isinstance(configured_model, str) else None)
+        if not effective_model or effective_model == self.orchestrator.llm_model:
+            return self.orchestrator
+        return ProcessingOrchestrator(db=self.db, llm_model=effective_model)
 
     @staticmethod
     async def _invoke_pipeline(callable_obj, *args, prompt_addendum: str | None = None):
@@ -506,11 +540,13 @@ class SessionProcessor:
 
         # User-defined pile: run the generic attribute-driven pipeline.
         attributes = list(target.attributes or [])
-        custom_addendum = (target.pipeline_config or {}).get("custom_prompt_addendum") if target.pipeline_config else None
-        outputs = await self.orchestrator.pile_outputs(
+        config = target.pipeline_config or {}
+        custom_addendum = pipeline_prompt_addendum_from_config(config)
+        orchestrator = self._orchestrator_for_model(pipeline_llm_model_from_config(config))
+        outputs = await orchestrator.pile_outputs(
             session.messages,
             attributes=attributes,
-            custom_prompt_addendum=custom_addendum if isinstance(custom_addendum, str) else None,
+            custom_prompt_addendum=custom_addendum,
         )
         session.built_in_pile = None
         session.pile_id = target.id

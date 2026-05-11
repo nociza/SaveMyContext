@@ -150,3 +150,27 @@ def pipeline_prompt_addendum_from_config(config: dict[str, Any] | None) -> str |
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def pipeline_llm_model_from_config(config: dict[str, Any] | None) -> str | None:
+    if not isinstance(config, dict):
+        return None
+    value = config.get("llm_model")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def restructure_config_from_pipeline_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        return {}
+    value = config.get("restructure")
+    return value if isinstance(value, dict) else {}
+
+
+def restructure_llm_model_from_config(config: dict[str, Any] | None) -> str | None:
+    restructure = restructure_config_from_pipeline_config(config)
+    value = restructure.get("llm_model")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return pipeline_llm_model_from_config(config)

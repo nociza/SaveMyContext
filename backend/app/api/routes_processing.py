@@ -1,20 +1,31 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
+from app.schemas.llm import LLMOptionsResponse
 from app.schemas.processing_worker import (
     ProcessingCompleteRequest,
     ProcessingCompleteResponse,
     ProcessingStatusResponse,
     ProcessingTaskResponse,
 )
+from app.services.llm.options import LLMOptionsService
 from app.services.processing_worker import ExtensionBrowserProcessingService
 
 
 router = APIRouter(prefix="/processing")
+
+
+@router.get("/llms", response_model=LLMOptionsResponse)
+async def processing_llms(
+    include_catalog: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=1000),
+    _: AuthContext = Depends(require_scope("read")),
+) -> LLMOptionsResponse:
+    return await LLMOptionsService().options(include_openrouter_catalog=include_catalog, limit=limit)
 
 
 @router.get("/status", response_model=ProcessingStatusResponse)

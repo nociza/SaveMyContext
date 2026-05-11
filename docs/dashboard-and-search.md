@@ -66,17 +66,17 @@ Use this to inspect storage and pipeline health:
 
 Each pile has its own workspace page. These are especially useful once your archive grows.
 
-### Atlas
+### Concept Map
 
-The atlas view combines graph structure, note lists, and filters. Use it when you want to see how notes and entities cluster together.
+The concept map combines graph structure and scoped filters. Use it when you want to see how notes and entities cluster together.
 
 ### Storylines
 
 Storylines group related notes into larger threads. Use this when you want guided exploration instead of a raw graph.
 
-### Graph Ops
+### Graph Health
 
-Graph Ops focuses on retrieval quality and graph maintenance. Use it to spot weakly connected areas and inspect graph quality issues.
+Graph Health focuses on retrieval quality and graph maintenance. Use it to spot weakly connected areas and inspect graph quality issues.
 
 ## Note reader
 

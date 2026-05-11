@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
+from app.core.config import get_settings, unique_nonempty_models
 from app.services.llm.base import LLMClient, SchemaT
 from app.services.text import extract_json_object
 
@@ -12,11 +12,11 @@ from app.services.text import extract_json_object
 class OpenAIClient(LLMClient):
     name = "openai_compatible"
 
-    def __init__(self) -> None:
+    def __init__(self, *, model_candidates: list[str] | None = None) -> None:
         settings = get_settings()
         self.api_key = settings.openai_api_key
         self.base_url = settings.resolved_openai_base_url.rstrip("/")
-        self.models = settings.resolved_openai_model_candidates
+        self.models = unique_nonempty_models(model_candidates or settings.resolved_openai_model_candidates)
         self.model = self.models[0]
         self.site_url = settings.openai_site_url or settings.public_url
         self.app_name = settings.openai_app_name

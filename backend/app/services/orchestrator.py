@@ -59,14 +59,25 @@ def render_indexed_transcript(messages: list[ChatMessage]) -> str:
 
 
 class ProcessingOrchestrator:
-    def __init__(self, browser_proxy: BrowserProxyService | None = None, db: AsyncSession | None = None) -> None:
+    def __init__(
+        self,
+        browser_proxy: BrowserProxyService | None = None,
+        db: AsyncSession | None = None,
+        *,
+        llm_model: str | None = None,
+    ) -> None:
         self.settings: Settings = get_settings()
         self.db = db
         self.browser_proxy = browser_proxy
+        self.llm_model = llm_model.strip() if isinstance(llm_model, str) and llm_model.strip() else None
         self.prompts = PromptTemplateService(db)
         self.client = self._resolve_client()
 
     def _resolve_client(self) -> LLMClient | None:
+        if self.llm_model:
+            if self.settings.openai_api_key:
+                return OpenAIClient(model_candidates=[self.llm_model])
+            return None
         backend = self.settings.llm_backend.lower()
         if backend == "browser_proxy":
             if not self.settings.experimental_browser_automation or self.browser_proxy is None:

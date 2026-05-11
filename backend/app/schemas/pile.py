@@ -66,3 +66,33 @@ class DiscardedSessionItem(BaseModel):
 class DiscardedSessionsResponse(BaseModel):
     count: int
     items: list[DiscardedSessionItem] = Field(default_factory=list)
+
+
+class PileRestructureRequest(BaseModel):
+    model: str | None = Field(default=None, max_length=200)
+    limit: int = Field(default=25, ge=1, le=500)
+    include_discarded: bool = False
+
+
+class PileRestructureResult(BaseModel):
+    scope: str
+    pile_slug: str | None = None
+    pile_name: str | None = None
+    model: str | None = None
+    processed_count: int = 0
+    moved_count: int = 0
+    session_ids: list[str] = Field(default_factory=list)
+    started_at: datetime
+    completed_at: datetime
+
+
+class PileRestructureDueRequest(BaseModel):
+    limit_per_pile: int = Field(default=10, ge=1, le=100)
+    include_discarded: bool = False
+
+
+class PileRestructureDueResponse(BaseModel):
+    checked_count: int = 0
+    due_count: int = 0
+    processed_count: int = 0
+    results: list[PileRestructureResult] = Field(default_factory=list)

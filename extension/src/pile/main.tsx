@@ -48,6 +48,7 @@ import {
 import {
   displayPileLabel,
   pileGlyphs,
+  pileDescriptions,
   pileLabels,
   pileOrder,
   pilePalette,
@@ -102,16 +103,23 @@ type RouteState = {
   provider: ProviderName | null;
   sort: PileSortMode;
   view: PileWorkspaceView;
+  panel: PilePanelView;
   bucket: string | null;
   project: string | null;
   note: string | null;
   extraPile: string | null;
 };
 
+type PilePanelView = "workspace" | "notes" | "reader";
+
 type GraphFocus = {
   label: string;
   sessionIds: string[];
 };
+
+function parsePilePanel(value: string | null): PilePanelView {
+  return value === "notes" || value === "reader" ? value : "workspace";
+}
 
 function readRouteState(): RouteState {
   const params = new URLSearchParams(window.location.search);
@@ -121,6 +129,7 @@ function readRouteState(): RouteState {
     provider: parseProvider(params.get("provider")),
     sort: parseSortMode(params.get("sort")),
     view: parsePileWorkspaceView(params.get("view")),
+    panel: parsePilePanel(params.get("panel")),
     bucket: params.get("bucket")?.trim() ?? null,
     project: params.get("project")?.trim() ?? null,
     note: params.get("note"),
@@ -150,6 +159,11 @@ function writeRouteState(state: RouteState, push = true): void {
     url.searchParams.set("view", state.view);
   } else {
     url.searchParams.delete("view");
+  }
+  if (state.panel !== "workspace") {
+    url.searchParams.set("panel", state.panel);
+  } else {
+    url.searchParams.delete("panel");
   }
   if (state.bucket) {
     url.searchParams.set("bucket", state.bucket);
@@ -334,7 +348,7 @@ function noteListMeta(
 ): string {
   const providerText = route.provider ? ` in ${providerLabels[route.provider]}` : "";
   const bucketText = route.bucket ? ` · ${formatBucketLabel(route.bucket)}` : "";
-  const extraPileText = route.extraPile ? ` · extra pile ${route.extraPile}` : "";
+  const extraPileText = route.extraPile ? ` · collection ${route.extraPile}` : "";
   const noteLabel = displayPile === "todo" ? "update notes" : "notes";
   if (focus) {
     return `${formatNumber(visible)} ${noteLabel} linked to ${focus.label}${bucketText}${extraPileText}`;
@@ -343,6 +357,24 @@ function noteListMeta(
     return `${formatNumber(visible)} matches for "${route.q}" from ${formatNumber(total)} ${noteLabel}${providerText}${bucketText}${extraPileText}`;
   }
   return `${formatNumber(total)} ${noteLabel} in view${providerText}${bucketText}${extraPileText}`;
+}
+
+function graphGroupingLabel(mode: GraphGroupingMode): string {
+  if (mode === "community") {
+    return "Topic communities";
+  }
+  if (mode === "provider") {
+    return "Source provider";
+  }
+  return "Entity type";
+}
+
+function graphDensityLabel(density: PileGraphDensity): string {
+  return density === "curated" ? "Curated graph" : "Complete graph";
+}
+
+function graphFocusModeLabel(mode: PileGraphFocusMode): string {
+  return mode === "context" ? "Focused context" : "Dim outside focus";
 }
 
 function graphNodeOptionScore(node: BackendExplorerGraphNode): number {
@@ -929,7 +961,7 @@ function App() {
   });
   const scopePills = [
     { key: "pile", label: isCustomScope ? "Default pile" : "Pile", value: pileLabels[activeDisplayCategory] },
-    route.extraPile ? { key: "extra-pile", label: "Extra pile", value: route.extraPile } : null,
+    route.extraPile ? { key: "extra-pile", label: "Collection", value: route.extraPile } : null,
     route.provider ? { key: "provider", label: "Provider", value: providerLabels[route.provider] } : null,
     route.q ? { key: "query", label: "Query", value: route.q } : null,
     route.bucket ? { key: "bucket", label: "Time", value: formatBucketLabel(route.bucket) } : null,
@@ -1010,14 +1042,14 @@ function App() {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ pile, note: null, bucket: null, project: null, view: "atlas", extraPile: null }, true);
+    updateRoute({ pile, note: null, bucket: null, project: null, view: "atlas", panel: "workspace", extraPile: null }, true);
   }
 
   function handleExtraPileSwitch(name: string): void {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ extraPile: name, note: null, bucket: null, project: null, view: "atlas" }, true);
+    updateRoute({ extraPile: name, note: null, bucket: null, project: null, view: "atlas", panel: "workspace" }, true);
   }
 
   function activateFocus(label: string, sessionIds: string[], nextView?: PileWorkspaceView): void {
@@ -1041,7 +1073,7 @@ function App() {
     setGraphFocus(null);
     setGraphInspect(null);
     setCollapsedGroups([]);
-    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, project: null, note: null, view: "atlas", extraPile: null }, true);
+    updateRoute({ q: "", provider: null, sort: "recent", bucket: null, project: null, note: null, view: "atlas", panel: "workspace", extraPile: null }, true);
   }
 
   function handlePathFocus(path: BackendExplorerGraphPath): void {
@@ -1078,7 +1110,7 @@ function App() {
             accent: pilePalette.journal.accent,
             icon: Activity,
             metric: `${formatNumber(journalEntryCount)} entries`,
-            detail: "Daily progression"
+            detail: "Chronological journal"
           },
           {
             value: "story" as const,
@@ -1086,7 +1118,7 @@ function App() {
             accent: "#2477c7",
             icon: MapPin,
             metric: `${formatNumber(journalPlaceCount)} places`,
-            detail: "Travel view"
+            detail: "Location movement"
           },
           {
             value: "ops" as const,
@@ -1094,7 +1126,7 @@ function App() {
             accent: "#0f8a84",
             icon: Users,
             metric: `${formatNumber(journalPeopleCount + journalEntityCount)} named`,
-            detail: "Relationships and items"
+            detail: "People and entities"
           }
         ]
       : activeDisplayCategory === "ideas"
@@ -1105,15 +1137,15 @@ function App() {
               accent: pilePalette.ideas.accent,
               icon: GitBranch,
               metric: `${formatNumber(ideaNodeCount)} ideas`,
-              detail: "Thread progression"
+              detail: "Idea progression"
             },
             {
               value: "story" as const,
-              label: "Mind map",
+              label: "Projects",
               accent: "#4968ab",
               icon: BrainCircuit,
               metric: `${formatNumber(ideaProjectCount || ideaThreadCount)} projects`,
-              detail: "Projects and facts"
+              detail: "Projects, threads, facts"
             },
             {
               value: "ops" as const,
@@ -1121,7 +1153,7 @@ function App() {
               accent: "#0f8a84",
               icon: Users,
               metric: `${formatNumber(ideaContributorCount)} voices`,
-              detail: "Validates and counters"
+              detail: "Claims and relations"
             }
           ]
         : [
@@ -1135,7 +1167,7 @@ function App() {
             },
             {
               value: "story" as const,
-              label: "Links",
+              label: "Cross-links",
               accent: "#4968ab",
               icon: Workflow,
               metric: `${formatNumber(factualLinkedSourceCount)} sources`,
@@ -1147,17 +1179,17 @@ function App() {
               accent: "#c77724",
               icon: Tags,
               metric: `${formatNumber(factualEntityCount)} entities`,
-              detail: "Queryable surface"
+              detail: "Keywords and entities"
             }
           ]
     : [
         {
           value: "atlas" as const,
-          label: "Atlas",
+          label: "Concept Map",
           accent: pilePalette[activeDisplayCategory].accent,
           icon: BrainCircuit,
           metric: `${formatNumber(filteredGraph.node_count)} nodes`,
-          detail: `${formatNumber(filteredGraph.edge_count)} links`
+          detail: `${formatNumber(filteredGraph.edge_count)} visible links`
         },
         {
           value: "story" as const,
@@ -1165,15 +1197,15 @@ function App() {
           accent: "#c77724",
           icon: Sparkles,
           metric: `${formatNumber(graphInsights.storylines.length)} trails`,
-          detail: `${formatNumber(graphInsights.corroboratedNodes)} corroborated nodes`
+          detail: "Guided graph trails"
         },
         {
           value: "ops" as const,
-          label: "Graph Ops",
+          label: "Graph Health",
           accent: "#2477c7",
           icon: Workflow,
           metric: `${formatPercent(graphInsights.sessionCoverage * 100)}% coverage`,
-          detail: graphInsights.warnings.length ? `${graphInsights.warnings.length} lint signals` : "Scope is connected"
+          detail: graphInsights.warnings.length ? `${graphInsights.warnings.length} maintenance signals` : "Scope is connected"
         }
       ];
 
@@ -1228,7 +1260,7 @@ function App() {
       setExtraPileDraft("");
       await Promise.all([sessionsQuery.refetch(), noteQuery.refetch(), extraPilesQuery.refetch()]);
     } catch (categoryError) {
-      setExtraPileError(categoryError instanceof Error ? categoryError.message : "Could not update extra piles.");
+      setExtraPileError(categoryError instanceof Error ? categoryError.message : "Could not update collections.");
     }
   }
 
@@ -1298,13 +1330,13 @@ function App() {
   const workspaceTitle = isTodoWorkspace
     ? "Shared list workspace"
     : usesCategoryWorkspace && activeDisplayCategory === "journal"
-      ? "Journal timeline workspace"
+      ? "Journal workspace"
       : usesCategoryWorkspace && activeDisplayCategory === "ideas"
-        ? "Idea evolution workspace"
+        ? "Ideas workspace"
         : usesCategoryWorkspace && activeDisplayCategory === "factual"
-          ? "Factual backlog workspace"
+          ? "Factual workspace"
           : activeDisplayCategory === "factual"
-            ? "Knowledge graph workspace"
+            ? "Concept map workspace"
             : "Context workspace";
   const workspaceDescription = isTodoWorkspace
     ? "A plain shared checklist with active and completed tasks."
@@ -1313,10 +1345,10 @@ function App() {
       : usesCategoryWorkspace && activeDisplayCategory === "ideas"
         ? "Projects preserve where ideas belong while threads show how they build, validate, and counter."
         : usesCategoryWorkspace && activeDisplayCategory === "factual"
-          ? "Simple dated reminders of what was learned, with links back from other piles."
+          ? "Browse learned facts by date, cross-pile references, and searchable terms."
           : isCustomScope
-            ? "This view follows one extra pile while preserving the underlying note and graph structure."
-            : "Start with the atlas. Storylines and graph ops are supporting views.";
+            ? "This view follows a cross-pile collection while preserving the original pile and note structure."
+            : "Use the concept map for relationships, storylines for guided trails, and graph health for coverage.";
 
   const headerMetrics =
     isTodoWorkspace
@@ -1396,7 +1428,231 @@ function App() {
   const maxActivityBucketCount = Math.max(...activityBuckets.map((bucket) => bucket.count), 1);
   const activePileAccent = pilePalette[activeDisplayCategory].accent;
   const activePileName = isCustomScope ? route.extraPile : pileLabels[route.pile];
-  const notesTitle = !isCustomScope && route.pile === "todo" ? "Change log notes" : isCustomScope ? "Notes in extra pile" : "Notes in scope";
+  const notesTitle = !isCustomScope && route.pile === "todo" ? "Change log notes" : isCustomScope ? "Notes in collection" : "Notes in scope";
+  const panelCards = [
+    {
+      value: "workspace" as const,
+      label: "Explore",
+      icon: BrainCircuit,
+      metric: isTodoWorkspace ? "Shared checklist" : workspaceTitle
+    },
+    {
+      value: "notes" as const,
+      label: "Notes",
+      icon: ListChecks,
+      metric: noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)
+    },
+    {
+      value: "reader" as const,
+      label: "Reader",
+      icon: BookOpen,
+      metric: selectedSession ? titleFromSession(selectedSession) : "Choose a note"
+    }
+  ];
+  const activePanelTitle =
+    route.panel === "reader"
+      ? selectedSession
+        ? titleFromSession(selectedSession)
+        : "Reader"
+      : route.panel === "notes"
+        ? notesTitle
+        : workspaceTitle;
+  const activePanelDescription =
+    route.panel === "reader"
+      ? "Read the selected note with full-width transcript, overview, and markdown views."
+      : route.panel === "notes"
+        ? noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)
+        : workspaceDescription;
+
+  function renderGraphGroupSelect() {
+    return (
+      <label className="control-field">
+        <span>Group by</span>
+        <Select value={groupingMode} onValueChange={(value) => setGroupingMode(value as GraphGroupingMode)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder={graphGroupingLabel(groupingMode)} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="community" className="py-1.5 text-xs">Topic communities</SelectItem>
+            <SelectItem value="provider" className="py-1.5 text-xs">Source provider</SelectItem>
+            <SelectItem value="kind" className="py-1.5 text-xs">Entity type</SelectItem>
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderSemanticGroupSelect() {
+    if (!graphInsights.clusters.length) {
+      return null;
+    }
+
+    return (
+      <label className="control-field">
+        <span>Focus group</span>
+        <Select
+          value="__semantic_groups__"
+          onValueChange={(value) => {
+            if (value === "__semantic_groups__") {
+              return;
+            }
+            if (value === "__all_groups__") {
+              setCollapsedGroups([]);
+              setGraphFocus(null);
+              setGraphInspect(null);
+              return;
+            }
+            const cluster = graphInsights.clusters.find((item) => item.id === value);
+            if (cluster) {
+              activateFocus(cluster.label, cluster.sessionIds, "atlas");
+            }
+          }}
+        >
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder="Choose group" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__semantic_groups__" className="py-1.5 text-xs">Choose group</SelectItem>
+            <SelectItem value="__all_groups__" className="py-1.5 text-xs">All groups</SelectItem>
+            {graphInsights.clusters.slice(0, 12).map((cluster) => (
+              <SelectItem key={cluster.id} value={cluster.id} className="py-1.5 text-xs">
+                {cluster.label} · {formatNumber(cluster.nodeCount)} nodes
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderProviderFilterSelect() {
+    if (!availableGraphProviders.length) {
+      return null;
+    }
+
+    return (
+      <label className="control-field">
+        <span>Source</span>
+        <Select value={providerFilterValue} onValueChange={handleProviderFilterSelect}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="py-1.5 text-xs">All sources</SelectItem>
+            {providerFilterValue === "__mixed__" ? (
+              <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed sources</SelectItem>
+            ) : null}
+            {availableGraphProviders.map((provider) => (
+              <SelectItem key={provider} value={provider} className="py-1.5 text-xs">
+                {providerLabels[provider]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderKindFilterSelect() {
+    if (!availableGraphKinds.length) {
+      return null;
+    }
+
+    return (
+      <label className="control-field">
+        <span>Type</span>
+        <Select value={kindFilterValue} onValueChange={handleKindFilterSelect}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="py-1.5 text-xs">
+              All {pileLabels[activeDisplayCategory].toLowerCase()}
+            </SelectItem>
+            {kindFilterValue === "__mixed__" ? (
+              <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed types</SelectItem>
+            ) : null}
+            {availableGraphKinds.map((kind) => (
+              <SelectItem key={kind} value={kind} className="py-1.5 text-xs">
+                {kind}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderDensitySelect() {
+    return (
+      <label className="control-field">
+        <span>Density</span>
+        <Select value={graphDensity} onValueChange={(value) => setGraphDensity(value as PileGraphDensity)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder={graphDensityLabel(graphDensity)} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="curated" className="py-1.5 text-xs">Curated graph</SelectItem>
+            <SelectItem value="complete" className="py-1.5 text-xs">Complete graph</SelectItem>
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderFocusModeSelect() {
+    if (!graphFocus) {
+      return null;
+    }
+
+    return (
+      <label className="control-field">
+        <span>Focus</span>
+        <Select value={graphFocusMode} onValueChange={(value) => setGraphFocusMode(value as PileGraphFocusMode)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue placeholder={graphFocusModeLabel(graphFocusMode)} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="context" className="py-1.5 text-xs">Focused context</SelectItem>
+            <SelectItem value="dim" className="py-1.5 text-xs">Dim outside focus</SelectItem>
+          </SelectContent>
+        </Select>
+      </label>
+    );
+  }
+
+  function renderGraphActionButtons() {
+    return (
+      <div className="control-actions">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => setCollapsedGroups(graphInsights.clusters.map((cluster) => cluster.id))}
+          disabled={!graphInsights.clusters.length}
+          className="h-8 px-2.5 text-xs"
+        >
+          Collapse
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setCollapsedGroups([])} disabled={!collapsedGroups.length} className="h-8 px-2.5 text-xs">
+          Expand
+        </Button>
+        {graphFocus ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setGraphFocus(null);
+              setGraphInspect(null);
+            }}
+            className="h-8 px-2.5 text-xs"
+          >
+            Clear focus
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
   const issueMessage =
     status?.backendValidationError ||
     error ||
@@ -1411,22 +1667,26 @@ function App() {
     null;
 
   return (
-    <div className="app-page app-page--wide pile-workbench">
-      <Card className="pile-workbench-header p-3">
-        <div className="grid gap-3 xl:grid-cols-[minmax(220px,0.45fr)_minmax(0,1fr)_auto] xl:items-center">
+    <div className={`app-page app-page--wide pile-workbench pile-workbench--${activeDisplayCategory}${!isCustomScope && activeDisplayCategory === "ideas" ? " pile-workbench--ideas" : ""}`}>
+      <Card className="pile-workbench-header workbench-topbar p-3">
+        <div className="grid gap-3 xl:grid-cols-[minmax(260px,0.42fr)_minmax(0,1fr)_auto] xl:items-center">
           <div className="flex min-w-0 items-center gap-3">
             <span
-              className="display-serif flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[16px]"
+              className="display-serif flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-[16px]"
               style={{
                 backgroundColor: `${activePileAccent}1a`,
                 color: activePileAccent
               }}
+              aria-hidden="true"
             >
-              {isCustomScope ? "⌘" : (pileGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
+              {isCustomScope ? "◎" : (pileGlyphs as Record<string, string>)[activeDisplayCategory] ?? "§"}
             </span>
             <div className="min-w-0">
-              <div className="eyebrow text-[10px]">{isCustomScope ? "Extra pile" : "Pile"}</div>
+              <div className="eyebrow text-[10px]">{isCustomScope ? "Collection" : "Pile"}</div>
               <CardTitle className="display-serif truncate text-[20px] font-semibold leading-tight">{activePileName}</CardTitle>
+              <CardDescription className="mt-0.5 line-clamp-2 text-xs leading-5">
+                {isCustomScope ? `${pileLabels[activeDisplayCategory]} source notes grouped as a cross-pile collection.` : pileDescriptions[route.pile]}
+              </CardDescription>
             </div>
           </div>
 
@@ -1444,7 +1704,7 @@ function App() {
 
           <Button variant="secondary" size="sm" className="justify-self-start xl:justify-self-end" onClick={() => (window.location.href = chrome.runtime.getURL("dashboard.html"))}>
             <ArrowLeft className="h-3.5 w-3.5" />
-            Overview
+            Dashboard
           </Button>
         </div>
         {scopePills.length ? (
@@ -1464,8 +1724,8 @@ function App() {
           <Card className="pile-sidebar-card p-3">
             <CardHeader className="gap-2">
               <div>
-                <div className="rail-heading"><Layers className="h-3.5 w-3.5" /> Explorer</div>
-                <CardTitle className="mt-0.5 text-base">Piles</CardTitle>
+                <div className="rail-heading"><Layers className="h-3.5 w-3.5" /> Navigate</div>
+                <CardTitle className="mt-0.5 text-base">Pile lanes</CardTitle>
               </div>
             </CardHeader>
             <CardContent className="pile-sidebar-scroll mt-3 space-y-4 pr-1">
@@ -1490,7 +1750,10 @@ function App() {
                       >
                         {pileGlyphs[pile]}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">{pileLabels[pile]}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold">{pileLabels[pile]}</span>
+                        <span className="pile-nav-description">{pileDescriptions[pile]}</span>
+                      </span>
                     </button>
                   );
                 })}
@@ -1509,7 +1772,7 @@ function App() {
                       onClick={() => {
                         setGraphFocus(null);
                         setGraphInspect(null);
-                        updateRoute({ project: null, note: null }, true);
+                        updateRoute({ project: null, note: null, panel: "workspace" }, true);
                       }}
                       className="flex w-full items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-2 py-1.5 text-left text-xs transition hover:bg-[var(--color-paper-sunken)]"
                       data-active={!route.project}
@@ -1517,7 +1780,7 @@ function App() {
                       <span className="font-semibold text-[var(--color-ink)]">All ideas</span>
                       <span className="text-[var(--color-ink-soft)]">{formatNumber(ideaNodeCount)}</span>
                     </button>
-                    {ideaProjectGroups.slice(0, 8).map((project) => {
+                    {ideaProjectGroups.map((project) => {
                       const activeProject = route.project === (project.slug ?? project.label) || route.project === project.label;
                       return (
                         <button
@@ -1526,7 +1789,7 @@ function App() {
                           onClick={() => {
                             setGraphFocus(null);
                             setGraphInspect(null);
-                            updateRoute({ project: project.slug ?? project.label, note: null, view: "atlas" }, true);
+                            updateRoute({ project: project.slug ?? project.label, note: null, view: "atlas", panel: "workspace" }, true);
                           }}
                           className={`w-full rounded-[8px] border px-2 py-1.5 text-left text-xs transition ${
                             activeProject
@@ -1556,7 +1819,7 @@ function App() {
                   </div>
 
                   <div className="grid gap-1.5">
-                    {ideaProjects.slice(0, 5).map((project) => (
+                    {ideaProjects.map((project) => (
                       <div key={project.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-2">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -1612,7 +1875,8 @@ function App() {
 
               <div className="rail-section space-y-1.5">
                 <div>
-                  <div className="rail-heading"><Tags className="h-3.5 w-3.5" /> Extra piles</div>
+                  <div className="rail-heading"><Tags className="h-3.5 w-3.5" /> Collections</div>
+                  <p className="mt-1 text-xs leading-5 text-[var(--color-ink-soft)]">Cross-pile groupings that keep each note in its original pile.</p>
                 </div>
 
                 <Select
@@ -1630,10 +1894,10 @@ function App() {
                   disabled={!extraPiles.length}
                 >
                   <SelectTrigger className="h-8 text-xs">
-                    <SelectValue placeholder="Extra pile" />
+                    <SelectValue placeholder="Collection" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__default__" className="py-1.5 text-xs">Default pile</SelectItem>
+                    <SelectItem value="__default__" className="py-1.5 text-xs">Current pile only</SelectItem>
                     {extraPiles.map((item) => (
                       <SelectItem key={item.name} value={item.name} className="py-1.5 text-xs">
                         {item.name} · {formatNumber(item.count)}
@@ -1654,11 +1918,12 @@ function App() {
                     type="text"
                     value={extraPileDraft}
                     onChange={(event) => setExtraPileDraft(event.target.value)}
-                    placeholder={selectedSession ? "New extra pile" : "Select a note first"}
+                    placeholder={selectedSession ? "Add to collection" : "Select a note first"}
                     className="compact-field h-8 min-w-0 flex-1"
                   />
                   <Button type="submit" size="sm" variant="secondary" className="h-8 shrink-0 px-2 text-xs" disabled={!selectedSession || !extraPileDraft.trim()}>
                     <Plus className="h-3.5 w-3.5" />
+                    <span className="sr-only">Add collection</span>
                   </Button>
                 </form>
               </div>
@@ -1746,7 +2011,7 @@ function App() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" variant="secondary" className="h-8 px-2.5 text-xs" onClick={clearScope}>
-                    Clear scope
+                    Reset
                   </Button>
                   {graphFocus ? (
                     <Button
@@ -1804,16 +2069,40 @@ function App() {
           </Card>
         </aside>
 
-        <div className="min-h-0 xl:h-full">
-          <Card className="flex min-h-0 flex-col overflow-hidden p-2.5 sm:p-3 xl:h-full">
-            <CardHeader className="flex-wrap items-center gap-2">
+        <div className="pile-workbench-content min-h-0 xl:h-full">
+          <Card className="pile-main-card flex min-h-0 flex-col overflow-hidden p-2.5 sm:p-3 xl:h-full">
+            <CardHeader className="workbench-content-header flex-wrap items-center gap-3">
               <div className="min-w-0">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Workspace</div>
-                <CardTitle className="mt-0.5 text-base">{workspaceTitle}</CardTitle>
-                <CardDescription className="line-clamp-1 text-xs leading-5 xl:hidden">{workspaceDescription}</CardDescription>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">Main view</div>
+                <CardTitle className="mt-0.5 text-base">{activePanelTitle}</CardTitle>
+                <CardDescription className="line-clamp-1 text-xs leading-5">{activePanelDescription}</CardDescription>
               </div>
-              {!isTodoWorkspace ? (
-                <div className="view-switch w-full shrink-0 sm:w-auto sm:min-w-[360px]">
+              <div className="panel-switch w-full shrink-0 sm:w-auto sm:min-w-[440px]" role="tablist" aria-label="Main view">
+                {panelCards.map((card) => {
+                  const active = route.panel === card.value;
+                  return (
+                    <button
+                      key={card.value}
+                      type="button"
+                      onClick={() => updateRoute({ panel: card.value }, true)}
+                      className="panel-switch-button"
+                      data-active={active}
+                      aria-pressed={active}
+                    >
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <card.icon className="h-3.5 w-3.5 shrink-0" style={{ color: activePileAccent }} />
+                        <span className="truncate text-xs font-semibold">{card.label}</span>
+                      </span>
+                      <span className="panel-switch-meta">{card.metric}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </CardHeader>
+
+            <CardContent className="pile-main-body mt-2 flex min-h-0 flex-1 flex-col">
+              {route.panel === "workspace" && !isTodoWorkspace ? (
+                <div className="workspace-mode-grid mb-2 w-full shrink-0" role="tablist" aria-label="Workspace mode">
                   {workspaceCards.map((card) => {
                     const active = route.view === card.value;
                     return (
@@ -1821,23 +2110,185 @@ function App() {
                         key={card.value}
                         type="button"
                         onClick={() => updateRoute({ view: card.value }, true)}
-                        className="view-switch-button"
+                        className="workspace-mode-button"
                         data-active={active}
+                        aria-pressed={active}
                       >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <card.icon className="h-3.5 w-3.5 shrink-0" style={{ color: card.accent }} />
-                          <span className="truncate text-xs font-semibold">{card.label}</span>
+                        <span className="flex min-w-0 items-start gap-2">
+                          <span className="workspace-mode-icon" style={{ color: card.accent, backgroundColor: `${card.accent}1a` }}>
+                            <card.icon className="h-3.5 w-3.5 shrink-0" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold">{card.label}</span>
+                            <span className="workspace-mode-detail">{card.detail}</span>
+                          </span>
                         </span>
-                        <span className="mt-1 block truncate text-[11px] leading-4 text-[var(--color-ink-soft)]">{card.metric}</span>
+                        <span className="workspace-mode-metric">{card.metric}</span>
                       </button>
                     );
                   })}
                 </div>
               ) : null}
-            </CardHeader>
+              {route.panel === "notes" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="rail-heading"><ListChecks className="h-3.5 w-3.5" /> Results</div>
+                      <div className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                        {noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}
+                      </div>
+                    </div>
+                    {graphFocus ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setGraphFocus(null);
+                          setGraphInspect(null);
+                        }}
+                      >
+                        Clear focus
+                      </Button>
+                    ) : null}
+                  </div>
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div className="grid gap-2 pr-5 pb-1 md:grid-cols-2 2xl:grid-cols-3">
+                      {noteListItems.map((session) => {
+                        const match = matches.get(session.id);
+                        const isActive = session.id === selectedSessionId;
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => updateRoute({ note: session.id, panel: "reader" }, false)}
+                            className={`rounded-[8px] border p-3 text-left transition ${
+                              isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
+                            }`}
+                          >
+                            <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+                              <span className="min-w-0 truncate text-sm font-semibold">{titleFromSession(session)}</span>
+                              <span className="shrink-0">
+                                <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
+                              </span>
+                            </div>
+                            {(session.extra_piles ?? []).length ? (
+                              <div className="mb-2 flex flex-wrap gap-1">
+                                {(session.extra_piles ?? []).slice(0, 3).map((pile) => (
+                                  <span
+                                    key={pile}
+                                    className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
+                                  >
+                                    {pile}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
+                              {formatCompactDate(session.updated_at)}
+                            </div>
+                            <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-ink-soft)]"}>
+                              {sessionPreviewText(session, match, session.pile_slug ?? activeDisplayCategory)}
+                            </p>
+                          </button>
+                        );
+                      })}
+                      {!noteListItems.length ? <p className="text-sm text-[var(--color-ink-soft)]">No notes match this view yet.</p> : null}
+                    </div>
+                  </ScrollArea>
+                </div>
+              ) : route.panel === "reader" ? (
+                <div className="reader-pane reader-viewport flex min-h-0 flex-1 flex-col">
+                  <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-line)] pb-3">
+                    <div className="min-w-0">
+                      <div className="rail-heading"><BookOpen className="h-3.5 w-3.5" /> Reader</div>
+                      <CardTitle className="mt-1 truncate text-2xl">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
+                      <CardDescription className="mt-1 text-sm leading-6">
+                        {noteQuery.data
+                          ? [
+                              providerLabels[noteQuery.data.provider],
+                              displayPileLabel(noteQuery.data.pile_slug ?? route.pile),
+                              formatLongDate(noteQuery.data.updated_at),
+                              `${formatNumber(noteQuery.data.word_count)} words`
+                            ].join(" · ")
+                          : "Select a note from Notes, the concept map, or a storyline to inspect it here."}
+                      </CardDescription>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => updateRoute({ panel: "notes" }, true)}>
+                        <ListChecks className="h-3.5 w-3.5" />
+                        Notes
+                      </Button>
+                      {selectedSession ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            window.location.href = notePageUrl({
+                              id: selectedSession.id,
+                              pile: selectedSession.pile_slug ?? route.pile,
+                              q: route.q,
+                              provider: route.provider,
+                              sort: route.sort,
+                              extraPile: route.extraPile
+                            });
+                          }}
+                        >
+                          <BookOpen className="h-3.5 w-3.5" />
+                          Open note
+                        </Button>
+                      ) : null}
+                      {noteQuery.data?.source_url ? (
+                        <Button variant="secondary" size="sm" onClick={() => void chrome.tabs.create({ url: noteQuery.data!.source_url! })}>
+                          <ExternalLink className="h-4 w-4" />
+                          Source
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {extraPileError ? (
+                    <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{extraPileError}</div>
+                  ) : null}
+                  {selectedSession && noteQuery.isLoading ? (
+                    <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content...</div>
+                  ) : selectedSession && noteQuery.data ? (
+                    <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
+                      <Tabs.List className="mb-3 grid w-full grid-cols-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
+                        {[
+                          { value: "overview", label: "Overview" },
+                          { value: "transcript", label: "Transcript" },
+                          { value: "markdown", label: "Markdown" }
+                        ].map((tab) => (
+                          <Tabs.Trigger
+                            key={tab.value}
+                            value={tab.value}
+                            className="rounded-[6px] px-3 py-2 text-sm font-medium text-[var(--color-ink-soft)] outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm"
+                          >
+                            {tab.label}
+                          </Tabs.Trigger>
+                        ))}
+                      </Tabs.List>
 
-            <CardContent className="mt-2 flex min-h-0 flex-1 flex-col">
-              {isTodoWorkspace ? (
+                      <ScrollArea className="min-h-0 flex-1">
+                        <div className="mx-auto max-w-[920px] pr-5 pb-6">
+                          <Tabs.Content value="overview" className="outline-none">
+                            <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
+                          </Tabs.Content>
+                          <Tabs.Content value="transcript" className="outline-none">
+                            <TranscriptView note={noteQuery.data as BackendSessionNoteRead} />
+                          </Tabs.Content>
+                          <Tabs.Content value="markdown" className="outline-none">
+                            <MarkdownView note={noteQuery.data as BackendSessionNoteRead} />
+                          </Tabs.Content>
+                        </div>
+                      </ScrollArea>
+                    </Tabs.Root>
+                  ) : (
+                    <div className="rounded-[8px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-8 text-sm text-[var(--color-ink-soft)]">
+                      Select a note from Notes, the concept map, or a storyline to inspect its summary, transcript, and markdown.
+                    </div>
+                  )}
+                </div>
+              ) : isTodoWorkspace ? (
                 <TodoWorkspace
                   todo={todo}
                   loading={todoQuery.isLoading}
@@ -1863,157 +2314,20 @@ function App() {
                 <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={route.view} onValueChange={(value) => updateRoute({ view: value as PileWorkspaceView }, true)}>
                 <Tabs.Content value="atlas" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-tool-strip">
-                      <div className="workspace-tool-group">
-                        <span className="tool-label">Map</span>
+                    <div className="graph-control-shelf">
+                      <div className="control-shelf-summary">
+                        <span className="tool-label">Concept map</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
 
-                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
-                        <span className="tool-label">Group</span>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "community" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("community")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Topic
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "provider" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("provider")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Provider
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "kind" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("kind")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Type
-                        </Button>
-
-                        {graphInsights.clusters.length ? (
-                          <Select
-                            value="__semantic_groups__"
-                            onValueChange={(value) => {
-                              if (value === "__semantic_groups__") {
-                                return;
-                              }
-                              if (value === "__all_groups__") {
-                                setCollapsedGroups([]);
-                                setGraphFocus(null);
-                                setGraphInspect(null);
-                                return;
-                              }
-                              const cluster = graphInsights.clusters.find((item) => item.id === value);
-                              if (cluster) {
-                                activateFocus(cluster.label, cluster.sessionIds, "atlas");
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="h-7 w-[138px] px-2 text-[11px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__semantic_groups__" className="py-1.5 text-xs">Semantic group</SelectItem>
-                              <SelectItem value="__all_groups__" className="py-1.5 text-xs">All groups</SelectItem>
-                              {graphInsights.clusters.slice(0, 12).map((cluster) => (
-                                <SelectItem key={cluster.id} value={cluster.id} className="py-1.5 text-xs">
-                                  {cluster.label} · {formatNumber(cluster.nodeCount)} nodes
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-
-                        {availableGraphProviders.length ? (
-                          <Select value={providerFilterValue} onValueChange={handleProviderFilterSelect}>
-                            <SelectTrigger className="h-7 w-[104px] px-2 text-[11px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__all__" className="py-1.5 text-xs">All sources</SelectItem>
-                              {providerFilterValue === "__mixed__" ? (
-                                <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed sources</SelectItem>
-                              ) : null}
-                              {availableGraphProviders.map((provider) => (
-                                <SelectItem key={provider} value={provider} className="py-1.5 text-xs">
-                                  {providerLabels[provider]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-
-                        {availableGraphKinds.length ? (
-                          <Select value={kindFilterValue} onValueChange={handleKindFilterSelect}>
-                            <SelectTrigger className="h-7 w-[112px] px-2 text-[11px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__all__" className="py-1.5 text-xs">
-                                All {pileLabels[activeDisplayCategory].toLowerCase()}
-                              </SelectItem>
-                              {kindFilterValue === "__mixed__" ? (
-                                <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed types</SelectItem>
-                              ) : null}
-                              {availableGraphKinds.map((kind) => (
-                                <SelectItem key={kind} value={kind} className="py-1.5 text-xs">
-                                  {kind}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-
-                        <span className="tool-label">View</span>
-                        <Button
-                          size="sm"
-                          variant={graphDensity === "curated" ? "primary" : "secondary"}
-                          onClick={() => setGraphDensity((current) => (current === "curated" ? "complete" : "curated"))}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          {graphDensity === "curated" ? "Clean" : "Full"}
-                        </Button>
-                        {graphFocus ? (
-                          <Button
-                            size="sm"
-                            variant={graphFocusMode === "context" ? "primary" : "secondary"}
-                            onClick={() => setGraphFocusMode((current) => (current === "context" ? "dim" : "context"))}
-                            className="h-7 px-2 text-[11px]"
-                          >
-                            {graphFocusMode === "context" ? "Context" : "Dim"}
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setCollapsedGroups(graphInsights.clusters.map((cluster) => cluster.id))}
-                          disabled={!graphInsights.clusters.length}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Collapse
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setCollapsedGroups([])} disabled={!collapsedGroups.length} className="h-7 px-2 text-[11px]">
-                          Expand
-                        </Button>
-                        {graphFocus ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                              setGraphFocus(null);
-                              setGraphInspect(null);
-                            }}
-                            className="h-7 px-2 text-[11px]"
-                          >
-                            Clear focus
-                          </Button>
-                        ) : null}
+                      <div className="control-shelf-grid">
+                        {renderGraphGroupSelect()}
+                        {renderSemanticGroupSelect()}
+                        {renderProviderFilterSelect()}
+                        {renderKindFilterSelect()}
+                        {renderDensitySelect()}
+                        {renderFocusModeSelect()}
+                        {renderGraphActionButtons()}
                       </div>
                     </div>
 
@@ -2064,49 +2378,27 @@ function App() {
 
                 <Tabs.Content value="story" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-tool-strip">
-                      <div className="workspace-tool-group">
-                        <span className="tool-label">Story</span>
+                    <div className="graph-control-shelf">
+                      <div className="control-shelf-summary">
+                        <span className="tool-label">Storylines</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
-                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
-                        <span className="tool-label">Group</span>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "community" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("community")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Topic
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "provider" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("provider")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Provider
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "kind" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("kind")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Type
-                        </Button>
+                      <div className="control-shelf-grid control-shelf-grid--compact">
+                        {renderGraphGroupSelect()}
                         {graphFocus ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                              setGraphFocus(null);
-                              setGraphInspect(null);
-                            }}
-                            className="h-7 px-2 text-[11px]"
-                          >
-                            Clear focus
-                          </Button>
+                          <div className="control-actions">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setGraphFocus(null);
+                                setGraphInspect(null);
+                              }}
+                              className="h-8 px-2.5 text-xs"
+                            >
+                              Clear focus
+                            </Button>
+                          </div>
                         ) : null}
                       </div>
                     </div>
@@ -2176,75 +2468,15 @@ function App() {
 
                 <Tabs.Content value="ops" className="min-h-0 flex-1 outline-none">
                   <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2">
-                    <div className="workspace-tool-strip">
-                      <div className="workspace-tool-group">
-                        <span className="tool-label">Ops</span>
+                    <div className="graph-control-shelf">
+                      <div className="control-shelf-summary">
+                        <span className="tool-label">Graph health</span>
                         <span className="workspace-scope-chip">{scopeSummary}</span>
                       </div>
-                      <div className="workspace-tool-group justify-end xl:flex-nowrap">
-                        <span className="tool-label">Group</span>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "community" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("community")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Topic
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "provider" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("provider")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Provider
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={groupingMode === "kind" ? "primary" : "secondary"}
-                          onClick={() => setGroupingMode("kind")}
-                          className="h-7 px-2 text-[11px]"
-                        >
-                          Type
-                        </Button>
-                        {availableGraphProviders.length ? (
-                          <Select value={providerFilterValue} onValueChange={handleProviderFilterSelect}>
-                            <SelectTrigger className="h-7 w-[104px] px-2 text-[11px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__all__" className="py-1.5 text-xs">All sources</SelectItem>
-                              {providerFilterValue === "__mixed__" ? (
-                                <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed sources</SelectItem>
-                              ) : null}
-                              {availableGraphProviders.map((provider) => (
-                                <SelectItem key={provider} value={provider} className="py-1.5 text-xs">
-                                  {providerLabels[provider]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-                        {availableGraphKinds.length ? (
-                          <Select value={kindFilterValue} onValueChange={handleKindFilterSelect}>
-                            <SelectTrigger className="h-7 w-[112px] px-2 text-[11px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__all__" className="py-1.5 text-xs">
-                                All {pileLabels[activeDisplayCategory].toLowerCase()}
-                              </SelectItem>
-                              {kindFilterValue === "__mixed__" ? (
-                                <SelectItem value="__mixed__" className="py-1.5 text-xs">Mixed types</SelectItem>
-                              ) : null}
-                              {availableGraphKinds.map((kind) => (
-                                <SelectItem key={kind} value={kind} className="py-1.5 text-xs">
-                                  {kind}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
+                      <div className="control-shelf-grid control-shelf-grid--compact">
+                        {renderGraphGroupSelect()}
+                        {renderProviderFilterSelect()}
+                        {renderKindFilterSelect()}
                       </div>
                     </div>
 
@@ -2401,199 +2633,6 @@ function App() {
             </CardContent>
           </Card>
         </div>
-      </div>
-
-      <div className="pile-workbench-context">
-            <Card className="context-card-fill p-3">
-              <CardHeader className="flex-col gap-2 sm:flex-row sm:items-start">
-                <div className="min-w-0">
-                  <div className="rail-heading"><ListChecks className="h-3.5 w-3.5" /> Results</div>
-                  <CardTitle className="mt-0.5 text-base">{notesTitle}</CardTitle>
-                </div>
-                <div className="max-w-[30ch] text-left text-xs leading-5 text-[var(--color-ink-soft)] sm:text-right">
-                  {noteListMeta(route, allSessions.length, noteListItems.length, graphFocus, activeDisplayCategory)}
-                </div>
-              </CardHeader>
-              <CardContent className="mt-3 min-h-0 flex-1">
-                <ScrollArea className="h-full">
-                  <div className="space-y-2 pr-5 pb-1">
-                    {noteListItems.map((session) => {
-                      const match = matches.get(session.id);
-                      const isActive = session.id === selectedSessionId;
-                      return (
-                        <button
-                          key={session.id}
-                          type="button"
-                          onClick={() => updateRoute({ note: session.id }, false)}
-                          className={`w-full rounded-[8px] border p-2.5 text-left transition ${
-                            isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
-                          }`}
-                        >
-                          <div className="mb-1.5 flex min-w-0 items-center justify-between gap-2">
-                            <span className="min-w-0 truncate text-sm font-semibold">{titleFromSession(session)}</span>
-                            <span className="shrink-0">
-                              <Badge tone="neutral">{providerLabels[session.provider]}</Badge>
-                            </span>
-                          </div>
-                          {(session.extra_piles ?? []).length ? (
-                            <div className="mb-1.5 flex flex-wrap gap-1">
-                              {(session.extra_piles ?? []).slice(0, 3).map((pile) => (
-                                <span
-                                  key={pile}
-                                  className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
-                                >
-                                  {pile}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
-                            {formatCompactDate(session.updated_at)}
-                          </div>
-                          <p className={isActive ? "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-white/80" : "mt-1.5 line-clamp-2 break-words text-xs leading-5 text-[var(--color-ink-soft)]"}>
-                            {sessionPreviewText(session, match, session.pile_slug ?? activeDisplayCategory)}
-                          </p>
-                        </button>
-                      );
-                    })}
-                    {!noteListItems.length ? <p className="text-sm text-[var(--color-ink-soft)]">No notes match this view yet.</p> : null}
-                  </div>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-
-            <Card className="context-card-fill reader-pane p-4">
-              <CardHeader className="gap-3">
-                <div className="min-w-0">
-                  <div className="rail-heading"><BookOpen className="h-3.5 w-3.5" /> Reader</div>
-                  <CardTitle className="mt-1 truncate text-lg">{selectedSession ? titleFromSession(selectedSession) : "Choose a note"}</CardTitle>
-                  <CardDescription className="line-clamp-2 text-xs leading-5">
-                    {noteQuery.data
-                      ? [
-                          providerLabels[noteQuery.data.provider],
-                          displayPileLabel(noteQuery.data.pile_slug ?? route.pile),
-                          formatLongDate(noteQuery.data.updated_at),
-                          `${formatNumber(noteQuery.data.word_count)} words`
-                        ].join(" · ")
-                      : "Select a note, graph node, or storyline to inspect it."}
-                  </CardDescription>
-                  {selectedSession ? (
-                    <div className="mt-4 space-y-3 xl:hidden">
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">Extra piles</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {(selectedSession.extra_piles ?? []).map((pile) => (
-                            <button
-                              key={pile}
-                              type="button"
-                              onClick={() => void handleRemoveExtraPile(pile)}
-                              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-1 text-xs text-[var(--color-ink-soft)] transition hover:bg-[var(--color-paper-sunken)]"
-                            >
-                              {pile}
-                              <X className="h-3 w-3" />
-                            </button>
-                          ))}
-                          {!(selectedSession.extra_piles ?? []).length ? (
-                            <span className="text-sm text-[var(--color-ink-soft)]">No extra piles assigned yet.</span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <form
-                        className="flex flex-col gap-2 sm:flex-row"
-                        onSubmit={(event) => {
-                          event.preventDefault();
-                          void handleAddExtraPile(extraPileDraft);
-                        }}
-                      >
-                        <input
-                          type="text"
-                          value={extraPileDraft}
-                          onChange={(event) => setExtraPileDraft(event.target.value)}
-                          placeholder="Add this note to an extra pile"
-                          className="compact-field h-10 flex-1 text-sm"
-                        />
-                        <Button type="submit" size="sm" variant="secondary" disabled={!extraPileDraft.trim()}>
-                          <Plus className="h-3.5 w-3.5" />
-                          Add pile
-                        </Button>
-                      </form>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {selectedSession ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="h-8 px-2.5 text-xs"
-                      onClick={() => {
-                        window.location.href = notePageUrl({
-                          id: selectedSession.id,
-                          pile: selectedSession.pile_slug ?? route.pile,
-                          q: route.q,
-                          provider: route.provider,
-                          sort: route.sort,
-                          extraPile: route.extraPile
-                        });
-                      }}
-                    >
-                      <BookOpen className="h-3.5 w-3.5" />
-                      Open note
-                    </Button>
-                  ) : null}
-                  {noteQuery.data?.source_url ? (
-                    <Button variant="secondary" size="sm" className="h-8 px-2.5 text-xs" onClick={() => void chrome.tabs.create({ url: noteQuery.data!.source_url! })}>
-                      <ExternalLink className="h-4 w-4" />
-                      Source
-                    </Button>
-                  ) : null}
-                </div>
-              </CardHeader>
-              <CardContent className="mt-2 flex min-h-0 flex-1 flex-col">
-                {extraPileError ? (
-                  <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{extraPileError}</div>
-                ) : null}
-                {selectedSession && noteQuery.isLoading ? (
-                  <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content…</div>
-                ) : selectedSession && noteQuery.data ? (
-                  <Tabs.Root className="flex min-h-0 flex-1 flex-col" value={readerTab} onValueChange={(value) => setReaderTab(value as typeof readerTab)}>
-                    <Tabs.List className="mb-3 grid w-full grid-cols-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-1">
-                      {[
-                        { value: "overview", label: "Overview" },
-                        { value: "transcript", label: "Transcript" },
-                        { value: "markdown", label: "Markdown" }
-                      ].map((tab) => (
-                        <Tabs.Trigger
-                          key={tab.value}
-                          value={tab.value}
-                          className="rounded-[6px] px-2.5 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] outline-none transition data-[state=active]:bg-[var(--color-paper-raised)] data-[state=active]:text-[var(--color-ink)] data-[state=active]:shadow-sm"
-                        >
-                          {tab.label}
-                        </Tabs.Trigger>
-                      ))}
-                    </Tabs.List>
-
-                    <ScrollArea className="min-h-0 flex-1">
-                      <div className="pr-5 pb-1">
-                        <Tabs.Content value="overview" className="outline-none">
-                          <NoteOverview note={noteQuery.data as BackendSessionNoteRead} />
-                        </Tabs.Content>
-                        <Tabs.Content value="transcript" className="outline-none">
-                          <TranscriptView note={noteQuery.data as BackendSessionNoteRead} />
-                        </Tabs.Content>
-                        <Tabs.Content value="markdown" className="outline-none">
-                          <MarkdownView note={noteQuery.data as BackendSessionNoteRead} />
-                        </Tabs.Content>
-                      </div>
-                    </ScrollArea>
-                  </Tabs.Root>
-                ) : (
-                  <div className="rounded-[8px] border border-dashed border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-6 text-sm text-[var(--color-ink-soft)]">
-                    Select a note from the list, atlas, or storyline view to inspect its summary, transcript, and markdown.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
       </div>
 
       {issueMessage ? (

@@ -1,17 +1,20 @@
 import { useMemo, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LoaderCircle, Plus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowLeft, Bot, CalendarClock, LoaderCircle, Plus, RefreshCw, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 
 import {
   createPile,
   deletePile,
+  fetchProcessingLLMs,
   fetchPiles,
+  restructureAllPiles,
+  restructurePile,
   updatePile,
   type PileCreatePayload,
   type PileUpdatePayload
 } from "../background/backend";
-import type { BackendPileRead, ExtensionSettings } from "../shared/types";
+import type { BackendLLMOptions, BackendPileRead, BackendPileRestructureResult, ExtensionSettings } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Button } from "../ui/components/button";
 import { useExtensionBootstrap } from "../ui/lib/runtime";
@@ -80,17 +83,57 @@ function isDiscarded(pile: BackendPileRead): boolean {
   return pile.slug === "discarded";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function configuredLLMModel(pile: BackendPileRead): string {
+  const value = asRecord(pile.pipeline_config).llm_model;
+  return typeof value === "string" ? value : "";
+}
+
+function restructureConfig(pile: BackendPileRead): Record<string, unknown> {
+  return asRecord(asRecord(pile.pipeline_config).restructure);
+}
+
+function configuredRestructureModel(pile: BackendPileRead): string {
+  const value = restructureConfig(pile).llm_model;
+  return typeof value === "string" && value.trim() ? value : configuredLLMModel(pile);
+}
+
+function buildLLMModelOptions(options?: BackendLLMOptions): string[] {
+  const values = [
+    ...(options?.suggested_models ?? []),
+    ...(options?.model_candidates ?? []),
+    ...(options?.openrouter_models ?? []).map((model) => model.id)
+  ];
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).slice(0, 250);
+}
+
+function restructureSummary(result: BackendPileRestructureResult): string {
+  const scope = result.pile_slug ? `'${result.pile_slug}'` : "the full base";
+  return `Restructured ${scope}: ${result.processed_count} sessions processed, ${result.moved_count} moved.`;
+}
+
 function App() {
   const { settings, status, loading } = useExtensionBootstrap();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const pilesQuery = useQuery({
     queryKey: ["piles", settings?.backendUrl, settings?.backendToken],
     queryFn: () => fetchPiles(settings as ExtensionSettings),
     enabled: Boolean(settings && !status?.backendValidationError)
+  });
+
+  const llmQuery = useQuery({
+    queryKey: ["processing-llms", settings?.backendUrl, settings?.backendToken],
+    queryFn: () => fetchProcessingLLMs(settings as ExtensionSettings, { includeCatalog: true, limit: 150 }),
+    enabled: Boolean(settings && !status?.backendValidationError),
+    staleTime: 5 * 60 * 1000
   });
 
   const updateMutation = useMutation({
@@ -99,6 +142,7 @@ function App() {
     onSuccess: () => {
       setEditing(null);
       setError(null);
+      setNotice(null);
       void queryClient.invalidateQueries({ queryKey: ["piles"] });
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : "Update failed.")
@@ -109,6 +153,7 @@ function App() {
     onSuccess: () => {
       setCreating(false);
       setError(null);
+      setNotice(null);
       void queryClient.invalidateQueries({ queryKey: ["piles"] });
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : "Create failed.")
@@ -118,9 +163,31 @@ function App() {
     mutationFn: (slug: string) => deletePile(settings as ExtensionSettings, slug),
     onSuccess: () => {
       setError(null);
+      setNotice(null);
       void queryClient.invalidateQueries({ queryKey: ["piles"] });
     },
     onError: (err: unknown) => setError(err instanceof Error ? err.message : "Delete failed.")
+  });
+
+  const restructureMutation = useMutation({
+    mutationFn: ({ slug, model }: { slug: string; model?: string }) =>
+      restructurePile(settings as ExtensionSettings, slug, { model, limit: 100 }),
+    onSuccess: (result) => {
+      setError(null);
+      setNotice(restructureSummary(result));
+      void queryClient.invalidateQueries({ queryKey: ["piles"] });
+    },
+    onError: (err: unknown) => setError(err instanceof Error ? err.message : "Restructure failed.")
+  });
+
+  const restructureAllMutation = useMutation({
+    mutationFn: (model?: string) => restructureAllPiles(settings as ExtensionSettings, { model, limit: 500 }),
+    onSuccess: (result) => {
+      setError(null);
+      setNotice(restructureSummary(result));
+      void queryClient.invalidateQueries({ queryKey: ["piles"] });
+    },
+    onError: (err: unknown) => setError(err instanceof Error ? err.message : "Base restructure failed.")
   });
 
   const piles = pilesQuery.data ?? [];
@@ -164,6 +231,23 @@ function App() {
             Prompts
           </Button>
           <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              if (confirm("Re-examine and recompile the full pile base? This re-runs classification and extraction for stored sessions.")) {
+                restructureAllMutation.mutate(undefined);
+              }
+            }}
+            disabled={loading || !settings || Boolean(status?.backendValidationError) || restructureAllMutation.isPending}
+          >
+            {restructureAllMutation.isPending ? (
+              <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Restructure base
+          </Button>
+          <Button
             variant="primary"
             size="sm"
             onClick={() => {
@@ -190,6 +274,14 @@ function App() {
         </div>
       ) : null}
 
+      {notice ? (
+        <div className="mb-6 rounded-[8px] border border-[rgba(67,130,88,0.35)] bg-[rgba(67,130,88,0.08)] px-4 py-3 text-sm text-[var(--color-ink)]">
+          {notice}
+        </div>
+      ) : null}
+
+      {llmQuery.data ? <LLMStatusPanel options={llmQuery.data} /> : null}
+
       {pilesQuery.isLoading ? (
         <div className="flex items-center gap-2 text-sm text-[var(--color-ink-subtle)]">
           <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -205,6 +297,7 @@ function App() {
           }}
           onSubmit={(payload) => createMutation.mutate(payload)}
           submitting={createMutation.isPending}
+          llmOptions={llmQuery.data}
         />
       ) : null}
 
@@ -222,7 +315,14 @@ function App() {
               }}
               onCancel={() => setEditing(null)}
               onSave={(payload) => updateMutation.mutate({ slug: pile.slug, payload })}
+              onRestructure={() => {
+                if (confirm(`Re-examine and recompile sessions currently organized under '${pile.slug}'?`)) {
+                  restructureMutation.mutate({ slug: pile.slug, model: configuredRestructureModel(pile) || undefined });
+                }
+              }}
               submitting={updateMutation.isPending && updateMutation.variables?.slug === pile.slug}
+              restructuring={restructureMutation.isPending && restructureMutation.variables?.slug === pile.slug}
+              llmOptions={llmQuery.data}
             />
           ))}
         </div>
@@ -248,12 +348,19 @@ function App() {
                 }}
                 onCancel={() => setEditing(null)}
                 onSave={(payload) => updateMutation.mutate({ slug: pile.slug, payload })}
+                onRestructure={() => {
+                  if (confirm(`Re-examine and recompile sessions currently organized under '${pile.slug}'?`)) {
+                    restructureMutation.mutate({ slug: pile.slug, model: configuredRestructureModel(pile) || undefined });
+                  }
+                }}
                 onDelete={() => {
                   if (confirm(`Soft-delete pile '${pile.slug}'? Existing sessions stay in place but the pile is hidden.`)) {
                     deleteMutation.mutate(pile.slug);
                   }
                 }}
                 submitting={updateMutation.isPending && updateMutation.variables?.slug === pile.slug}
+                restructuring={restructureMutation.isPending && restructureMutation.variables?.slug === pile.slug}
+                llmOptions={llmQuery.data}
               />
             ))}
           </div>
@@ -263,34 +370,86 @@ function App() {
   );
 }
 
+function LLMStatusPanel({ options }: { options: BackendLLMOptions }) {
+  return (
+    <section className="surface mb-6 p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="eyebrow">LLM routing</p>
+          <h2 className="display-serif mt-1 text-[20px] font-semibold text-[var(--color-ink)]">Ingestion models</h2>
+        </div>
+        <span className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-1 text-[11px] font-semibold text-[var(--color-ink-soft)]">
+          {options.openrouter_configured ? "OpenRouter configured" : options.current_backend}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-2">
+        {options.services.map((service) => (
+          <div key={service.id} className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Bot className="h-3.5 w-3.5 text-[var(--color-ink-soft)]" />
+              <span className="text-[13px] font-semibold text-[var(--color-ink)]">{service.label}</span>
+            </div>
+            <div className="mt-1 text-[12px] text-[var(--color-ink-soft)]">
+              {service.available ? service.model || service.backend : "Heuristic fallback"}
+            </div>
+          </div>
+        ))}
+      </div>
+      {options.catalog_error ? (
+        <p className="mt-3 text-[11.5px] text-[var(--color-ink-subtle)]">
+          OpenRouter catalog unavailable: {options.catalog_error}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function PileCard({
   pile,
   editing,
   onStartEdit,
   onCancel,
   onSave,
+  onRestructure,
   onDelete,
-  submitting
+  submitting,
+  restructuring,
+  llmOptions
 }: {
   pile: BackendPileRead;
   editing: boolean;
   onStartEdit: () => void;
   onCancel: () => void;
   onSave: (payload: PileUpdatePayload) => void;
+  onRestructure: () => void;
   onDelete?: () => void;
   submitting: boolean;
+  restructuring: boolean;
+  llmOptions?: BackendLLMOptions;
 }) {
   const builtIn = isBuiltIn(pile);
   const discarded = isDiscarded(pile);
+  const llmModelOptions = useMemo(() => buildLLMModelOptions(llmOptions), [llmOptions]);
+  const currentRestructureConfig = restructureConfig(pile);
+  const configuredModel = configuredLLMModel(pile);
 
   const [description, setDescription] = useState(pile.description ?? "");
   const [folderLabel, setFolderLabel] = useState(pile.folder_label);
   const [attributes, setAttributes] = useState<string[]>(pile.attributes ?? []);
+  const [llmModel, setLlmModel] = useState(configuredModel);
+  const [autoRestructureEnabled, setAutoRestructureEnabled] = useState(Boolean(currentRestructureConfig.enabled));
+  const [restructureIntervalDays, setRestructureIntervalDays] = useState<string>(
+    typeof currentRestructureConfig.interval_days === "number" ? String(currentRestructureConfig.interval_days) : "30"
+  );
+  const [restructureModel, setRestructureModel] = useState<string>(
+    typeof currentRestructureConfig.llm_model === "string" ? currentRestructureConfig.llm_model : configuredModel
+  );
   const [autoDiscardCategories, setAutoDiscardCategories] = useState<string>(
     Array.isArray((pile.pipeline_config as Record<string, unknown>)?.auto_discard_categories)
       ? ((pile.pipeline_config as Record<string, unknown>).auto_discard_categories as string[]).join(", ")
       : ""
   );
+  const lastRestructureRun = typeof currentRestructureConfig.last_run_at === "string" ? currentRestructureConfig.last_run_at : null;
   const [pipelinePromptAddendum, setPipelinePromptAddendum] = useState<string>(
     typeof (pile.pipeline_config as Record<string, unknown>)?.pipeline_prompt_addendum === "string"
       ? ((pile.pipeline_config as Record<string, unknown>).pipeline_prompt_addendum as string)
@@ -314,7 +473,14 @@ function PileCard({
     const pipelineConfig: Record<string, unknown> = {
       ...(pile.pipeline_config ?? {}),
       pipeline_prompt_addendum: pipelinePromptAddendum.trim() || null,
-      custom_prompt_addendum: pipelinePromptAddendum.trim() || null
+      custom_prompt_addendum: pipelinePromptAddendum.trim() || null,
+      llm_model: llmModel.trim() || null,
+      restructure: {
+        ...currentRestructureConfig,
+        enabled: autoRestructureEnabled,
+        interval_days: Number.parseInt(restructureIntervalDays, 10) || 30,
+        llm_model: restructureModel.trim() || llmModel.trim() || null
+      }
     };
     if (discarded) {
       pipelineConfig.auto_discard_categories = autoDiscardCategories
@@ -356,6 +522,17 @@ function PileCard({
               ))
             )}
           </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className="rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-0.5 text-[11px] text-[var(--color-ink-soft)]">
+              LLM: {configuredModel || llmOptions?.default_model || "backend default"}
+            </span>
+            {currentRestructureConfig.enabled ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-2 py-0.5 text-[11px] text-[var(--color-ink-soft)]">
+                <CalendarClock className="h-3 w-3" />
+                Auto restructure every {String(currentRestructureConfig.interval_days ?? 30)}d
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 flex-col gap-2">
           {editing ? (
@@ -375,6 +552,10 @@ function PileCard({
             </>
           ) : (
             <>
+              <Button variant="ghost" size="sm" onClick={onRestructure} disabled={restructuring}>
+                {restructuring ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Restructure
+              </Button>
               <Button variant="secondary" size="sm" onClick={onStartEdit}>
                 Edit
               </Button>
@@ -461,6 +642,75 @@ function PileCard({
           ) : null}
 
           <Field
+            label="OpenRouter model"
+            hint="Overrides extraction and ad-hoc restructuring for this pile. Leave blank to use the backend default."
+          >
+            <input
+              list={`llm-models-${pile.id}`}
+              value={llmModel}
+              onChange={(event) => setLlmModel(event.target.value)}
+              placeholder={llmOptions?.default_model ?? "openai/gpt-4.1-mini"}
+              className="input-paper"
+            />
+            <datalist id={`llm-models-${pile.id}`}>
+              {llmModelOptions.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+          </Field>
+
+          <Field
+            label="Restructure cadence"
+            hint="When enabled, the extension asks the backend on login to re-run stale pile organization."
+          >
+            <div className="space-y-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-3">
+              <label className="flex items-center gap-2 text-[13px] font-semibold text-[var(--color-ink)]">
+                <input
+                  type="checkbox"
+                  checked={autoRestructureEnabled}
+                  onChange={(event) => setAutoRestructureEnabled(event.target.checked)}
+                />
+                Auto restructure this pile
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+                    Interval days
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={restructureIntervalDays}
+                    onChange={(event) => setRestructureIntervalDays(event.target.value)}
+                    className="input-paper"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
+                    Restructure model
+                  </label>
+                  <input
+                    list={`restructure-llm-models-${pile.id}`}
+                    value={restructureModel}
+                    onChange={(event) => setRestructureModel(event.target.value)}
+                    placeholder={llmModel || llmOptions?.default_model || "openai/gpt-4.1-mini"}
+                    className="input-paper"
+                  />
+                  <datalist id={`restructure-llm-models-${pile.id}`}>
+                    {llmModelOptions.map((model) => (
+                      <option key={model} value={model} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+              {lastRestructureRun ? (
+                <div className="text-[11.5px] text-[var(--color-ink-subtle)]">Last run: {lastRestructureRun}</div>
+              ) : null}
+            </div>
+          </Field>
+
+          <Field
             label="Pipeline instructions (optional)"
             hint="Extra instructions appended when this pile's extraction step runs."
           >
@@ -480,17 +730,21 @@ function PileCard({
 function NewPileForm({
   onCancel,
   onSubmit,
-  submitting
+  submitting,
+  llmOptions
 }: {
   onCancel: () => void;
   onSubmit: (payload: PileCreatePayload) => void;
   submitting: boolean;
+  llmOptions?: BackendLLMOptions;
 }) {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [folderLabel, setFolderLabel] = useState("");
   const [attributes, setAttributes] = useState<string[]>(["summary"]);
+  const [llmModel, setLlmModel] = useState("");
+  const llmModelOptions = useMemo(() => buildLLMModelOptions(llmOptions), [llmOptions]);
 
   function toggleAttribute(id: string): void {
     setAttributes((prev) => (prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]));
@@ -506,7 +760,8 @@ function NewPileForm({
       name: name.trim(),
       description: description.trim() || undefined,
       folder_label: folderLabel.trim() || undefined,
-      attributes
+      attributes,
+      pipeline_config: llmModel.trim() ? { llm_model: llmModel.trim() } : undefined
     });
   }
 
@@ -565,6 +820,23 @@ function NewPileForm({
             placeholder="Research"
             className="input-paper"
           />
+        </Field>
+      </div>
+
+      <div className="mt-4">
+        <Field label="OpenRouter model" hint="Optional model override for this pile's extraction pipeline.">
+          <input
+            list="new-pile-llm-models"
+            value={llmModel}
+            onChange={(event) => setLlmModel(event.target.value)}
+            placeholder={llmOptions?.default_model ?? "openai/gpt-4.1-mini"}
+            className="input-paper"
+          />
+          <datalist id="new-pile-llm-models">
+            {llmModelOptions.map((model) => (
+              <option key={model} value={model} />
+            ))}
+          </datalist>
         </Field>
       </div>
 

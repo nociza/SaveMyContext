@@ -195,6 +195,35 @@ export interface BackendProcessingStatus {
   pending_count: number;
 }
 
+export interface BackendLLMServiceStatus {
+  id: string;
+  label: string;
+  backend: string;
+  model?: string | null;
+  available: boolean;
+  notes?: string | null;
+}
+
+export interface BackendLLMModelOption {
+  id: string;
+  name?: string | null;
+  context_length?: number | null;
+  prompt_price?: string | null;
+  completion_price?: string | null;
+}
+
+export interface BackendLLMOptions {
+  current_backend: string;
+  openrouter_configured: boolean;
+  openrouter_base_url: string;
+  default_model?: string | null;
+  model_candidates: string[];
+  suggested_models: string[];
+  services: BackendLLMServiceStatus[];
+  openrouter_models: BackendLLMModelOption[];
+  catalog_error?: string | null;
+}
+
 export type BuiltInPileSlug = "journal" | "factual" | "ideas" | "todo" | "discarded";
 
 export type PileSlug = string;
@@ -841,6 +870,25 @@ export interface BackendDiscardedSessionItem {
 export interface BackendDiscardedSessionsResponse {
   count: number;
   items: BackendDiscardedSessionItem[];
+}
+
+export interface BackendPileRestructureResult {
+  scope: string;
+  pile_slug?: string | null;
+  pile_name?: string | null;
+  model?: string | null;
+  processed_count: number;
+  moved_count: number;
+  session_ids: string[];
+  started_at: string;
+  completed_at: string;
+}
+
+export interface BackendPileRestructureDueResponse {
+  checked_count: number;
+  due_count: number;
+  processed_count: number;
+  results: BackendPileRestructureResult[];
 }
 
 export interface SaveSettingsResponse {
