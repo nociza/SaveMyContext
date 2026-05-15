@@ -1,5 +1,26 @@
 title: SaveMyContext
-description: User documentation for installing SaveMyContext, connecting the extension, and working with the local vault.
+description: Capture AI conversations from ChatGPT, Gemini, and Grok into a private, searchable knowledge base.
+tagline: Your AI conversations, saved into a knowledge base you control.
 theme: jekyll-theme-primer
 markdown: kramdown
 permalink: pretty
+
+nav:
+  - title: Overview
+    url: /
+  - title: Get Started
+    url: /getting-started/
+  - title: Service Options
+    url: /service-options/
+  - title: Remote Access
+    url: /remote-access/
+  - title: Security
+    url: /security-and-access/
+  - title: Docs
+    url: /using-save-my-context/
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
