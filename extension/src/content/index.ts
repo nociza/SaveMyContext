@@ -226,6 +226,7 @@ function installNavigationObserver(): void {
     }
     lastUrl = window.location.href;
     notifyPageVisit();
+    selectionCaptureController.handleLocationChange();
     contextSuggestionController.handleLocationChange();
   };
 

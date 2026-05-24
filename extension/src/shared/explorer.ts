@@ -19,11 +19,11 @@ export const pileDescriptions: Record<BuiltInPileSlug, string> = {
 };
 
 export const pilePalette: Record<BuiltInPileSlug, { accent: string; soft: string; ink: string }> = {
-  factual: { accent: "#0f8a84", soft: "#e2f1ef", ink: "#076b66" },
-  ideas: { accent: "#d18425", soft: "#faecd4", ink: "#8a561a" },
-  journal: { accent: "#4968ab", soft: "#e3ebf8", ink: "#2f4a85" },
-  todo: { accent: "#c15a40", soft: "#f7e4dd", ink: "#8a3b27" },
-  discarded: { accent: "#736e63", soft: "#ebe7df", ink: "#4a463e" }
+  factual: { accent: "#5e6ad2", soft: "#eef0fb", ink: "#4f5bba" },
+  ideas: { accent: "#b0852c", soft: "#faf3df", ink: "#7e5e1f" },
+  journal: { accent: "#6c7793", soft: "#eef0f4", ink: "#4d5466" },
+  todo: { accent: "#c15a40", soft: "#fbede7", ink: "#8a3b27" },
+  discarded: { accent: "#8a8f98", soft: "#f1f2f4", ink: "#62666d" }
 };
 
 export const pileGlyphs: Record<BuiltInPileSlug, string> = {
@@ -41,9 +41,9 @@ export const providerLabels: Record<ProviderName, string> = {
 };
 
 export const providerColors: Record<ProviderName, string> = {
-  chatgpt: "#0f8a84",
-  gemini: "#d18425",
-  grok: "#4968ab"
+  chatgpt: "#5e6ad2",
+  gemini: "#b0852c",
+  grok: "#6c7793"
 };
 
 export type PileSortMode = "recent" | "title";

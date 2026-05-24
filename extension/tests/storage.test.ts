@@ -82,6 +82,7 @@ describe("storage", () => {
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
         contextSuggestionsFloatingButtonEnabled: true,
+        pageSurfaceScope: "ai_providers",
         accountCaptureMode: "all",
         enabledAccountKeys: {}
       }
@@ -102,7 +103,8 @@ describe("storage", () => {
         discardWords: [],
         selectionCaptureEnabled: true,
         contextSuggestionsEnabled: true,
-        contextSuggestionsFloatingButtonEnabled: false
+        contextSuggestionsFloatingButtonEnabled: false,
+        pageSurfaceScope: "all_pages"
       },
       "savemycontext.settings.secrets": {
         backendToken: "secret-token"
@@ -124,6 +126,7 @@ describe("storage", () => {
     expect(settings.indexingMode).toBe("trigger_word");
     expect(settings.triggerWords).toEqual(["lorem", "alpha"]);
     expect(settings.blacklistWords).toEqual(["ignore"]);
+    expect(settings.pageSurfaceScope).toBe("all_pages");
   });
 
   it("persists merged defaults once during initialization when settings are incomplete", async () => {
@@ -163,6 +166,7 @@ describe("storage", () => {
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
         contextSuggestionsFloatingButtonEnabled: true,
+        pageSurfaceScope: "ai_providers",
         accountCaptureMode: "all",
         enabledAccountKeys: {}
       }
@@ -186,6 +190,7 @@ describe("storage", () => {
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
         contextSuggestionsFloatingButtonEnabled: true,
+        pageSurfaceScope: "ai_providers",
         accountCaptureMode: "all",
         enabledAccountKeys: {}
       }

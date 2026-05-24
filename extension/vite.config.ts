@@ -10,7 +10,7 @@ const rootDir = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
-    emptyOutDir: true,
+    emptyOutDir: false,
     outDir: "dist",
     sourcemap: true,
     rollupOptions: {

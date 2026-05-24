@@ -8,6 +8,7 @@ import type {
 } from "../shared/types";
 import { detectProviderFromUrl } from "../shared/provider";
 import { providerDomAdapters } from "../shared/provider-dom";
+import { pageSurfaceScopeAllowsUrl } from "../shared/page-surfaces";
 import type { EditableTarget } from "./editable-target";
 import { insertIntoTarget, isEditableElement, readEditableText } from "./editable-target";
 import { buildContextSuggestionQueries, rankContextualSuggestions } from "./context-suggestions-model";
@@ -19,12 +20,31 @@ type ContextSuggestionController = {
   handleLocationChange(): void;
 };
 
+type ContextSuggestionFramePositionInput = {
+  targetRect: Pick<DOMRectReadOnly, "top" | "right" | "bottom">;
+  viewportWidth: number;
+  viewportHeight: number;
+};
+
+export type ContextSuggestionFramePosition = {
+  left: number;
+  top: number;
+  placement: "above" | "below";
+  panelMaxBlockSize: number;
+};
+
 const SETTINGS_CACHE_KEY = "savemycontext.settings.cache";
 const SETTINGS_SYNC_KEY = "savemycontext.settings";
 const HOST_ID = "savemycontext-context-suggestions-root";
 const REFRESH_DEBOUNCE_MS = 280;
 const REFRESH_INTERVAL_MS = 5_000;
 const MAX_RESULT_COUNT = 3;
+const PANEL_MAX_WIDTH_PX = 360;
+const PANEL_MAX_HEIGHT_PX = 440;
+const PANEL_GAP_PX = 10;
+const VIEWPORT_MARGIN_PX = 12;
+const LAUNCHER_HEIGHT_PX = 32;
+const LAUNCHER_BLOCK_SIZE_PX = 44;
 const STYLE = `
 :host {
   all: initial;
@@ -35,8 +55,13 @@ const STYLE = `
 }
 
 .frame {
+  --panel-width: min(360px, calc(100vw - 24px));
+  --panel-max-block-size: min(440px, calc(100vh - 24px));
   position: fixed;
   z-index: 2147483646;
+  display: grid;
+  inline-size: var(--panel-width);
+  justify-items: end;
   pointer-events: none;
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   color: #11263a;
@@ -84,7 +109,7 @@ const STYLE = `
 
 .panel {
   position: absolute;
-  inline-size: min(360px, calc(100vw - 24px));
+  inline-size: var(--panel-width);
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -92,17 +117,19 @@ const STYLE = `
   border-radius: 8px;
   background: rgba(255, 252, 246, 0.98);
   box-shadow: 0 20px 48px rgba(17, 38, 58, 0.18);
+  max-block-size: var(--panel-max-block-size);
+  overflow: auto;
   pointer-events: auto;
 }
 
 .frame[data-placement="above"] .panel {
   right: 0;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% + ${PANEL_GAP_PX}px);
 }
 
 .frame[data-placement="below"] .panel {
   right: 0;
-  top: calc(100% + 10px);
+  top: calc(100% + ${PANEL_GAP_PX}px);
 }
 
 .panel[hidden] {
@@ -261,6 +288,51 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function computeVerticalFramePosition(
+  placement: ContextSuggestionFramePosition["placement"],
+  targetRect: ContextSuggestionFramePositionInput["targetRect"],
+  viewportHeight: number
+): Pick<ContextSuggestionFramePosition, "placement" | "top" | "panelMaxBlockSize"> {
+  const preferredTop =
+    placement === "above" ? targetRect.top - LAUNCHER_BLOCK_SIZE_PX : targetRect.bottom + VIEWPORT_MARGIN_PX;
+  const maxTop = Math.max(VIEWPORT_MARGIN_PX, viewportHeight - LAUNCHER_HEIGHT_PX - VIEWPORT_MARGIN_PX);
+  const top = clamp(preferredTop, VIEWPORT_MARGIN_PX, maxTop);
+  const availableBlockSize =
+    placement === "above"
+      ? top - PANEL_GAP_PX - VIEWPORT_MARGIN_PX
+      : viewportHeight - top - LAUNCHER_HEIGHT_PX - PANEL_GAP_PX - VIEWPORT_MARGIN_PX;
+
+  return {
+    placement,
+    top,
+    panelMaxBlockSize: Math.max(0, Math.min(PANEL_MAX_HEIGHT_PX, availableBlockSize))
+  };
+}
+
+export function computeContextSuggestionFramePosition({
+  targetRect,
+  viewportWidth,
+  viewportHeight
+}: ContextSuggestionFramePositionInput): ContextSuggestionFramePosition {
+  const preferredPlacement = targetRect.top > 210 || viewportHeight - targetRect.bottom < 220 ? "above" : "below";
+  const fallbackPlacement = preferredPlacement === "above" ? "below" : "above";
+  const preferredVerticalPosition = computeVerticalFramePosition(preferredPlacement, targetRect, viewportHeight);
+  const fallbackVerticalPosition = computeVerticalFramePosition(fallbackPlacement, targetRect, viewportHeight);
+  const verticalPosition =
+    preferredVerticalPosition.panelMaxBlockSize < 160 &&
+    fallbackVerticalPosition.panelMaxBlockSize > preferredVerticalPosition.panelMaxBlockSize
+      ? fallbackVerticalPosition
+      : preferredVerticalPosition;
+  const panelWidth = Math.min(PANEL_MAX_WIDTH_PX, Math.max(0, viewportWidth - VIEWPORT_MARGIN_PX * 2));
+  const maxLeft = Math.max(VIEWPORT_MARGIN_PX, viewportWidth - panelWidth - VIEWPORT_MARGIN_PX);
+  const left = clamp(targetRect.right - panelWidth, VIEWPORT_MARGIN_PX, maxLeft);
+
+  return {
+    left,
+    ...verticalPosition
+  };
+}
+
 export function createContextSuggestionController(sendMessage: RuntimeRequester): ContextSuggestionController {
   let enabled = false;
   let floatingButtonEnabled = true;
@@ -284,9 +356,11 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
   async function refreshSettings(): Promise<void> {
     try {
       const settings = await sendMessage<
-        Pick<ExtensionSettings, "contextSuggestionsEnabled" | "contextSuggestionsFloatingButtonEnabled">
+        Pick<ExtensionSettings, "contextSuggestionsEnabled" | "contextSuggestionsFloatingButtonEnabled" | "pageSurfaceScope">
       >({ type: "GET_SETTINGS" });
-      enabled = Boolean(settings.contextSuggestionsEnabled);
+      enabled =
+        Boolean(settings.contextSuggestionsEnabled) &&
+        pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, window.location.href);
       floatingButtonEnabled = settings.contextSuggestionsFloatingButtonEnabled !== false;
     } catch {
       enabled = false;
@@ -357,9 +431,20 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
     dismiss.className = "dismiss";
     dismiss.type = "button";
     dismiss.textContent = "Close";
-    dismiss.addEventListener("click", () => {
-      panelOpen = false;
-      render();
+    const dismissPanel = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closePanel();
+    };
+    dismiss.addEventListener("pointerdown", dismissPanel);
+    dismiss.addEventListener("click", dismissPanel);
+
+    panel.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      closePanel();
     });
 
     header.append(heading, dismiss);
@@ -403,17 +488,28 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
     }
   }
 
+  function closePanel(): void {
+    panelOpen = false;
+    if (panel) {
+      panel.hidden = true;
+    }
+    render();
+  }
+
   function positionFrame(target: EditableTarget | null): void {
     if (!frame || !target) {
       return;
     }
     const rect = target.getBoundingClientRect();
-    const placeAbove = rect.top > 210 || window.innerHeight - rect.bottom < 220;
-    const left = clamp(rect.right - 132, 12, window.innerWidth - 132);
-    const top = placeAbove ? rect.top - 44 : rect.bottom + 12;
-    frame.style.left = `${left}px`;
-    frame.style.top = `${clamp(top, 12, window.innerHeight - 44)}px`;
-    frame.dataset.placement = placeAbove ? "above" : "below";
+    const position = computeContextSuggestionFramePosition({
+      targetRect: rect,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight
+    });
+    frame.style.left = `${position.left}px`;
+    frame.style.top = `${position.top}px`;
+    frame.style.setProperty("--panel-max-block-size", `${position.panelMaxBlockSize}px`);
+    frame.dataset.placement = position.placement;
   }
 
   function renderResults(provider: ProviderName): void {
@@ -636,6 +732,18 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
     "mousedown",
     (event) => {
       if (!panelOpen || isInsideHost(event.target, host, shadow)) {
+        return;
+      }
+      panelOpen = false;
+      render();
+    },
+    true
+  );
+
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (!panelOpen || event.key !== "Escape") {
         return;
       }
       panelOpen = false;

@@ -1,4 +1,5 @@
 import type { RuntimeMessage, SourceCapturePayload, SourceCaptureResponse } from "../shared/types";
+import { pageSurfaceScopeAllowsUrl } from "../shared/page-surfaces";
 
 type RuntimeRequester = <TResponse>(message: RuntimeMessage) => Promise<TResponse>;
 
@@ -17,6 +18,7 @@ type PageSnapshot = {
 
 type SelectionCaptureController = {
   handleRuntimeMessage(message: RuntimeMessage): Promise<SourceCaptureResponse | null>;
+  handleLocationChange(): void;
 };
 
 const SETTINGS_CACHE_KEY = "savemycontext.settings.cache";
@@ -269,8 +271,13 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
 
   async function refreshSettings(): Promise<void> {
     try {
-      const settings = await sendMessage<{ selectionCaptureEnabled?: boolean }>({ type: "GET_SETTINGS" });
-      enabled = Boolean(settings.selectionCaptureEnabled);
+      const settings = await sendMessage<{
+        selectionCaptureEnabled?: boolean;
+        pageSurfaceScope?: "ai_providers" | "all_pages";
+      }>({ type: "GET_SETTINGS" });
+      enabled =
+        Boolean(settings.selectionCaptureEnabled) &&
+        pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, window.location.href);
       if (!enabled) {
         hide();
       }
@@ -513,6 +520,10 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
         return null;
       }
       return await saveCurrentPage(message.payload?.saveMode ?? "raw");
+    },
+    handleLocationChange(): void {
+      hide();
+      void refreshSettings();
     }
   };
 }

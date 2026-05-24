@@ -174,19 +174,19 @@ function App() {
       </header>
 
       {error ? (
-        <div className="mb-6 rounded-[12px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-4 py-3 text-sm text-[#8a3b27]">
+        <div className="mb-6 rounded-[12px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">
           {error}
         </div>
       ) : null}
 
       {surfaceError ? (
-        <div className="mb-6 rounded-[12px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-4 py-3 text-sm text-[#8a3b27]">
+        <div className="mb-6 rounded-[12px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">
           {surfaceError}
         </div>
       ) : null}
 
       {status?.backendValidationError ? (
-        <div className="mb-6 rounded-[12px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-4 py-3 text-sm text-[#8a3b27]">
+        <div className="mb-6 rounded-[12px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">
           <strong>Backend unavailable.</strong> {status.backendValidationError}
         </div>
       ) : null}

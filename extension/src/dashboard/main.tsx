@@ -319,7 +319,7 @@ function App() {
       {hasBackendError ? (
         <div
           id="backend-alert"
-          className="mb-6 rounded-[8px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-5 py-4 text-sm text-[#8a3b27]"
+          className="mb-6 rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-5 py-4 text-sm text-[var(--color-danger)]"
         >
           <strong className="font-semibold">Backend unavailable.</strong> {status?.backendValidationError}
         </div>
@@ -343,10 +343,10 @@ function App() {
               type="button"
               onClick={() => void handleQuickSave()}
               disabled={captureState === "saving"}
-              className="group flex items-center justify-between gap-3 rounded-[8px] bg-[var(--color-ink)] px-5 py-4 text-left text-[var(--color-paper)] transition hover:bg-[#1a2c44] disabled:opacity-70"
+              className="group flex items-center justify-between gap-3 rounded-[8px] bg-[var(--color-action)] px-5 py-4 text-left text-[var(--color-action-ink)] transition hover:bg-[var(--color-action-hover)] disabled:opacity-70"
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-white/10">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[var(--color-action-muted)]">
                   {captureState === "saving" ? (
                     <LoaderCircle className="h-4 w-4 animate-spin" />
                   ) : (
@@ -355,18 +355,18 @@ function App() {
                 </div>
                 <div>
                   <div className="text-[14px] font-semibold">Save current page</div>
-                  <div className="text-[12px] text-white/60">
+                  <div className="text-[12px] text-[var(--color-action-ink-subtle)]">
                     {captureMessage || "Save the active tab as a raw note"}
                   </div>
                 </div>
               </div>
-              <ArrowRight className="h-4 w-4 text-white/80 transition group-hover:translate-x-0.5" />
+              <ArrowRight className="h-4 w-4 text-[var(--color-action-ink-soft)] transition group-hover:translate-x-0.5" />
             </button>
 
             <button
               type="button"
               onClick={() => void handleQuickSearch()}
-              className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-5 py-4 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[#e6dfcd]"
+              className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] px-5 py-4 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-line)]"
             >
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-[8px] bg-[var(--color-paper-raised)]">
@@ -479,7 +479,7 @@ function App() {
           </div>
           <div className="px-6 py-4">
             {recoverError ? (
-              <div className="mb-3 rounded-[8px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-3 py-2 text-xs text-[#8a3b27]">
+              <div className="mb-3 rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-3 py-2 text-xs text-[var(--color-danger)]">
                 {recoverError}
               </div>
             ) : null}
@@ -527,7 +527,7 @@ function App() {
           <div className="flex items-center justify-between border-b border-[var(--color-line)] px-6 py-4">
             <div>
               <div className="eyebrow">Pulse</div>
-              <div className="display-serif mt-1 text-[22px] font-semibold text-[var(--color-ink)]">Capture activity</div>
+              <div className="mt-1 text-[18px] font-semibold tracking-[-0.02em] text-[var(--color-ink)]">Capture activity</div>
             </div>
             <div className="text-xs text-[var(--color-ink-subtle)]">{activityData.length} active days</div>
           </div>
@@ -536,23 +536,25 @@ function App() {
               <AreaChart data={activityData}>
                 <defs>
                   <linearGradient id="sessionFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#0f8a84" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#0f8a84" stopOpacity={0.02} />
+                    <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.28} />
+                    <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="#ebe4d1" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="day" tick={{ fill: "#8693a2", fontSize: 11 }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fill: "#8693a2", fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={26} />
+                <CartesianGrid stroke="var(--color-chart-grid)" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: "var(--color-ink-subtle)", fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fill: "var(--color-ink-subtle)", fontSize: 11 }} tickLine={false} axisLine={false} allowDecimals={false} width={26} />
                 <Tooltip
                   contentStyle={{
-                    borderRadius: 10,
-                    border: "1px solid #ebe4d1",
-                    background: "#fbf9f3",
-                    fontSize: 12
+                    borderRadius: 8,
+                    border: "1px solid var(--color-line)",
+                    background: "var(--color-paper-raised)",
+                    color: "var(--color-ink)",
+                    fontSize: 12,
+                    boxShadow: "0 4px 12px -4px var(--color-panel-shadow)"
                   }}
-                  cursor={{ stroke: "#d7cfb9" }}
+                  cursor={{ stroke: "var(--color-chart-cursor)" }}
                 />
-                <Area type="monotone" dataKey="sessions" stroke="#0f8a84" fill="url(#sessionFill)" strokeWidth={2.25} />
+                <Area type="monotone" dataKey="sessions" stroke="var(--color-accent)" fill="url(#sessionFill)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -741,7 +743,7 @@ function App() {
           </dl>
 
           {status?.providerDriftAlert ? (
-            <div className="mt-4 rounded-[8px] border border-[rgba(209,132,37,0.35)] bg-[rgba(209,132,37,0.08)] px-4 py-3 text-[13px] text-[#8a561a]">
+            <div className="mt-4 rounded-[8px] border border-[var(--color-warning-line)] bg-[var(--color-warning-soft)] px-4 py-3 text-[13px] text-[var(--color-warning)]">
               {formatProviderDriftAlert(status.providerDriftAlert)}
             </div>
           ) : null}
@@ -797,7 +799,7 @@ function App() {
       edgesQuery.error ||
       sessionsQuery.error ||
       todoQuery.error ? (
-        <div className="mt-6 rounded-[8px] border border-[rgba(193,90,64,0.35)] bg-[rgba(193,90,64,0.08)] px-4 py-3 text-sm text-[#8a3b27]">
+        <div className="mt-6 rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">
           {error ||
             (summaryQuery.error instanceof Error && summaryQuery.error.message) ||
             (systemQuery.error instanceof Error && systemQuery.error.message) ||

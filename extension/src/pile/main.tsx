@@ -592,7 +592,7 @@ function GraphPathPanel({
       <div className="mt-2 space-y-1.5">
         {nodes.length < 2 ? <p className="text-xs leading-5 text-[var(--color-ink-soft)]">At least two visible concepts are needed.</p> : null}
         {loading ? <p className="text-xs text-[var(--color-ink-soft)]">Finding paths...</p> : null}
-        {error && canSearch ? <p className="text-xs text-[#963c24]">{error.message}</p> : null}
+        {error && canSearch ? <p className="text-xs text-[var(--color-danger)]">{error.message}</p> : null}
         {paths.slice(0, 2).map((item, index) => (
           <button
             key={`${item.node_ids.join(":")}:${index}`}
@@ -1263,7 +1263,7 @@ function App() {
           {
             value: "ops" as const,
             label: "People",
-            accent: "#0f8a84",
+            accent: "#5e6ad2",
             icon: Users,
             metric: `${formatNumber(journalPeopleCount + journalEntityCount)} named`,
             detail: "People and entities"
@@ -1282,7 +1282,7 @@ function App() {
             {
               value: "story" as const,
               label: "Projects",
-              accent: "#4968ab",
+              accent: "#6c7793",
               icon: BrainCircuit,
               metric: `${formatNumber(ideaProjectCount || ideaThreadCount)} projects`,
               detail: "Projects, threads, facts"
@@ -1290,7 +1290,7 @@ function App() {
             {
               value: "ops" as const,
               label: "Attribution",
-              accent: "#0f8a84",
+              accent: "#5e6ad2",
               icon: Users,
               metric: `${formatNumber(ideaContributorCount)} voices`,
               detail: "Claims and relations"
@@ -1308,7 +1308,7 @@ function App() {
             {
               value: "story" as const,
               label: "Cross-links",
-              accent: "#4968ab",
+              accent: "#6c7793",
               icon: Workflow,
               metric: `${formatNumber(factualLinkedSourceCount)} sources`,
               detail: "Referenced by other piles"
@@ -1316,7 +1316,7 @@ function App() {
             {
               value: "ops" as const,
               label: "Terms",
-              accent: "#c77724",
+              accent: "#b0852c",
               icon: Tags,
               metric: `${formatNumber(factualEntityCount)} entities`,
               detail: "Keywords and entities"
@@ -1334,7 +1334,7 @@ function App() {
         {
           value: "story" as const,
           label: "Storylines",
-          accent: "#c77724",
+          accent: "#b0852c",
           icon: Sparkles,
           metric: `${formatNumber(graphInsights.storylines.length)} trails`,
           detail: "Guided graph trails"
@@ -1884,8 +1884,8 @@ function App() {
                       <span
                         className="display-serif flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] text-[12px] leading-none"
                         style={{
-                          backgroundColor: active ? "rgba(255,255,255,0.14)" : `${accent}1a`,
-                          color: active ? "#ffffff" : accent
+                          backgroundColor: active ? "var(--color-action-muted)" : `${accent}1a`,
+                          color: active ? "var(--color-action-ink)" : accent
                         }}
                       >
                         {pileGlyphs[pile]}
@@ -1933,16 +1933,16 @@ function App() {
                           }}
                           className={`w-full rounded-[8px] border px-2 py-1.5 text-left text-xs transition ${
                             activeProject
-                              ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                              ? "border-[var(--color-action)] bg-[var(--color-action)] text-[var(--color-action-ink)]"
                               : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                           }`}
                         >
                           <span className="flex items-center justify-between gap-2">
                             <span className="min-w-0 truncate font-semibold">{project.label}</span>
-                            <span className={activeProject ? "text-white/75" : "text-[var(--color-ink-soft)]"}>{formatNumber(project.count)}</span>
+                            <span className={activeProject ? "text-[var(--color-action-ink-soft)]" : "text-[var(--color-ink-soft)]"}>{formatNumber(project.count)}</span>
                           </span>
                           {project.kind === "suggested" ? (
-                            <span className={activeProject ? "mt-1 block text-[10px] uppercase tracking-[0.08em] text-white/60" : "mt-1 block text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
+                            <span className={activeProject ? "mt-1 block text-[10px] uppercase tracking-[0.08em] text-[var(--color-action-ink-subtle)]" : "mt-1 block text-[10px] uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
                               Suggested
                             </span>
                           ) : null}
@@ -2009,7 +2009,7 @@ function App() {
                       {ideaProjectSaving ? "Saving..." : "Add project"}
                     </Button>
                   </form>
-                  {ideaProjectError ? <p className="text-xs leading-5 text-[#963c24]">{ideaProjectError}</p> : null}
+                  {ideaProjectError ? <p className="text-xs leading-5 text-[var(--color-danger)]">{ideaProjectError}</p> : null}
                 </div>
               ) : null}
 
@@ -2207,20 +2207,20 @@ function App() {
                         onClick={() => handleBucketToggle(bucket.bucket)}
                         className={`rounded-[8px] border px-2 py-1.5 text-left transition ${
                           active
-                            ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white"
+                            ? "border-[var(--color-action)] bg-[var(--color-action)] text-[var(--color-action-ink)]"
                             : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                         }`}
                       >
                         <span className="flex items-center justify-between gap-2">
                           <span className="text-xs font-semibold">{bucket.label}</span>
-                          <span className={active ? "text-xs text-white/75" : "text-xs text-[var(--color-ink-soft)]"}>{formatNumber(bucket.count)}</span>
+                          <span className={active ? "text-xs text-[var(--color-action-ink-soft)]" : "text-xs text-[var(--color-ink-soft)]"}>{formatNumber(bucket.count)}</span>
                         </span>
-                        <span className={active ? "mt-1.5 block h-1.5 rounded-full bg-white/20" : "mt-1.5 block h-1.5 rounded-full bg-[var(--color-paper-sunken)]"}>
+                        <span className={active ? "mt-1.5 block h-1.5 rounded-full bg-[var(--color-action-track)]" : "mt-1.5 block h-1.5 rounded-full bg-[var(--color-paper-sunken)]"}>
                           <span
                             className="block h-full rounded-full"
                             style={{
                               width: `${(bucket.count / maxActivityBucketCount) * 100}%`,
-                              backgroundColor: active ? "#ffffff" : activePileAccent
+                              backgroundColor: active ? "var(--color-action-ink)" : activePileAccent
                             }}
                           />
                         </span>
@@ -2332,7 +2332,7 @@ function App() {
                               updateRoute({ note: session.id }, false);
                             }}
                             className={`rounded-[8px] border p-3 text-left transition ${
-                              isActive ? "border-[var(--color-ink)] bg-[var(--color-ink)] text-white" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
+                              isActive ? "border-[var(--color-action)] bg-[var(--color-action)] text-[var(--color-action-ink)]" : "border-[var(--color-line)] bg-[var(--color-paper-raised)] hover:bg-[var(--color-paper-sunken)]"
                             }`}
                           >
                             <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
@@ -2347,17 +2347,17 @@ function App() {
                                 {(session.extra_piles ?? []).slice(0, 3).map((pile) => (
                                   <span
                                     key={pile}
-                                    className={isActive ? "rounded-full border border-white/20 px-2 py-0.5 text-[10px] text-white/75" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
+                                    className={isActive ? "rounded-full border border-[var(--color-action-border)] px-2 py-0.5 text-[10px] text-[var(--color-action-ink-soft)]" : "rounded-full border border-[var(--color-line)] px-2 py-0.5 text-[10px] text-[var(--color-ink-soft)]"}
                                   >
                                     {pile}
                                   </span>
                                 ))}
                               </div>
                             ) : null}
-                            <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-white/70" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
+                            <div className={isActive ? "text-xs uppercase tracking-[0.08em] text-[var(--color-action-ink-soft)]" : "text-xs uppercase tracking-[0.08em] text-[var(--color-ink-soft)]"}>
                               {formatCompactDate(session.updated_at)}
                             </div>
-                            <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-white/80" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-ink-soft)]"}>
+                            <p className={isActive ? "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-action-ink-soft)]" : "mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--color-ink-soft)]"}>
                               {sessionPreviewText(session, match, session.pile_slug ?? activeDisplayCategory)}
                             </p>
                           </button>
@@ -2419,7 +2419,7 @@ function App() {
                     </div>
                   </div>
                   {extraPileError ? (
-                    <div className="mb-4 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{extraPileError}</div>
+                    <div className="mb-4 rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">{extraPileError}</div>
                   ) : null}
                   {selectedSession && noteQuery.isLoading ? (
                     <div className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-sunken)] p-5 text-sm text-[var(--color-ink-soft)]">Loading note content...</div>
@@ -2878,7 +2878,7 @@ function App() {
       ) : null}
 
       {issueMessage ? (
-        <div className="pile-workbench-error rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="pile-workbench-error rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">
           {issueMessage}
         </div>
       ) : null}

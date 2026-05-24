@@ -10,6 +10,10 @@ import {
   normalizeProviderRefreshIntervalMinutes,
   PROVIDER_REFRESH_DEFAULT_INTERVAL_MINUTES
 } from "./provider-refresh";
+import {
+  DEFAULT_PAGE_SURFACE_SCOPE,
+  normalizePageSurfaceScope
+} from "./page-surfaces";
 
 const SETTINGS_KEY = "savemycontext.settings";
 const SECRET_SETTINGS_KEY = "savemycontext.settings.secrets";
@@ -39,6 +43,7 @@ export const defaultSettings: ExtensionSettings = {
   selectionCaptureEnabled: false,
   contextSuggestionsEnabled: false,
   contextSuggestionsFloatingButtonEnabled: true,
+  pageSurfaceScope: DEFAULT_PAGE_SURFACE_SCOPE,
   accountCaptureMode: "all",
   enabledAccountKeys: {}
 };
@@ -70,6 +75,7 @@ function mergeSettings(
       current.contextSuggestionsEnabled ?? defaultSettings.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
       current.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled,
+    pageSurfaceScope: normalizePageSurfaceScope(current.pageSurfaceScope),
     accountCaptureMode: current.accountCaptureMode ?? defaultSettings.accountCaptureMode,
     enabledAccountKeys: {
       ...(current.enabledAccountKeys ?? defaultSettings.enabledAccountKeys)
@@ -92,6 +98,7 @@ function shouldPersistSettings(current: Partial<ExtensionSettings>): boolean {
     current.selectionCaptureEnabled === undefined ||
     current.contextSuggestionsEnabled === undefined ||
     current.contextSuggestionsFloatingButtonEnabled === undefined ||
+    current.pageSurfaceScope === undefined ||
     current.accountCaptureMode === undefined ||
     current.enabledAccountKeys === undefined
   ) {
@@ -126,6 +133,7 @@ function publicSettings(settings: ExtensionSettings | Partial<ExtensionSettings>
       settings.contextSuggestionsEnabled ?? defaultSettings.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
       settings.contextSuggestionsFloatingButtonEnabled ?? defaultSettings.contextSuggestionsFloatingButtonEnabled,
+    pageSurfaceScope: normalizePageSurfaceScope(settings.pageSurfaceScope),
     accountCaptureMode: settings.accountCaptureMode ?? defaultSettings.accountCaptureMode,
     enabledAccountKeys: {
       ...(settings.enabledAccountKeys ?? defaultSettings.enabledAccountKeys)
@@ -190,6 +198,7 @@ export async function saveSettings(update: Partial<ExtensionSettings>): Promise<
     contextSuggestionsEnabled: update.contextSuggestionsEnabled ?? current.contextSuggestionsEnabled,
     contextSuggestionsFloatingButtonEnabled:
       update.contextSuggestionsFloatingButtonEnabled ?? current.contextSuggestionsFloatingButtonEnabled,
+    pageSurfaceScope: normalizePageSurfaceScope(update.pageSurfaceScope ?? current.pageSurfaceScope),
     accountCaptureMode: update.accountCaptureMode ?? current.accountCaptureMode,
     enabledAccountKeys: update.enabledAccountKeys ?? current.enabledAccountKeys
   };

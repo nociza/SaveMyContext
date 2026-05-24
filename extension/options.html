@@ -164,10 +164,21 @@
               <span class="toggle-body">
                 <span class="toggle-title">Selection capture pop-up</span>
                 <span class="toggle-help">
-                  Show a small action pop-up when you select text on normal web pages, offering a raw save or
+                  Show a small action pop-up when you select text on enabled pages, offering a raw save or
                   an AI-summarized save.
                 </span>
               </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Page surfaces</span>
+              <select id="page-surface-scope" name="page-surface-scope">
+                <option value="ai_providers">Supported AI provider pages</option>
+                <option value="all_pages">All regular web pages</option>
+              </select>
+              <small>
+                Controls where selection capture, quick search, and contextual note surfaces can appear.
+              </small>
             </label>
 
             <label class="toggle">

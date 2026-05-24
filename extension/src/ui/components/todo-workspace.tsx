@@ -79,7 +79,7 @@ export function TodoWorkspace({
                 value={draft}
                 onChange={(event) => onDraftChange(event.target.value)}
                 placeholder="Add a task that belongs on the shared checklist"
-                className="h-11 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm outline-none transition focus:border-[var(--color-line-strong)]"
+                className="h-11 flex-1 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 text-sm text-[var(--color-ink)] outline-none transition placeholder:text-[var(--color-ink-subtle)] focus:border-[var(--color-line-strong)]"
               />
               <Button type="submit" variant="primary">
                 <Plus className="h-4 w-4" />
@@ -149,7 +149,7 @@ export function TodoWorkspace({
           </div>
 
           {error ? (
-            <div className="rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>
+            <div className="rounded-[8px] border border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)]">{error}</div>
           ) : null}
 
           {loading ? (

@@ -436,6 +436,14 @@ function selectedNeighborSet(graph: Graph<SigmaNodeAttributes, SigmaEdgeAttribut
   return neighbors;
 }
 
+function cssColor(name: string, fallback: string): string {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 export function PileGraph({
   graph,
   pile,
@@ -497,6 +505,12 @@ export function PileGraph({
       return;
     }
 
+    const graphColors = {
+      mutedNode: cssColor("--color-graph-muted-node", "#c7cbd1"),
+      mutedEdge: cssColor("--color-graph-muted-edge", "#e4e6ea"),
+      activeEdge: cssColor("--color-graph-active-edge", "#6b7380")
+    };
+
     const renderer = new Sigma<SigmaNodeAttributes, SigmaEdgeAttributes>(build.graph, container, {
       allowInvalidContainer: true,
       autoCenter: true,
@@ -526,7 +540,7 @@ export function PileGraph({
           data.noteCount >= 6;
         return {
           ...data,
-          color: data.muted || !inNeighborhood ? "#c7cbd1" : data.baseColor,
+          color: data.muted || !inNeighborhood ? graphColors.mutedNode : data.baseColor,
           label: labelAllowed ? data.label : "",
           size: isActive ? data.size * 1.45 : data.size,
           zIndex: isActive ? 2 : data.variant === "cluster" ? 1 : 0
@@ -538,9 +552,8 @@ export function PileGraph({
         const inNeighborhood = !neighbors || (neighbors.has(String(extremities[0])) && neighbors.has(String(extremities[1])));
         return {
           ...data,
-          // Faded, near-white default keeps idle edges from crosshatching the
-          // visible labels. Focused neighborhoods get a darker tone for contrast.
-          color: data.muted || !inNeighborhood ? "#e4e6ea" : "#6b7380",
+          // Theme-aware muted edges keep idle links from crosshatching labels.
+          color: data.muted || !inNeighborhood ? graphColors.mutedEdge : graphColors.activeEdge,
           size: inNeighborhood ? data.size : Math.max(data.size * 0.35, 0.3),
           zIndex: inNeighborhood ? 1 : 0
         };

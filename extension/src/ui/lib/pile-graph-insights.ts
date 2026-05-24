@@ -66,8 +66,8 @@ export interface PileGraphInsights {
   averageNodesPerSession: number;
 }
 
-const kindAccents = ["#0f8a84", "#c77724", "#2477c7", "#b04d37", "#2f855a", "#0ea5a4"];
-const communityAccents = ["#0f8a84", "#c77724", "#4968ab", "#b04d37", "#2f855a", "#7c5aa6", "#2477c7", "#8b5e34"];
+const kindAccents = ["#5e6ad2", "#b0852c", "#6c7793", "#c15a40", "#3a7d6c", "#8a8f98"];
+const communityAccents = ["#5e6ad2", "#b0852c", "#6c7793", "#c15a40", "#3a7d6c", "#7c5aa6", "#4f5bba", "#8a8f98"];
 
 function hashString(value: string): number {
   let hash = 0;

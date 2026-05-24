@@ -65,21 +65,21 @@ function textList(value: unknown): string[] {
 function cardClass(kind: IdeaNodeKind): string {
   switch (kind) {
     case "thread":
-      return "border-[#818cf8] bg-gradient-to-r from-[#eef2ff] to-[#f5f3ff] text-[#3730a3]";
+      return "border-[var(--color-info-line)] bg-[var(--color-accent-soft)] text-[var(--color-accent-strong)]";
     case "origin":
       return "border-[var(--color-line)] bg-[var(--color-paper-sunken)] text-[var(--color-ink-soft)]";
     case "core":
-      return "border-[#4338ca] bg-gradient-to-br from-[#eef2ff] via-[#e0e7ff] to-[#ede9fe] text-[#1e1b4b] shadow-md";
+      return "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)] shadow-md";
     case "reasoning":
-      return "border-[var(--color-line-strong)] bg-white text-[var(--color-ink)]";
+      return "border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] text-[var(--color-ink)]";
     case "support":
-      return "border-[#16a34a] bg-[#f0fdf4] text-[#14532d]";
+      return "border-[var(--color-success-line)] bg-[var(--color-success-soft)] text-[var(--color-success)]";
     case "conflict":
-      return "border-[#dc2626] bg-[#fef2f2] text-[#7f1d1d]";
+      return "border-[var(--color-danger-line)] bg-[var(--color-danger-soft)] text-[var(--color-danger)]";
     case "fact":
-      return "border-[#2563eb] bg-[#eff6ff] text-[#1e3a8a]";
+      return "border-[var(--color-info-line)] bg-[var(--color-info-bg)] text-[var(--color-info-text)]";
     case "nextStep":
-      return "border-[#d97706] bg-[#fffbeb] text-[#7c2d12]";
+      return "border-[var(--color-warning-line)] bg-[var(--color-warning-soft)] text-[var(--color-warning)]";
     case "share":
       return "border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink-soft)] italic";
   }
@@ -210,8 +210,8 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       source: threadNodeId,
       target: originId,
       type: "smoothstep",
-      style: { stroke: "#a5b4fc", strokeDasharray: "2 4" },
-      markerEnd: { type: MarkerType.Arrow, color: "#a5b4fc" }
+      style: { stroke: "var(--color-accent)", strokeDasharray: "2 4" },
+      markerEnd: { type: MarkerType.Arrow, color: "var(--color-accent)" }
     });
   }
   row += 1;
@@ -233,9 +233,9 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       target: coreId,
       type: "smoothstep",
       label: "surfaced",
-      style: { stroke: "#6366f1", strokeWidth: 2 },
-      labelStyle: { fontSize: 10, fill: "#4338ca", fontWeight: 600 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#6366f1" }
+      style: { stroke: "var(--color-accent)", strokeWidth: 2 },
+      labelStyle: { fontSize: 10, fill: "var(--color-accent-strong)", fontWeight: 600 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-accent)" }
     });
     previousCenter = coreId;
     row += 1;
@@ -262,9 +262,9 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       target: id,
       type: "smoothstep",
       label: reasoningConnective(index, reasoning.length),
-      style: { stroke: "#475569" },
-      labelStyle: { fontSize: 10, fill: "#334155" },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#475569" }
+      style: { stroke: "var(--color-ink-soft)" },
+      labelStyle: { fontSize: 10, fill: "var(--color-ink-soft)" },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-ink-soft)" }
     });
     previousCenter = id;
     row += 1;
@@ -308,8 +308,8 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       });
     });
   };
-  placeArg(supports, "support", SUPPORT_X, "#16a34a", "reinforces");
-  placeArg(conflicts, "conflict", CONFLICT_X, "#dc2626", "pushes back");
+  placeArg(supports, "support", SUPPORT_X, "var(--color-success)", "reinforces");
+  placeArg(conflicts, "conflict", CONFLICT_X, "var(--color-danger)", "pushes back");
 
   // Grounded-in facts: horizontal substrate at the bottom, each anchoring
   // upward into the last spine node. Facts are the stable ground, not the
@@ -332,9 +332,9 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
         target: id,
         type: "smoothstep",
         label: index === 0 ? "grounded in" : undefined,
-        style: { stroke: "#2563eb", strokeDasharray: "2 4" },
-        labelStyle: { fontSize: 10, fill: "#1d4ed8" },
-        markerEnd: { type: MarkerType.Arrow, color: "#2563eb" }
+        style: { stroke: "var(--color-info-text)", strokeDasharray: "2 4" },
+        labelStyle: { fontSize: 10, fill: "var(--color-info-text)" },
+        markerEnd: { type: MarkerType.Arrow, color: "var(--color-info-text)" }
       });
     });
     row = factRow + 1;
@@ -360,9 +360,9 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       target: id,
       type: "smoothstep",
       label: "leads to",
-      style: { stroke: "#b45309" },
-      labelStyle: { fontSize: 10, fill: "#92400e" },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#b45309" }
+      style: { stroke: "var(--color-warning)" },
+      labelStyle: { fontSize: 10, fill: "var(--color-warning)" },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--color-warning)" }
     });
     previousCenter = id;
     row += 1;
@@ -384,7 +384,7 @@ function buildGraph(idea: IdeaFlowData, origin?: IdeaFlowOrigin): { nodes: Node<
       source: previousCenter,
       target: id,
       type: "smoothstep",
-      style: { stroke: "#94a3b8" }
+      style: { stroke: "var(--color-ink-subtle)" }
     });
   }
 
@@ -439,15 +439,15 @@ export function IdeaFlow({
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#d4d8dd" />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-chart-grid)" />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
       <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-soft)]">
-        <LegendDot color="#4338ca" label="Core idea" />
-        <LegendDot color="#16a34a" label="In favor" />
-        <LegendDot color="#dc2626" label="Counterpoints" />
-        <LegendDot color="#2563eb" label="Grounded in" />
-        <LegendDot color="#b45309" label="What's next" />
+        <LegendDot color="var(--color-accent)" label="Core idea" />
+        <LegendDot color="var(--color-success)" label="In favor" />
+        <LegendDot color="var(--color-danger)" label="Counterpoints" />
+        <LegendDot color="var(--color-info-text)" label="Grounded in" />
+        <LegendDot color="var(--color-warning)" label="What's next" />
       </div>
     </div>
   );

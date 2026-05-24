@@ -98,9 +98,12 @@ export interface ExtensionSettings {
   selectionCaptureEnabled: boolean;
   contextSuggestionsEnabled: boolean;
   contextSuggestionsFloatingButtonEnabled: boolean;
+  pageSurfaceScope?: PageSurfaceScope;
   accountCaptureMode?: "all" | "include";
   enabledAccountKeys?: Partial<Record<ProviderName, string[]>>;
 }
+
+export type PageSurfaceScope = "ai_providers" | "all_pages";
 
 export interface BackendCapabilities {
   product: string;

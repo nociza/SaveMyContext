@@ -28,6 +28,7 @@ const autoSyncHistoryInput = document.querySelector<HTMLInputElement>("#auto-syn
 const scheduledProviderRefreshEnabledInput = document.querySelector<HTMLInputElement>("#scheduled-provider-refresh-enabled");
 const scheduledProviderRefreshIntervalInput = document.querySelector<HTMLInputElement>("#scheduled-provider-refresh-interval");
 const selectionCaptureEnabledInput = document.querySelector<HTMLInputElement>("#selection-capture-enabled");
+const pageSurfaceScopeInput = document.querySelector<HTMLSelectElement>("#page-surface-scope");
 const contextSuggestionsEnabledInput = document.querySelector<HTMLInputElement>("#context-suggestions-enabled");
 const contextSuggestionsFloatingButtonEnabledInput = document.querySelector<HTMLInputElement>(
   "#context-suggestions-floating-button-enabled"
@@ -211,6 +212,9 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
   if (selectionCaptureEnabledInput) {
     selectionCaptureEnabledInput.checked = settings.selectionCaptureEnabled;
   }
+  if (pageSurfaceScopeInput) {
+    pageSurfaceScopeInput.value = settings.pageSurfaceScope ?? "ai_providers";
+  }
   if (contextSuggestionsEnabledInput) {
     contextSuggestionsEnabledInput.checked = settings.contextSuggestionsEnabled;
   }
@@ -340,6 +344,7 @@ form?.addEventListener("submit", async (event) => {
       scheduledProviderRefreshIntervalInput?.value
     ),
     selectionCaptureEnabled: selectionCaptureEnabledInput?.checked ?? false,
+    pageSurfaceScope: pageSurfaceScopeInput?.value === "all_pages" ? "all_pages" : "ai_providers",
     contextSuggestionsEnabled: contextSuggestionsEnabledInput?.checked ?? false,
     contextSuggestionsFloatingButtonEnabled: contextSuggestionsFloatingButtonEnabledInput?.checked ?? true,
     accountCaptureMode: accountCaptureIncludeInput?.checked ? "include" : "all",
@@ -443,6 +448,10 @@ scheduledProviderRefreshIntervalInput?.addEventListener("input", () => {
 });
 
 selectionCaptureEnabledInput?.addEventListener("change", () => {
+  formDirty = true;
+});
+
+pageSurfaceScopeInput?.addEventListener("change", () => {
   formDirty = true;
 });
 

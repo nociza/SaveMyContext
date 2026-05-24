@@ -43,6 +43,10 @@ import {
 } from "../shared/storage";
 import { parseConnectionString } from "../shared/connection";
 import { evaluateDiscardWords, evaluateIndexingRules, indexingRulesFingerprint } from "../shared/indexing-rules";
+import {
+  normalizePageSurfaceScope,
+  pageSurfaceScopeAllowsUrl
+} from "../shared/page-surfaces";
 import type {
   ActiveChatContextResponse,
   ActiveChatContextSnapshot,
@@ -88,6 +92,20 @@ const PROVIDER_TAB_READY_INTERVAL_MS = 250;
 const PROVIDER_REFRESH_TAB_LOAD_TIMEOUT_MS = 30_000;
 const PROCESSING_REPAIR_ATTEMPTS = 3;
 const CONTENT_SCRIPT_FILE = "assets/content.js";
+const PAGE_SURFACE_SCRIPT_ID = "savemycontext-page-surfaces-all-pages";
+const PAGE_SURFACE_CLEANUP_FLAG = "data-savemycontext-page-surfaces-cleanup";
+const PAGE_SURFACE_HOST_IDS = [
+  "savemycontext-selection-capture-root",
+  "savemycontext-context-suggestions-root",
+  "savemycontext-quick-search-host"
+];
+const ALL_REGULAR_PAGE_MATCHES = ["https://*/*", "http://*/*"];
+const AI_PROVIDER_PAGE_MATCHES = [
+  "https://chatgpt.com/*",
+  "https://chat.openai.com/*",
+  "https://gemini.google.com/*",
+  "https://grok.com/*"
+];
 const HISTORY_SYNC_PROVIDERS: ProviderName[] = ["chatgpt", "gemini", "grok"];
 const scheduledProviderRefreshesInFlight = new Set<ProviderName>();
 const ACTION_ICON_PATHS: Record<number, string> = {
@@ -255,19 +273,19 @@ function createSyncActionIcon(size: number): ImageData {
   const arrowSize = Math.max(2.2, size * 0.14);
 
   context.clearRect(0, 0, size, size);
-  context.fillStyle = "#0f1b2c";
+  context.fillStyle = "#08090a";
   context.beginPath();
   context.arc(center, center, outerRadius, 0, Math.PI * 2);
   context.fill();
 
   context.lineWidth = lineWidth;
   context.lineCap = "round";
-  context.strokeStyle = "#fbf9f3";
+  context.strokeStyle = "#ffffff";
   context.beginPath();
   context.arc(center, center, ringRadius, Math.PI * 0.25, Math.PI * 1.2);
   context.stroke();
 
-  context.strokeStyle = "#0f8a84";
+  context.strokeStyle = "#5e6ad2";
   context.beginPath();
   context.arc(center, center, ringRadius, Math.PI * 1.28, Math.PI * 2.08);
   context.stroke();
@@ -275,7 +293,7 @@ function createSyncActionIcon(size: number): ImageData {
   const arrowAngle = Math.PI * 2.08;
   const arrowX = center + Math.cos(arrowAngle) * ringRadius;
   const arrowY = center + Math.sin(arrowAngle) * ringRadius;
-  context.fillStyle = "#0f8a84";
+  context.fillStyle = "#5e6ad2";
   context.beginPath();
   context.moveTo(arrowX, arrowY);
   context.lineTo(arrowX - arrowSize, arrowY - arrowSize * 0.2);
@@ -283,7 +301,7 @@ function createSyncActionIcon(size: number): ImageData {
   context.closePath();
   context.fill();
 
-  context.fillStyle = "#fbf9f3";
+  context.fillStyle = "#ffffff";
   context.beginPath();
   context.arc(center, center, Math.max(1.4, size * 0.09), 0, Math.PI * 2);
   context.fill();
@@ -694,6 +712,39 @@ function tabSupportsInteractivePage(tab: chrome.tabs.Tab | undefined): tab is ch
   return Boolean(tab && typeof tab.id === "number" && typeof tab.url === "string" && /^https?:\/\//i.test(tab.url));
 }
 
+function pageSurfaceScopeError(action: string): string {
+  return `SaveMyContext ${action} is limited to supported AI provider pages. Change Page surfaces in Settings to use it on all web pages.`;
+}
+
+async function settingsAllowPageSurface(tabUrl: string): Promise<boolean> {
+  const settings = await getSettings();
+  return pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, tabUrl);
+}
+
+function installPageSurfaceCleanupGuard(hostIds: string[], flagAttribute: string): void {
+  const cleanup = () => {
+    for (const id of hostIds) {
+      document.getElementById(id)?.remove();
+    }
+  };
+  cleanup();
+
+  if (document.documentElement.getAttribute(flagAttribute) === "1") {
+    return;
+  }
+  document.documentElement.setAttribute(flagAttribute, "1");
+
+  const scheduleCleanup = () => {
+    cleanup();
+    window.setTimeout(cleanup, 120);
+    window.setTimeout(cleanup, 300);
+  };
+  for (const eventName of ["selectionchange", "mouseup", "mousedown", "focusin"]) {
+    document.addEventListener(eventName, scheduleCleanup, true);
+  }
+  window.addEventListener("scroll", scheduleCleanup, true);
+}
+
 async function ensureQuickSearchContentScript(tabId: number): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
@@ -707,6 +758,12 @@ async function openQuickSearchInActiveTab(): Promise<{ ok: boolean; error?: stri
     return {
       ok: false,
       error: "SaveMyContext quick search only works on regular http or https pages."
+    };
+  }
+  if (!(await settingsAllowPageSurface(activeTab.url))) {
+    return {
+      ok: false,
+      error: pageSurfaceScopeError("quick search")
     };
   }
 
@@ -738,10 +795,16 @@ async function openQuickSearchInActiveTab(): Promise<{ ok: boolean; error?: stri
   }
 }
 
-async function sendMessageToActivePage<TResponse>(message: RuntimeMessage): Promise<TResponse> {
+async function sendMessageToActivePage<TResponse>(
+  message: RuntimeMessage,
+  options: { actionName?: string; requirePageSurfaceScope?: boolean } = {}
+): Promise<TResponse> {
   const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tabSupportsInteractivePage(activeTab)) {
     throw new Error("SaveMyContext page actions only work on regular http or https pages.");
+  }
+  if (options.requirePageSurfaceScope !== false && !(await settingsAllowPageSurface(activeTab.url))) {
+    throw new Error(pageSurfaceScopeError(options.actionName ?? "page action"));
   }
 
   try {
@@ -888,6 +951,8 @@ async function handleSaveCurrentPageSource(saveMode: "raw" | "ai" = "raw"): Prom
       payload: {
         saveMode
       }
+    }, {
+      actionName: "page capture"
     });
   } catch (error) {
     return {
@@ -1079,6 +1144,59 @@ async function syncProviderRefreshAlarms(settings?: ExtensionSettings): Promise<
   );
 }
 
+async function syncPageSurfaceContentScript(settings?: ExtensionSettings): Promise<void> {
+  const resolvedSettings = settings ?? (await getSettings());
+  const registered = await chrome.scripting.getRegisteredContentScripts({
+    ids: [PAGE_SURFACE_SCRIPT_ID]
+  });
+  const registeredForAllPages = registered.length > 0;
+  const shouldRegisterForAllPages = normalizePageSurfaceScope(resolvedSettings.pageSurfaceScope) === "all_pages";
+
+  if (!shouldRegisterForAllPages) {
+    if (registeredForAllPages) {
+      await chrome.scripting.unregisterContentScripts({
+        ids: [PAGE_SURFACE_SCRIPT_ID]
+      });
+    }
+    await cleanupDisallowedPageSurfaceTabs(resolvedSettings);
+    return;
+  }
+
+  if (registeredForAllPages) {
+    return;
+  }
+
+  await chrome.scripting.registerContentScripts([
+    {
+      id: PAGE_SURFACE_SCRIPT_ID,
+      js: [CONTENT_SCRIPT_FILE],
+      matches: ALL_REGULAR_PAGE_MATCHES,
+      excludeMatches: AI_PROVIDER_PAGE_MATCHES,
+      runAt: "document_start"
+    }
+  ]);
+}
+
+async function cleanupDisallowedPageSurfaceTabs(settings: ExtensionSettings): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (!tabSupportsInteractivePage(tab) || pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, tab.url)) {
+        return;
+      }
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: installPageSurfaceCleanupGuard,
+          args: [PAGE_SURFACE_HOST_IDS, PAGE_SURFACE_CLEANUP_FLAG]
+        });
+      } catch {
+        // Some pages cannot be scripted; they also cannot host extension UI.
+      }
+    })
+  );
+}
+
 async function handleScheduledProviderRefresh(provider: ProviderName): Promise<void> {
   if (scheduledProviderRefreshesInFlight.has(provider)) {
     return;
@@ -1114,6 +1232,7 @@ async function handleScheduledProviderRefresh(provider: ProviderName): Promise<v
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage().then(async () => {
     await syncProviderRefreshAlarms();
+    await syncPageSurfaceContentScript();
     await refreshBackendStatus(true);
   });
 });
@@ -1121,6 +1240,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   void initializeStorage().then(async () => {
     await syncProviderRefreshAlarms();
+    await syncPageSurfaceContentScript();
     await refreshBackendStatus(true);
   });
 });
@@ -2028,6 +2148,7 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       await clearProviderHistorySyncStates();
     }
     await syncProviderRefreshAlarms(saved);
+    await syncPageSurfaceContentScript(saved);
     await saveBackendValidation(capabilities, null);
     backendValidationLastKey = backendValidationCacheKey(saved);
     backendValidationLastCompletedAt = Date.now();

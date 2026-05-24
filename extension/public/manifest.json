@@ -10,6 +10,7 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://*/*",
+    "http://*/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -25,7 +26,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*/*", "http://*/*"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*"
+      ],
       "js": ["assets/content.js"],
       "run_at": "document_start"
     },

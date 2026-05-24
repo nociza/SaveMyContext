@@ -6,26 +6,26 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(15,138,132,0.35)] focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 select-none",
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium tracking-[-0.005em] transition-colors duration-100 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-soft)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-paper)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-[14px] [&_svg]:shrink-0 select-none",
   {
     variants: {
       variant: {
         primary:
-          "rounded-[8px] bg-[var(--color-ink)] text-[var(--color-paper)] hover:bg-[#1a2c44] active:translate-y-[0.5px]",
+          "rounded-md bg-[var(--color-action)] text-[var(--color-action-ink)] hover:bg-[var(--color-action-hover)]",
         accent:
-          "rounded-[8px] bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-strong)] active:translate-y-[0.5px]",
+          "rounded-md bg-[var(--color-accent)] text-[var(--color-accent-ink)] shadow-[inset_0_1px_0_var(--color-action-border)] hover:bg-[var(--color-accent-strong)]",
         secondary:
-          "rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]",
+          "rounded-md border border-[var(--color-line)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]",
         subtle:
-          "rounded-[8px] bg-[var(--color-paper-sunken)] text-[var(--color-ink)] hover:bg-[#e6dfcd]",
+          "rounded-md bg-[var(--color-paper-sunken)] text-[var(--color-ink)] hover:bg-[var(--color-line)]",
         ghost:
-          "rounded-[8px] text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)] hover:text-[var(--color-ink)]"
+          "rounded-md text-[var(--color-ink-soft)] hover:bg-[var(--color-paper-sunken)] hover:text-[var(--color-ink)]"
       },
       size: {
-        default: "h-10 px-4 text-sm",
-        sm: "h-9 px-3 text-[13px]",
-        lg: "h-11 px-5 text-sm",
-        icon: "h-10 w-10"
+        default: "h-8 px-3 text-[13px]",
+        sm: "h-7 px-2.5 text-[12.5px]",
+        lg: "h-9 px-4 text-[13.5px]",
+        icon: "h-8 w-8"
       }
     },
     defaultVariants: {

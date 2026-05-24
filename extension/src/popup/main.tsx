@@ -242,7 +242,7 @@ function PopupApp() {
 
       <header className="flex items-center justify-between px-5 pb-2 pt-4">
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--color-ink)] text-[var(--color-paper)]">
+          <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--color-action)] text-[var(--color-action-ink)]">
             <span className="display-serif text-[15px] font-semibold leading-none">C</span>
           </div>
           <div className="flex flex-col leading-none">
@@ -272,10 +272,10 @@ function PopupApp() {
             type="button"
             onClick={() => void handleSave()}
             disabled={isSaving}
-            className="group relative flex w-full items-center justify-between gap-3 rounded-[8px] bg-[var(--color-ink)] px-4 py-3 text-left text-[var(--color-paper)] transition hover:bg-[#1a2c44] disabled:opacity-70"
+            className="group relative flex w-full items-center justify-between gap-3 rounded-[8px] bg-[var(--color-action)] px-4 py-3 text-left text-[var(--color-action-ink)] transition hover:bg-[var(--color-action-hover)] disabled:opacity-70"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-white/10">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-action-muted)]">
                 {isSaving ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
                 ) : isProviderTab ? (
@@ -286,12 +286,12 @@ function PopupApp() {
               </div>
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold leading-tight">{primaryLabel}</div>
-                <div className="mt-0.5 truncate text-[11px] text-white/60">
+                <div className="mt-0.5 truncate text-[11px] text-[var(--color-action-ink-subtle)]">
                   {activeTabInfo?.title ?? "Capture the current tab to your vault"}
                 </div>
               </div>
             </div>
-            <ArrowRight className="h-4 w-4 shrink-0 text-white/80 transition group-hover:translate-x-0.5" />
+            <ArrowRight className="h-4 w-4 shrink-0 text-[var(--color-action-ink-soft)] transition group-hover:translate-x-0.5" />
           </button>
 
           <button
@@ -307,15 +307,15 @@ function PopupApp() {
           </button>
 
           {showHistorySyncBanner ? (
-            <div className="relative mt-2 rounded-[8px] border border-[rgba(15,138,132,0.22)] bg-[rgba(15,138,132,0.07)] px-3 py-2">
+            <div className="relative mt-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-accent-soft)] px-3 py-2">
               <div className="mb-1 flex items-center justify-between gap-3">
-                <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold text-[#076b66]">
+                <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-[var(--color-accent-strong)]">
                   <LoaderCircle className="h-3 w-3 shrink-0 animate-spin" />
                   <span className="truncate">Syncing {historySyncProviderLabel} chats</span>
                 </span>
-                <span className="shrink-0 text-[10.5px] font-medium text-[#076b66]/80">{historySyncProgressLabel}</span>
+                <span className="shrink-0 text-[10.5px] font-medium text-[var(--color-accent-strong)]/80">{historySyncProgressLabel}</span>
               </div>
-              <div className="relative h-1 overflow-hidden rounded-full bg-[rgba(15,138,132,0.16)]">
+              <div className="relative h-1 overflow-hidden rounded-full bg-[rgba(94,106,210,0.16)]">
                 {historySyncProgress === null ? (
                   <div className="popup-progress-indeterminate absolute inset-y-0 left-0 w-[34%] rounded-full bg-[var(--color-factual)]" />
                 ) : (
@@ -410,7 +410,7 @@ function PopupApp() {
           {hasDrift ? (
             <div
               id="provider-drift-card"
-              className="truncate rounded-[8px] border border-[rgba(209,132,37,0.35)] bg-[rgba(209,132,37,0.1)] px-3 py-2 text-[11.5px] font-medium text-[#8b561a]"
+              className="truncate rounded-[8px] border border-[var(--color-warning-line)] bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] font-medium text-[var(--color-warning)]"
             >
               <span id="provider-drift" className="sr-only">
                 {status?.providerDriftAlert?.provider}: {status?.providerDriftAlert?.message}
@@ -422,7 +422,7 @@ function PopupApp() {
               {toastMessage || error}
             </div>
           ) : captureStatus ? (
-            <div className="truncate rounded-[8px] border border-[rgba(15,138,132,0.2)] bg-[rgba(15,138,132,0.08)] px-3 py-2 text-[11.5px] font-medium text-[#076b66]">
+            <div className="truncate rounded-[8px] border border-[var(--color-info-line)] bg-[var(--color-accent-soft)] px-3 py-2 text-[11.5px] font-medium text-[var(--color-accent-strong)]">
               {captureStatus}
             </div>
           ) : null}
