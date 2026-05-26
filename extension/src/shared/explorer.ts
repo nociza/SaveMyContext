@@ -37,13 +37,17 @@ export const pileGlyphs: Record<BuiltInPileSlug, string> = {
 export const providerLabels: Record<ProviderName, string> = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
-  grok: "Grok"
+  grok: "Grok",
+  codex: "Codex",
+  claude: "Claude"
 };
 
 export const providerColors: Record<ProviderName, string> = {
   chatgpt: "#5e6ad2",
   gemini: "#b0852c",
-  grok: "#6c7793"
+  grok: "#6c7793",
+  codex: "#2f855a",
+  claude: "#9a5b35"
 };
 
 export type PileSortMode = "recent" | "title";
@@ -171,7 +175,9 @@ export function parsePile(value: string | null): BuiltInPileSlug {
 }
 
 export function parseProvider(value: string | null): ProviderName | null {
-  return value === "chatgpt" || value === "gemini" || value === "grok" ? value : null;
+  return value === "chatgpt" || value === "gemini" || value === "grok" || value === "codex" || value === "claude"
+    ? value
+    : null;
 }
 
 export function parseSortMode(value: string | null): PileSortMode {

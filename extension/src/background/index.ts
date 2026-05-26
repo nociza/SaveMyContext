@@ -1,9 +1,12 @@
 import {
   buildBackendHeaders,
   completeProcessingTask,
+  fetchContextMigrationBundle,
   fetchKnowledgeSearch,
   fetchNextProcessingTask,
   fetchProcessingStatus,
+  fetchSessions,
+  importContextMigrationBundle,
   redeemConnectionBundle,
   runDuePileRestructures,
   saveSourceCaptureToBackend,
@@ -50,6 +53,7 @@ import {
 import type {
   ActiveChatContextResponse,
   ActiveChatContextSnapshot,
+  ActiveChatMarkdownDumpResponse,
   BackendSearchResult,
   CapturedNetworkEvent,
   ExtensionSettings,
@@ -71,6 +75,10 @@ import type {
   SaveSettingsResponse,
   SyncStatus
 } from "../shared/types";
+import {
+  buildMarkdownContextImportPayload,
+  renderActiveChatMarkdown
+} from "../shared/context-markdown";
 
 let queue = Promise.resolve();
 const HISTORY_SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -132,7 +140,9 @@ function refreshedProcessingLastError(status: SyncStatus, pendingCount: number):
 const PROVIDER_START_URLS: Record<ProviderName, string> = {
   chatgpt: "https://chatgpt.com/",
   gemini: "https://gemini.google.com/app",
-  grok: "https://grok.com/"
+  grok: "https://grok.com/",
+  codex: "https://codex.openai.com/",
+  claude: "https://claude.ai/"
 };
 
 function formatProviderName(provider: ProviderName): string {
@@ -142,7 +152,13 @@ function formatProviderName(provider: ProviderName): string {
   if (provider === "gemini") {
     return "Gemini";
   }
-  return "Grok";
+  if (provider === "grok") {
+    return "Grok";
+  }
+  if (provider === "codex") {
+    return "Codex";
+  }
+  return "Claude";
 }
 
 function formatProviderList(providers: ProviderName[] | undefined, fallback: ProviderName | undefined): string {
@@ -962,6 +978,133 @@ async function handleSaveCurrentPageSource(saveMode: "raw" | "ai" = "raw"): Prom
   }
 }
 
+async function snapshotFromActiveProviderPage(
+  activeTab: chrome.tabs.Tab & { id: number; url: string },
+  activeProvider: ProviderName
+): Promise<ActiveChatContextSnapshot | null> {
+  const remembered = activeChatContextsByTabId.get(activeTab.id);
+  if (remembered?.provider === activeProvider) {
+    return remembered;
+  }
+
+  try {
+    const response = await sendMessageToActivePage<ActiveChatContextResponse>(
+      { type: "GET_PAGE_CHAT_CONTEXT" },
+      { actionName: "chat markdown dump" }
+    );
+    if (response.ok && response.snapshot?.provider === activeProvider) {
+      return response.snapshot;
+    }
+  } catch {
+    // The caller will surface a clearer fallback error below.
+  }
+
+  return remembered?.provider === activeProvider ? remembered : null;
+}
+
+function matchingSavedSession(
+  sessions: Awaited<ReturnType<typeof fetchSessions>>,
+  snapshot: ActiveChatContextSnapshot
+) {
+  return sessions.find((session) => session.external_session_id === snapshot.externalSessionId)
+    ?? sessions.find((session) => session.external_session_id.endsWith(`__${snapshot.externalSessionId}`))
+    ?? sessions.find((session) => snapshot.sourceUrl && session.external_session_id && snapshot.sourceUrl.includes(session.external_session_id));
+}
+
+async function handleDumpActiveChatMarkdown(): Promise<ActiveChatMarkdownDumpResponse> {
+  const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tabSupportsInteractivePage(activeTab)) {
+    return {
+      ok: false,
+      error: "SaveMyContext chat dumps only work on regular http or https provider pages."
+    };
+  }
+
+  const activeProvider = detectProviderFromUrl(activeTab.url);
+  if (!activeProvider || activeProvider === "codex") {
+    return {
+      ok: false,
+      error: "Open a ChatGPT, Gemini, Grok, or Claude chat page before dumping Markdown."
+    };
+  }
+
+  const settings = await getSettings();
+  const status = await refreshBackendStatus(false);
+  const backendSettings = {
+    ...settings,
+    backendUrl: status.backendUrl ?? settings.backendUrl
+  };
+
+  const snapshot = await snapshotFromActiveProviderPage(activeTab, activeProvider);
+  if (!snapshot?.messages.length) {
+    return {
+      ok: false,
+      provider: activeProvider,
+      error: "Could not find a captured or visible chat on this page yet."
+    };
+  }
+
+  if (!status.backendValidationError) {
+    try {
+      const sessions = await fetchSessions(backendSettings, { provider: snapshot.provider });
+      const savedSession = matchingSavedSession(sessions, snapshot);
+      if (savedSession) {
+        const bundle = await fetchContextMigrationBundle(backendSettings, savedSession.id);
+        return {
+          ok: true,
+          markdown: bundle.handoff_markdown,
+          title: bundle.title ?? savedSession.title,
+          provider: snapshot.provider,
+          sessionId: savedSession.id,
+          source: "saved_session",
+          backendStored: true
+        };
+      }
+    } catch {
+      // Fall back to a page-authored snapshot below. This still gives the user a clipboard dump.
+    }
+  }
+
+  const markdown = renderActiveChatMarkdown(snapshot);
+  if (!status.backendValidationError) {
+    try {
+      const imported = await importContextMigrationBundle(
+        backendSettings,
+        buildMarkdownContextImportPayload(snapshot, markdown)
+      );
+      return {
+        ok: true,
+        markdown,
+        title: imported.bundle.title,
+        provider: snapshot.provider,
+        sessionId: imported.session_id,
+        source: "page_snapshot",
+        backendStored: true
+      };
+    } catch (error) {
+      return {
+        ok: true,
+        markdown,
+        title: snapshot.title,
+        provider: snapshot.provider,
+        source: "page_snapshot",
+        backendStored: false,
+        warning: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    markdown,
+    title: snapshot.title,
+    provider: snapshot.provider,
+    source: "page_snapshot",
+    backendStored: false,
+    warning: status.backendValidationError
+  };
+}
+
 async function waitForProviderTabReady(tabId: number, provider: ProviderName): Promise<void> {
   const deadline = Date.now() + PROVIDER_TAB_READY_TIMEOUT_MS;
   let lastError: string | null = null;
@@ -1397,6 +1540,19 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           ok: false,
           error: error instanceof Error ? error.message : String(error)
         } satisfies SourceCaptureResponse);
+      });
+    return true;
+  }
+
+  if (message.type === "DUMP_ACTIVE_CHAT_MARKDOWN") {
+    void enqueueTask(() => handleDumpActiveChatMarkdown())
+      .then(sendResponse)
+      .catch((error) => {
+        console.error("SaveMyContext chat markdown dump failed", error);
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        } satisfies ActiveChatMarkdownDumpResponse);
       });
     return true;
   }

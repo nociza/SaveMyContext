@@ -1,5 +1,6 @@
 import type {
   BackendCapabilities,
+  BrowserProviderName,
   ProviderName,
   ExtensionSettings,
   ProviderHistorySyncState,
@@ -105,7 +106,7 @@ function shouldPersistSettings(current: Partial<ExtensionSettings>): boolean {
     return true;
   }
 
-  return (Object.keys(defaultSettings.enabledProviders) as ProviderName[]).some(
+  return (Object.keys(defaultSettings.enabledProviders) as BrowserProviderName[]).some(
     (provider) => current.enabledProviders?.[provider] === undefined
   );
 }

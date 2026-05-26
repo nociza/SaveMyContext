@@ -21,7 +21,9 @@ export type StatusTone = "neutral" | "success" | "warning" | "danger" | "info";
 export const providerLabels: Record<ProviderName, string> = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
-  grok: "Grok"
+  grok: "Grok",
+  codex: "Codex",
+  claude: "Claude"
 };
 
 export function formatNumber(value?: number | null): string {

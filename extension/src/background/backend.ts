@@ -28,6 +28,9 @@ import type {
   BackendSystemStatus,
   BackendTodoListRead,
   BackendTodoListUpdate,
+  ContextMigrationBundle,
+  ContextMigrationImportPayload,
+  ContextMigrationImportResponse,
   ParsedConnectionBundle,
   BackendExtraPileSummary,
   ExtensionSettings,
@@ -1023,6 +1026,34 @@ export async function fetchSessionNote(
   capabilities?: BackendCapabilities
 ): Promise<BackendSessionNoteRead> {
   return normalizeSessionNoteRead(await fetchBackendJson<BackendSessionNoteRead>(settings, `/notes/${encodeURIComponent(sessionId)}`, capabilities));
+}
+
+export async function fetchContextMigrationBundle(
+  settings: ExtensionSettings,
+  sessionId: string,
+  capabilities?: BackendCapabilities
+): Promise<ContextMigrationBundle> {
+  return await fetchBackendJson<ContextMigrationBundle>(settings, `/context/export/${encodeURIComponent(sessionId)}`, capabilities);
+}
+
+export async function importContextMigrationBundle(
+  settings: ExtensionSettings,
+  payload: ContextMigrationImportPayload,
+  capabilities?: BackendCapabilities
+): Promise<ContextMigrationImportResponse> {
+  const response = await fetch(backendApiUrl(settings, "/context/import", capabilities), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authorizationHeader(settings.backendToken)
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(`Context dump failed with ${response.status}: ${details.slice(0, 300)}`);
+  }
+  return (await response.json()) as ContextMigrationImportResponse;
 }
 
 export async function fetchPileStats(

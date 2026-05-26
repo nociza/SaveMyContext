@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${PLUGIN_ROOT}/hooks/savemycontext_codex_hook.py session-start",
+            "timeout": 5,
+            "statusMessage": "Checking SaveMyContext"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${PLUGIN_ROOT}/hooks/savemycontext_codex_hook.py stop",
+            "timeout": 15,
+            "statusMessage": "Saving Codex context"
+          }
+        ]
+      }
+    ]
+  }
+}

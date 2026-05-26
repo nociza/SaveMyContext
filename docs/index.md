@@ -1,6 +1,6 @@
 ---
 title: SaveMyContext
-description: Save AI conversations from ChatGPT, Gemini, and Grok into a backend you control.
+description: Save AI conversations and agent context handoffs into a backend you control.
 landing: true
 ---
 
@@ -9,7 +9,7 @@ landing: true
     <p class="eyebrow">Private AI memory for people who use more than one model</p>
     <h1>SaveMyContext</h1>
     <p class="hero-lede">
-      Capture conversations from ChatGPT, Gemini, and Grok, then turn them into searchable notes,
+      Capture conversations from ChatGPT, Gemini, Grok, Codex, and Claude Code, then turn them into searchable notes,
       graph views, dashboards, and an Obsidian-friendly Markdown vault.
     </p>
     <div class="hero-actions">
@@ -71,7 +71,7 @@ smc install --remote
   <div class="grid">
     <div class="card">
       <h3>AI chat history</h3>
-      <p>Sync conversations from ChatGPT, Gemini, and Grok into one private archive.</p>
+      <p>Sync conversations from ChatGPT, Gemini, Grok, Codex, and Claude Code into one private archive.</p>
     </div>
     <div class="card">
       <h3>Saved pages and selections</h3>

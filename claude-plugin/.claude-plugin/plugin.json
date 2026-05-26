@@ -1,0 +1,8 @@
+{
+  "name": "savemycontext",
+  "description": "Dump Claude Code context to SaveMyContext as an agent-authored Markdown handoff.",
+  "version": "0.1.0",
+  "author": {
+    "name": "SaveMyContext"
+  }
+}

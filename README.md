@@ -1,6 +1,6 @@
 # SaveMyContext
 
-SaveMyContext turns your conversations with ChatGPT, Gemini, and Grok into a private knowledge base you actually keep.
+SaveMyContext turns your conversations with ChatGPT, Gemini, Grok, Codex, and Claude Code into a private knowledge base you actually keep.
 
 It runs a backend you control, syncs through a Chrome extension, and writes everything into searchable notes, dashboards, a shared to-do list, and an Obsidian-friendly Markdown vault.
 
@@ -13,6 +13,8 @@ It runs a backend you control, syncs through a Chrome extension, and writes ever
 ## What You Get
 
 - automatic history sync from ChatGPT, Gemini, and Grok
+- one-click Markdown dumps from ChatGPT, Gemini, Grok, and Claude pages
+- agent-authored Markdown context dumps from Codex and Claude Code
 - saved pages and saved text selections alongside chat history
 - a searchable dashboard, graph, and quick search inside the extension
 - a local Markdown vault that works well with Obsidian
@@ -83,6 +85,7 @@ smc invite --security per_device_code --device work-laptop
 - [Security and Access](docs/security-and-access.md)
 - [Dashboard and Search](docs/dashboard-and-search.md)
 - [Vault and Storage](docs/vault-and-storage.md)
+- [Codex and Context Migration](docs/codex-and-context-migration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
 ## Development

@@ -7,7 +7,13 @@ export function providerDisplayName(provider: ProviderName): string {
   if (provider === "gemini") {
     return "Gemini";
   }
-  return "Grok";
+  if (provider === "grok") {
+    return "Grok";
+  }
+  if (provider === "codex") {
+    return "Codex";
+  }
+  return "Claude";
 }
 
 export function normalizeAccountKey(provider: ProviderName, rawKey?: string | null): string {

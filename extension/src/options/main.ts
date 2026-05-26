@@ -76,7 +76,13 @@ function formatProviderName(provider: ProviderName): string {
   if (provider === "gemini") {
     return "Gemini";
   }
-  return "Grok";
+  if (provider === "grok") {
+    return "Grok";
+  }
+  if (provider === "codex") {
+    return "Codex";
+  }
+  return "Claude";
 }
 
 function formatProviderList(providers: ProviderName[] | undefined, fallback: ProviderName | undefined): string {
@@ -249,7 +255,7 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
 
   for (const [provider, input] of Object.entries(providerInputs)) {
     if (input) {
-      input.checked = settings.enabledProviders[provider as keyof typeof settings.enabledProviders];
+      input.checked = Boolean(settings.enabledProviders[provider as keyof typeof settings.enabledProviders]);
     }
   }
 

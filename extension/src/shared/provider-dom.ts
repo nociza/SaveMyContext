@@ -70,5 +70,27 @@ export const providerDomAdapters: Record<ProviderName, ProviderDomAdapter> = {
     responseSelectors: ["article", "main article", "[data-testid*='message']"],
     thinkingTogglePatterns: [/think/i, /reason/i, /deep\\s*search/i, /research/i],
     stopButtonPatterns: [/stop/i, /interrupt/i, /cancel/i]
+  },
+  codex: {
+    startUrl: "https://codex.openai.com/",
+    inputSelectors: ["textarea", "div[contenteditable='true'][role='textbox']", "div[contenteditable='true']"],
+    sendButtonSelectors: ["button[aria-label*='Send']", "button[data-testid*='send']", "form button[type='submit']"],
+    stopButtonSelectors: ["button[aria-label*='Stop']", "button[title*='Stop']", "button[data-testid*='stop']"],
+    responseSelectors: ["article", "main article", "[data-testid*='message']"],
+    thinkingTogglePatterns: [/think/i, /reason/i],
+    stopButtonPatterns: [/stop/i, /interrupt/i, /cancel/i]
+  },
+  claude: {
+    startUrl: "https://claude.ai/",
+    inputSelectors: [
+      "div[contenteditable='true'][role='textbox']",
+      "div[contenteditable='true']",
+      "textarea"
+    ],
+    sendButtonSelectors: ["button[aria-label*='Send']", "button[data-testid*='send']", "form button[type='submit']"],
+    stopButtonSelectors: ["button[aria-label*='Stop']", "button[title*='Stop']", "button[data-testid*='stop']"],
+    responseSelectors: ["article", "main article", "[data-testid*='message']"],
+    thinkingTogglePatterns: [/think/i, /reason/i],
+    stopButtonPatterns: [/stop/i, /interrupt/i, /cancel/i]
   }
 };

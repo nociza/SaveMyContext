@@ -91,7 +91,7 @@ function providerMix(sessions: BackendSessionListItem[]): Array<{ provider: Prov
     counts.set(session.provider, (counts.get(session.provider) ?? 0) + 1);
   }
 
-  return (["chatgpt", "gemini", "grok"] as const).map((provider) => ({
+  return (["chatgpt", "gemini", "grok", "codex", "claude"] as const).map((provider) => ({
     provider,
     label: providerLabels[provider],
     count: counts.get(provider) ?? 0

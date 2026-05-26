@@ -7,6 +7,8 @@ class ProviderName(StrEnum):
     CHATGPT = "chatgpt"
     GEMINI = "gemini"
     GROK = "grok"
+    CODEX = "codex"
+    CLAUDE = "claude"
 
 
 class BuiltInPileSlug(StrEnum):

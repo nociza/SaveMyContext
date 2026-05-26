@@ -3,6 +3,7 @@ import type { CapturedNetworkEvent, ProviderName } from "../shared/types";
 import { ChatGPTScraper } from "../providers/chatgpt";
 import { GeminiScraper } from "../providers/gemini";
 import { GrokScraper } from "../providers/grok";
+import type { IProviderScraper } from "../providers/provider";
 import { normalizeWhitespace } from "../providers/helpers";
 import { providerDomAdapters } from "../shared/provider-dom";
 import { extractFirstBalancedJsonObject } from "./proxy-json";
@@ -30,7 +31,7 @@ const FALLBACK_QUIET_PERIOD_MS = 5000;
 const PARTIAL_JSON_FALLBACK_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-const scrapers = {
+const scrapers: Partial<Record<ProviderName, IProviderScraper>> = {
   chatgpt: new ChatGPTScraper(),
   gemini: new GeminiScraper(),
   grok: new GrokScraper()
@@ -242,6 +243,9 @@ function extractResponseFromDom(provider: ProviderName): string | null {
 
 function latestAssistantText(provider: ProviderName, events: CapturedNetworkEvent[]): string | null {
   const scraper = scrapers[provider];
+  if (!scraper) {
+    return null;
+  }
   let latestText: string | null = null;
   for (const event of events) {
     const snapshot = scraper.parse(event);
@@ -351,6 +355,9 @@ export function observeProxyCapture(event: CapturedNetworkEvent): void {
   }
 
   const scraper = scrapers[activeRun.provider];
+  if (!scraper) {
+    return;
+  }
   try {
     if (!scraper.matches(event)) {
       return;

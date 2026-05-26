@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BookOpen,
+  Clipboard,
   Inbox,
   LoaderCircle,
   Search,
@@ -29,6 +30,7 @@ import type {
   BackendDashboardSummary,
   BackendSessionListItem,
   ExtensionSettings,
+  ActiveChatMarkdownDumpResponse,
   BuiltInPileSlug,
   SourceCaptureResponse,
   SyncStatus
@@ -87,6 +89,7 @@ function PopupApp() {
   const [captureStatus, setCaptureStatus] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDumping, setIsDumping] = useState(false);
   const [activeTabInfo, setActiveTabInfo] = useState<{ url?: string; title?: string } | null>(null);
 
   useEffect(() => {
@@ -131,9 +134,11 @@ function PopupApp() {
 
   const activeProvider = detectProviderFromUrl(activeTabInfo?.url ?? "");
   const isProviderTab = Boolean(activeProvider);
+  const canDumpActiveChat = Boolean(activeProvider && activeProvider !== "codex");
   const primaryLabel = isProviderTab && activeProvider
     ? `Capture this ${providerLabels[activeProvider]} chat`
     : "Save this page";
+  const dumpLabel = activeProvider ? `Dump ${providerLabels[activeProvider]} Markdown` : "Dump chat Markdown";
 
   const lastErrorText = status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None";
   const lastSyncLabel = formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "never");
@@ -201,6 +206,39 @@ function PopupApp() {
       return;
     }
     window.close();
+  }
+
+  async function handleDumpMarkdown(): Promise<void> {
+    setCaptureStatus("");
+    setActionError(null);
+    setIsDumping(true);
+
+    try {
+      const response = await sendRuntimeMessage<ActiveChatMarkdownDumpResponse>({
+        type: "DUMP_ACTIVE_CHAT_MARKDOWN"
+      });
+      if (!response.ok || !response.markdown) {
+        throw new Error(response.error ?? "Could not dump Markdown for this chat.");
+      }
+      await navigator.clipboard.writeText(response.markdown);
+      const title = response.title ?? "chat";
+      setCaptureStatus(
+        response.backendStored === false
+          ? `Copied · backend not updated · ${title}`
+          : `Copied Markdown · ${title}`
+      );
+      if (response.warning) {
+        setActionError(response.warning);
+      }
+      await reload();
+      await summaryQuery.refetch();
+    } catch (dumpError) {
+      const message = dumpError instanceof Error ? dumpError.message : "Could not dump Markdown for this chat.";
+      setCaptureStatus(message);
+      setActionError(message);
+    } finally {
+      setIsDumping(false);
+    }
   }
 
   async function handleRunQueue(): Promise<void> {
@@ -293,6 +331,27 @@ function PopupApp() {
             </div>
             <ArrowRight className="h-4 w-4 shrink-0 text-[var(--color-action-ink-soft)] transition group-hover:translate-x-0.5" />
           </button>
+
+          {canDumpActiveChat ? (
+            <button
+              type="button"
+              onClick={() => void handleDumpMarkdown()}
+              disabled={isDumping}
+              className="mt-2 flex w-full items-center gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper)] px-4 py-2.5 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)] disabled:opacity-70"
+            >
+              {isDumping ? (
+                <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-[var(--color-ink-soft)]" />
+              ) : (
+                <Clipboard className="h-4 w-4 shrink-0 text-[var(--color-ink-soft)]" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--color-ink-soft)]">
+                {dumpLabel}
+              </span>
+              <span className="shrink-0 text-[10.5px] font-medium uppercase tracking-[0.12em] text-[var(--color-ink-subtle)]">
+                Copy
+              </span>
+            </button>
+          ) : null}
 
           <button
             type="button"

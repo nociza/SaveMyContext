@@ -13,7 +13,14 @@ describe("extension manifest", () => {
       "https://chatgpt.com/*",
       "https://chat.openai.com/*",
       "https://gemini.google.com/*",
-      "https://grok.com/*"
+      "https://grok.com/*",
+      "https://claude.ai/*"
     ]);
+  });
+
+  it("can write dumped markdown to the clipboard", () => {
+    const manifest = JSON.parse(readFileSync(resolve("public/manifest.json"), "utf8"));
+
+    expect(manifest.permissions).toContain("clipboardWrite");
   });
 });

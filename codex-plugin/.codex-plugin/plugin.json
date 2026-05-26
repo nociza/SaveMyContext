@@ -1,0 +1,33 @@
+{
+  "name": "savemycontext",
+  "version": "0.1.0",
+  "description": "Log Codex sessions to SaveMyContext and migrate complete context bundles across AI interfaces.",
+  "author": {
+    "name": "SaveMyContext"
+  },
+  "license": "MIT",
+  "keywords": [
+    "context",
+    "codex",
+    "migration",
+    "knowledge"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SaveMyContext",
+    "shortDescription": "Log and migrate agent context",
+    "longDescription": "Captures Codex turns into SaveMyContext and produces portable context bundles for Codex, Claude, and web AI handoffs.",
+    "developerName": "SaveMyContext",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Save this Codex session to SaveMyContext.",
+      "Export a complete context handoff for another AI interface.",
+      "Import this context bundle into SaveMyContext."
+    ],
+    "brandColor": "#5E6AD2"
+  }
+}

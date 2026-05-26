@@ -9,10 +9,12 @@ The frontend acts as a silent observer, capturing the delta (diff) of conversati
 * **Framework & Tooling:** TypeScript compiled via Vite for instantaneous Hot Module Replacement (HMR) during development.
 * **Manifest Version:** Manifest V3 (MV3) for modern Chrome Web Store compliance.
 * **Background Architecture:** Uses an MV3 Service Worker to listen to web requests and intercept the raw JSON payloads returning from the AI providers' internal APIs.
-* **Provider Harness:** A clean, modular interface (`IProviderScraper`) allowing easy addition of new AIs. Currently supports:
+* **Provider Harness:** A clean, modular interface (`IProviderScraper`) allowing easy addition of new AIs. Web capture currently supports:
     * **ChatGPT:** Intercepts `conversations` API endpoints.
     * **Gemini:** Intercepts Google's internal RPC/batched payload responses.
     * **Grok:** Intercepts xAI's chat API requests.
+* **Web Chat Markdown Dumps:** On ChatGPT, Gemini, Grok, and Claude pages, the extension popup can dump the current chat as Markdown, copy it to the clipboard, and store the Markdown handoff in the backend. Scraped sessions use the saved backend context when available; Claude web uses the visible-page fallback.
+* **Agent Context Migration:** A portable context bundle path supports Codex and Claude transcripts outside the browser extension. Codex and Claude Code also expose `save-context` plugin skills that let the agent author a large Markdown handoff, copy it to the clipboard, and dump that exact Markdown into the backend as the intermediate exchange artifact.
 * **Sync Logic:** Captures only the newest messages (the diff) during an active session and POSTs them to the local FastAPI backend.
 
 ### 2. Backend: Core Infrastructure

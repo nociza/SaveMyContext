@@ -9,6 +9,7 @@ import type {
 } from "../shared/types";
 import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
 import { detectProviderFromUrl } from "../shared/provider";
+import { extractPageChatContext } from "./chat-context-dump";
 import { createContextSuggestionController } from "./context-suggestions";
 import { createQuickSearchPalette } from "./quick-search";
 import { createSelectionCaptureController } from "./selection-capture";
@@ -266,6 +267,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       sendResponse(response ?? { ok: false, error: "Unsupported page capture message." });
     });
     return true;
+  }
+  if (message.type === "GET_PAGE_CHAT_CONTEXT") {
+    sendResponse(extractPageChatContext());
+    return false;
   }
   if (message.type === "TRIGGER_HISTORY_SYNC") {
     const payload: HistorySyncTriggerPayload = message.payload;

@@ -3,12 +3,13 @@
   "name": "SaveMyContext",
   "version": "0.2.0",
   "description": "Capture AI chat deltas from supported providers and sync them to a local SaveMyContext backend.",
-  "permissions": ["storage", "tabs", "scripting", "activeTab", "alarms"],
+  "permissions": ["storage", "tabs", "scripting", "activeTab", "alarms", "clipboardWrite"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
+    "https://claude.ai/*",
     "https://*/*",
     "http://*/*",
     "http://127.0.0.1/*",
@@ -30,7 +31,8 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
-        "https://grok.com/*"
+        "https://grok.com/*",
+        "https://claude.ai/*"
       ],
       "js": ["assets/content.js"],
       "run_at": "document_start"
@@ -40,7 +42,8 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
-        "https://grok.com/*"
+        "https://grok.com/*",
+        "https://claude.ai/*"
       ],
       "js": ["assets/injected.js"],
       "run_at": "document_start",

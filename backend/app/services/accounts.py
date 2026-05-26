@@ -23,6 +23,10 @@ def provider_display_name(provider: ProviderName | str | None) -> str:
         return "Gemini"
     if value == "grok":
         return "Grok"
+    if value == "codex":
+        return "Codex"
+    if value == "claude":
+        return "Claude"
     return value.title() if value else "Provider"
 
 

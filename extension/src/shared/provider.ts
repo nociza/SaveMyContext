@@ -12,6 +12,12 @@ export function detectProviderFromUrl(url: string): ProviderName | null {
     if (hostname === "grok.com" || hostname.endsWith(".grok.com")) {
       return "grok";
     }
+    if (hostname === "claude.ai" || hostname.endsWith(".claude.ai")) {
+      return "claude";
+    }
+    if (hostname === "codex.openai.com" || hostname.endsWith(".codex.openai.com")) {
+      return "codex";
+    }
   } catch {
     return null;
   }

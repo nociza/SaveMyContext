@@ -1,4 +1,5 @@
-export type ProviderName = "chatgpt" | "gemini" | "grok";
+export type BrowserProviderName = "chatgpt" | "gemini" | "grok";
+export type ProviderName = BrowserProviderName | "codex" | "claude";
 export type MessageRole = "user" | "assistant" | "system" | "tool" | "unknown";
 export type CaptureMode = "incremental" | "full_snapshot";
 export type IndexingMode = "all" | "trigger_word";
@@ -86,7 +87,7 @@ export interface ProviderHistorySyncState {
 export interface ExtensionSettings {
   backendUrl: string;
   backendToken?: string;
-  enabledProviders: Record<ProviderName, boolean>;
+  enabledProviders: Partial<Record<ProviderName, boolean>>;
   autoSyncHistory: boolean;
   scheduledProviderRefreshEnabled?: boolean;
   scheduledProviderRefreshIntervalMinutes?: number;
@@ -759,6 +760,80 @@ export interface ActiveChatContextResponse {
   error?: string;
 }
 
+export interface ContextMigrationMessage {
+  id: string;
+  parent_id?: string | null;
+  role: MessageRole;
+  content: string;
+  occurred_at?: string | null;
+  metadata?: Record<string, unknown>;
+  raw_payload?: unknown;
+}
+
+export interface ContextMigrationArtifact {
+  kind: string;
+  name?: string | null;
+  uri?: string | null;
+  content_type?: string | null;
+  content?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ContextMigrationImportPayload {
+  schema_version: "savemycontext.context.v1";
+  provider: ProviderName;
+  external_session_id: string;
+  source_interface?: string | null;
+  account_key?: string | null;
+  account_label?: string | null;
+  title?: string | null;
+  source_url?: string | null;
+  captured_at?: string | null;
+  custom_tags?: string[];
+  metadata?: Record<string, unknown>;
+  artifacts?: ContextMigrationArtifact[];
+  messages?: ContextMigrationMessage[];
+  handoff_markdown?: string | null;
+  raw_transcript?: unknown;
+}
+
+export interface ContextMigrationBundle {
+  schema_version: "savemycontext.context.v1";
+  session_id: string;
+  provider: ProviderName;
+  source_interface?: string | null;
+  external_session_id: string;
+  account_key: string;
+  account_label: string;
+  title?: string | null;
+  source_url?: string | null;
+  captured_at?: string | null;
+  exported_at: string;
+  custom_tags: string[];
+  handoff_markdown: string;
+}
+
+export interface ContextMigrationImportResponse {
+  session_id: string;
+  provider: ProviderName;
+  external_session_id: string;
+  new_message_count: number;
+  status: string;
+  bundle: ContextMigrationBundle;
+}
+
+export interface ActiveChatMarkdownDumpResponse {
+  ok: boolean;
+  markdown?: string;
+  title?: string | null;
+  provider?: ProviderName;
+  sessionId?: string;
+  source?: "saved_session" | "page_snapshot";
+  backendStored?: boolean;
+  warning?: string;
+  error?: string;
+}
+
 export interface HistorySyncTriggerPayload {
   provider: ProviderName;
   syncedSessionIds?: string[];
@@ -980,6 +1055,8 @@ export type RuntimeMessage =
   | { type: "TOGGLE_QUICK_SEARCH" }
   | { type: "SEARCH_KNOWLEDGE"; payload: KnowledgeSearchRequest }
   | { type: "GET_ACTIVE_CHAT_CONTEXT"; payload?: { pageUrl?: string } }
+  | { type: "GET_PAGE_CHAT_CONTEXT" }
+  | { type: "DUMP_ACTIVE_CHAT_MARKDOWN" }
   | { type: "PING_PROVIDER_TAB" }
   | { type: "RUN_PROVIDER_PROMPT"; payload: RunProviderPromptPayload }
   | { type: "GET_SETTINGS" }
