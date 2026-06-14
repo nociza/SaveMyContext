@@ -94,8 +94,8 @@ Backend:
 
 ```bash
 cd backend
-uv sync
-uv run pytest -q
+uv sync --group dev
+uv run --group dev python -m pytest -q
 ```
 
 Extension:

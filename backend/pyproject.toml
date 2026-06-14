@@ -4,6 +4,18 @@ version = "0.2.3"
 description = "Self-hosted FastAPI backend and Linux/macOS service CLI for SaveMyContext"
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "SaveMyContext" }]
+keywords = ["ai", "chrome-extension", "fastapi", "knowledge-base", "obsidian", "self-hosted"]
+classifiers = [
+  "Framework :: FastAPI",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: Utilities",
+]
 dependencies = [
   "aiosqlite>=0.21.0",
   "fastapi>=0.115.0",
@@ -23,6 +35,11 @@ dependencies = [
 dev = "app.dev:main"
 smc = "app.cli:main"
 savemycontext = "app.cli:main"
+
+[project.urls]
+Documentation = "https://nociza.github.io/SaveMyContext/"
+Issues = "https://github.com/nociza/SaveMyContext/issues"
+Source = "https://github.com/nociza/SaveMyContext"
 
 [dependency-groups]
 dev = [

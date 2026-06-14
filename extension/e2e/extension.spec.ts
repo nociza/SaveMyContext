@@ -3333,6 +3333,7 @@ test("searches the knowledge base and injects a fact into the focused page field
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
       await optionsPage.locator("#auto-sync-history").setChecked(true);
+      await optionsPage.locator("#page-surface-scope").selectOption("all_pages");
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });
@@ -3362,13 +3363,10 @@ test("searches the knowledge base and injects a fact into the focused page field
       await page.goto("https://example.com/compose", { waitUntil: "domcontentloaded" });
       await page.locator("#composer").click();
 
-      const openSearchResponse = await serviceWorker.evaluate(async () => {
-        const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        if (!tab?.id) {
-          return { ok: false, error: "Missing active tab." };
-        }
-        return (await chrome.tabs.sendMessage(tab.id, {
-          type: "TOGGLE_QUICK_SEARCH"
+      await page.bringToFront();
+      const openSearchResponse = await optionsPage.evaluate(async () => {
+        return (await chrome.runtime.sendMessage({
+          type: "OPEN_QUICK_SEARCH"
         })) as { ok: boolean; error?: string };
       });
       expect(openSearchResponse.ok).toBe(true);
@@ -3446,6 +3444,7 @@ test("shows the selection capture pop-up and saves the selected text into the ba
       await optionsPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: "domcontentloaded" });
       await optionsPage.locator("#backend-url").fill(backendBaseUrl);
       await optionsPage.locator("#selection-capture-enabled").setChecked(true);
+      await optionsPage.locator("#page-surface-scope").selectOption("all_pages");
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });

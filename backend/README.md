@@ -8,37 +8,48 @@ Recommended user flow on Linux and macOS:
 
 ```bash
 uv tool install savemycontext
-savemycontext service install --start
+smc install
 ```
 
-On Linux, that installs a `systemd --user` service. On macOS, it installs a per-user `launchd` agent. The CLI also supports `savemycontext run` if you want the backend in the foreground without a background service.
+The package name is `savemycontext`. It installs both `smc` and `savemycontext` command aliases; the docs use `smc`.
+
+On Linux, `smc install` writes a `systemd --user` service. On macOS, it writes a per-user `launchd` agent. If one machine should serve other devices, use:
+
+```bash
+smc install --remote
+```
+
+Remote setup starts the backend, enables managed remote exposure, and prints a `smc_conn_1_...` connection string for the extension.
 
 Useful commands:
 
 ```bash
-savemycontext service status
-savemycontext service logs -f
-savemycontext config path
-savemycontext doctor
+smc status
+smc logs -f
+smc config path
+smc doctor
 ```
 
 ## Processing
 
-Recommended OpenRouter env settings:
+SaveMyContext captures and stores conversations without an AI key. Add an OpenAI-compatible or Google key when you want richer summaries, classification, and graph extraction.
+
+Recommended OpenRouter settings:
 
 ```bash
-SAVEMYCONTEXT_OPENAI_API_KEY=your_openrouter_key
-SAVEMYCONTEXT_OPENAI_BASE_URL=https://openrouter.ai/api/v1
-SAVEMYCONTEXT_OPENAI_MODEL=google/gemma-4-31b-it:free
-SAVEMYCONTEXT_OPENAI_MODEL_FALLBACKS=google/gemma-4-26b-a4b-it:free,google/gemma-3-27b-it:free,google/gemma-3-12b-it:free,google/gemma-3-4b-it:free,google/gemma-3n-e4b-it:free,google/gemma-3n-e2b-it:free,openai/gpt-4.1-mini
+smc config set \
+  --openai-api-key your_openrouter_key \
+  --openai-base-url https://openrouter.ai/api/v1 \
+  --openai-model google/gemma-4-31b-it:free \
+  --openai-model-fallbacks google/gemma-4-26b-a4b-it:free,google/gemma-3-27b-it:free,google/gemma-3-12b-it:free,google/gemma-3-4b-it:free,google/gemma-3n-e4b-it:free,google/gemma-3n-e2b-it:free,openai/gpt-4.1-mini
 ```
 
-Browser automation is experimental and disabled by default.
-
-For `savemycontext service install`, put those values in the generated env file:
+You can also edit the generated env file directly:
 
 - Linux: `~/.config/savemycontext/savemycontext.env`
 - macOS: `~/Library/Application Support/savemycontext/savemycontext.env`
+
+Browser automation is experimental and disabled by default.
 
 ## Vault And To-Do Versioning
 
@@ -47,7 +58,8 @@ SaveMyContext writes the Obsidian vault under `markdown/SaveMyContext`, keeps a 
 ## Run In the Foreground
 
 ```bash
-savemycontext run
+smc config init
+smc run
 ```
 
 ## Development
@@ -55,6 +67,12 @@ savemycontext run
 Run the local development server from source with:
 
 ```bash
-uv sync
+uv sync --group dev
 uv run python -m app.dev
+```
+
+Run the backend tests with:
+
+```bash
+uv run --group dev python -m pytest -q
 ```
