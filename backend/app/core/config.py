@@ -47,6 +47,9 @@ def env_alias(name: str, *extra_names: str) -> AliasChoices:
 
 
 class Settings(BaseSettings):
+    basic_memory_url: str | None = Field(default=None, validation_alias=env_alias("BASIC_MEMORY_URL"))
+    basic_memory_project: str = Field(default="savemycontext", validation_alias=env_alias("BASIC_MEMORY_PROJECT"))
+    basic_memory_sync: bool = Field(default=True, validation_alias=env_alias("BASIC_MEMORY_SYNC"))
     workspace_enabled: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_ENABLED"))
     workspace_worker: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_WORKER"))
     workspace_token_dir: Path | None = Field(default=None, validation_alias=env_alias("WORKSPACE_TOKEN_DIR"))

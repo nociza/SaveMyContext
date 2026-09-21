@@ -59,6 +59,8 @@ def parser():
     sub.add_parser("status")
     search = sub.add_parser("search")
     search.add_argument("query")
+    search.add_argument("--mode", choices=["auto", "exact", "semantic"], default="auto")
+    search.add_argument("--scope", choices=["all", "curated", "sources"], default="all")
     remember = sub.add_parser("remember")
     remember.add_argument("title")
     remember.add_argument("--text")
@@ -117,7 +119,7 @@ def execute(args):
     if name == "status":
         return request("/overview")
     if name == "search":
-        return request("/search?" + urlencode({"q": args.query}))
+        return request("/search?" + urlencode({"q": args.query, "mode": args.mode, "scope": args.scope}))
     if name == "remember":
         if bool(args.text) == bool(args.file):
             raise ValueError("Supply exactly one of --text or --file")

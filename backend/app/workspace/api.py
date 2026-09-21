@@ -13,6 +13,7 @@ from app.api.dependencies import AuthContext, require_scope
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.workspace.models import Event, Job, Memory, Project, Revision, Source, Task
+from app.workspace import knowledge
 from app.workspace.schemas import (
     CaptureInput,
     MemoryPatch,
@@ -31,7 +32,6 @@ from app.workspace.store import (
     notifications,
     project_exists,
     record,
-    search,
     set_settings,
     task_dashboard,
     update_task,
@@ -86,6 +86,7 @@ async def overview(
             and settings.workspace_generate,
         },
         "settings": await preferences(db),
+        "retrieval": await knowledge.status(db),
     }
 
 
@@ -350,10 +351,12 @@ async def add_project(
 @router.get("/search")
 async def search_workspace(
     q: str = Query(min_length=1, max_length=500),
+    mode: Literal["auto", "exact", "semantic"] = "auto",
+    scope: Literal["all", "curated", "sources"] = "all",
     _: AuthContext = Depends(read),
     db: AsyncSession = Depends(get_db_session),
 ):
-    return {"items": await search(db, q)}
+    return await knowledge.search(db, q, mode=mode, scope=scope)
 
 
 @router.get("/tasks")

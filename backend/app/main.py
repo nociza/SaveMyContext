@@ -20,6 +20,7 @@ from app.services.todo import TodoListConflictError, TodoListService
 from app.workspace.api import compat_router
 from app.workspace.store import Conflict
 from app.workspace.worker import run_worker
+from app.workspace.knowledge import run_sync
 
 try:
     import uvloop
@@ -58,16 +59,22 @@ async def lifespan(app: FastAPI):
         if settings.workspace_enabled and settings.workspace_worker
         else None
     )
+    knowledge_worker = (
+        asyncio.create_task(run_sync(SessionLocal, stop))
+        if settings.workspace_enabled and settings.basic_memory_url and settings.basic_memory_sync
+        else None
+    )
     try:
         yield
     finally:
         stop.set()
-        if worker:
-            worker.cancel()
-            try:
-                await worker
-            except asyncio.CancelledError:
-                pass
+        for task in (worker, knowledge_worker):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 app = FastAPI(

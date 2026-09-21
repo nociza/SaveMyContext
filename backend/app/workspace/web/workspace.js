@@ -42,6 +42,9 @@ export class SMCWorkspace extends HTMLElement {
       query: "",
       project: "",
       taskStatus: "open",
+      searchMode: "auto",
+      searchScope: "all",
+      retrieval: null,
     };
     this._token = "";
     this.notice = "";
@@ -51,6 +54,10 @@ export class SMCWorkspace extends HTMLElement {
     this.shadowRoot.addEventListener("click", (event) => this.click(event));
     this.shadowRoot.addEventListener("submit", (event) => this.submit(event));
     this.shadowRoot.addEventListener("change", (event) => {
+      if (event.target.name === "search-mode" || event.target.name === "search-scope") {
+        this.state[event.target.name === "search-mode" ? "searchMode" : "searchScope"] = event.target.value;
+        this.load();
+      }
       if (event.target.name === "project-filter") {
         this.state.project = event.target.value;
         this.load();
@@ -126,6 +133,8 @@ export class SMCWorkspace extends HTMLElement {
       this.state.project,
       this.state.query,
       this.state.taskStatus,
+      this.state.searchMode,
+      this.state.searchScope,
     ]);
     this.loading = !this.state.overview || viewKey !== this.viewKey;
     this.render();
@@ -139,7 +148,7 @@ export class SMCWorkspace extends HTMLElement {
           this.api("/overview"),
           this.api("/projects"),
           query
-            ? this.api(`/search?q=${encodeURIComponent(query)}`)
+            ? this.api(`/search?q=${encodeURIComponent(query)}&mode=${this.state.searchMode}&scope=${this.state.searchScope}`)
             : view === "tasks"
               ? this.api(`/tasks?status=${taskStatus}`)
               : this.api(
@@ -160,6 +169,7 @@ export class SMCWorkspace extends HTMLElement {
         items: result.items || [],
         tasks: projectTasks?.tasks || result.tasks || [],
         sources: sources.items,
+        retrieval: result.retrieval || null,
       };
       this.moreSources = sources.items.length === 50;
       this.moreMemories = result.items?.length === 50 && !query;
@@ -268,7 +278,7 @@ export class SMCWorkspace extends HTMLElement {
         )}</nav><form class="search" data-form="search"><label class="sr-only" for="smc-search">Search your memory</label><input id="smc-search" name="q" type="search" placeholder="Search your memory…" value="${esc(s.query)}"><button type="submit" aria-label="Search">↗</button></form></div>
       <div role="status" aria-live="polite">${this.notice ? `<p class="notice">${esc(this.notice)}</p>` : ""}</div>${this.error ? `<p role="alert" class="notice error">${esc(this.error)}</p>` : ""}
       ${this.needsAuth ? this.login() : this.loading ? '<p class="busy" role="status">Opening your workspace…</p>' : s.overview ? this.content() : '<button data-action="refresh">Try again</button>'}
-      ${s.overview ? `<footer class="bottom"><span><i class="status-dot"></i>${s.overview.processing.external_enabled ? "External processing enabled" : "Local capture & search · No AI inference"}${counts.pending_jobs ? ` · ${counts.pending_jobs} queued` : ""}${counts.failed_jobs ? ` · ${counts.failed_jobs} need attention` : ""}</span><div><button data-action="jobs">Processing</button> <button data-action="settings">Reminders</button> <button data-action="export">Export</button></div></footer>` : ""}
+      ${s.overview ? `<footer class="bottom"><span><i class="status-dot"></i>${s.overview.processing.external_enabled ? "External processing enabled" : s.overview.retrieval?.enabled ? "Basic Memory · Local search · Interpretation off" : "Local capture & search · No AI inference"}${s.overview.retrieval?.error ? " · Semantic index needs attention" : s.overview.retrieval?.pending ? ` · ${s.overview.retrieval.pending} waiting to index` : ""}${counts.pending_jobs ? ` · ${counts.pending_jobs} queued` : ""}${counts.failed_jobs ? ` · ${counts.failed_jobs} need attention` : ""}</span><div><button data-action="jobs">Processing</button> <button data-action="settings">Reminders</button> <button data-action="export">Export</button></div></footer>` : ""}
       <dialog><div class="dialog-head"><h2 id="dialog-title"></h2><button type="button" data-action="close" aria-label="Close dialog">×</button></div><p class="notice error dialog-error" role="alert" hidden></p><div class="dialog-content"></div></dialog>
     </section>`;
     const dialog = this.shadowRoot.querySelector("dialog");
@@ -290,7 +300,11 @@ export class SMCWorkspace extends HTMLElement {
   content() {
     const s = this.state;
     if (s.query)
-      return `<div class="section-title"><h2>Search results</h2><button data-action="clear-search">Clear search</button></div>${s.items.length ? `<div class="grid">${s.items.map((item) => this.searchCard(item)).join("")}</div>` : this.empty("No matches yet", "Try a name, project, or phrase from a conversation.")}`;
+      return `<div class="section-title"><h2>Search results</h2><button data-action="clear-search">Clear search</button></div>
+      <div class="filters"><label>Match <select name="search-mode" aria-label="Search matching">${[["auto", "Exact + meaning"], ["exact", "Exact terms"], ["semantic", "Similar meaning"]].map(([value, label]) => `<option value="${value}" ${s.searchMode === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>Look in <select name="search-scope" aria-label="Search scope">${[["all", "Everything"], ["curated", "Kept memories & open tasks"], ["sources", "Original sources"]].map(([value, label]) => `<option value="${value}" ${s.searchScope === value ? "selected" : ""}>${label}</option>`).join("")}</select></label></div>
+      ${s.retrieval?.degraded ? '<p class="notice" role="status">Semantic search is unavailable. Showing exact matches; your records are safe.</p>' : ""}
+      ${s.overview.retrieval?.enabled ? '<p class="muted">Similar meaning is a search aid, not a verified fact. Long conversations use excerpts for semantic search; open the source for full context.</p>' : ""}
+      ${s.items.length ? `<div class="grid">${s.items.map((item) => this.searchCard(item)).join("")}</div>` : this.empty("No matches yet", "Try a name, project, or phrase from a conversation.")}`;
     if (s.view === "tasks") return this.tasksView();
     if (s.view === "projects" && !s.project)
       return `<div class="section-title"><h2>Your projects</h2><button data-action="add-project">＋ New project</button></div>${s.projects.length ? `<div class="grid">${s.projects.map((p) => `<button class="card project" data-action="project" data-id="${esc(p.id)}" style="text-align:left"><span class="kind">Project</span><h3>${esc(p.name)}</h3><p>${esc(p.description || "Gather the conversations and work that belong here.")}</p><div class="project-num">Open project ↗</div></button>`).join("")}</div>` : this.empty("Give your work a home", "Create a project to connect its sources, decisions, and tasks.")}`;
@@ -310,7 +324,8 @@ export class SMCWorkspace extends HTMLElement {
     return `<button class="source-row" data-action="source" data-id="${esc(item.id)}"><span class="source-mark" aria-hidden="true">≡</span><span class="text"><span class="source-title">${esc(item.title)}</span><span class="source-excerpt">${esc(item.excerpt || item.body?.slice(0, 180))}</span></span><span class="source-meta">${esc(item.provider)} · ${shortDate(item.updated_at)}</span></button>`;
   }
   searchCard(item) {
-    return `<article class="card"><span class="kind">${esc(item.record_type)}</span><h3>${esc(item.title)}</h3><p>${esc((item.body || item.notes || "").slice(0, 250))}</p><div class="card-actions"><button data-action="${item.record_type === "task" ? "edit-task" : item.record_type === "source" ? "source" : "edit-memory"}" data-id="${esc(item.id)}">Open ↗</button></div></article>`;
+    const label = item.record_type === "source" ? "Original source" : item.record_type === "task" ? `Task · ${item.status}` : item.record_type === "memory" ? `Memory · ${item.status}` : "Project";
+    return `<article class="card"><span class="kind">${esc(label)}</span>${item.match === "semantic" ? '<span class="muted"> · Similar meaning</span>' : ""}<h3>${esc(item.title)}</h3><p>${esc((item.body || item.notes || item.description || "").slice(0, 250))}</p><div class="card-actions"><button data-action="${item.record_type === "project" ? "project" : item.record_type === "task" ? "edit-task" : item.record_type === "source" ? "source" : "edit-memory"}" data-id="${esc(item.id)}">Open ↗</button></div></article>`;
   }
   tasksView() {
     const s = this.state,
@@ -423,6 +438,7 @@ export class SMCWorkspace extends HTMLElement {
         return;
       }
       if (action === "project") {
+        this.state.query = "";
         this.state.project = id;
         this.state.view = "projects";
         await this.load();

@@ -7,6 +7,11 @@ conversations. Capture once, keep the evidence, and pick up the work anywhere.
 web interface, and agent skill use the same API. Tasks are part of your context,
 not another disconnected to-do list.
 
+An optional [Basic Memory integration](docs/basic-memory.md) adds private local
+semantic search behind that same API. During this reversible pilot, its Markdown
+and search database are service-managed projections; the workspace SQLite ledger
+remains authoritative. No second task writer or automatic interpretation is enabled.
+
 ## The workspace
 
 - **Inbox:** review ideas, decisions, and task suggestions from captured sources.

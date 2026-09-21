@@ -113,6 +113,15 @@ class Preference(Base):
     value: Mapped[dict] = mapped_column(JSON)
 
 
+class KnowledgeProjection(TimestampMixin, Base):
+    """Acknowledged, rebuildable Basic Memory projection; never a second ledger."""
+
+    __tablename__ = "workspace_knowledge_projections"
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    permalink: Mapped[str] = mapped_column(String(120), unique=True)
+
+
 class Job(TimestampMixin, Base):
     __tablename__ = "workspace_jobs"
     __table_args__ = (UniqueConstraint("source_id", "revision", "processor"),)
