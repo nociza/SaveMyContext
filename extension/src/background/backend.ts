@@ -41,8 +41,38 @@ import type {
   SourceCapturePayload,
   SourceCaptureResponse
 } from "../shared/types";
+import { createSourceCaptureKey } from "../shared/source-capture";
 
 const REQUIRED_EXTENSION_SCOPES = ["ingest", "read"] as const;
+const SOURCE_CAPTURE_MAX_ATTEMPTS = 2;
+const SOURCE_CAPTURE_MAX_RETRY_DELAY_MS = 5_000;
+
+function retryAfterDelayMs(value: string | null): number {
+  if (!value) {
+    return 0;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1_000, SOURCE_CAPTURE_MAX_RETRY_DELAY_MS);
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return 0;
+  }
+  return Math.min(
+    Math.max(timestamp - Date.now(), 0),
+    SOURCE_CAPTURE_MAX_RETRY_DELAY_MS
+  );
+}
+
+async function waitForRetry(delayMs: number): Promise<void> {
+  if (delayMs <= 0) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    globalThis.setTimeout(resolve, delayMs);
+  });
+}
 
 function normalizeBackendUrl(rawUrl: string): string {
   return rawUrl.trim().replace(/\/$/, "");
@@ -138,6 +168,7 @@ function normalizeTodoList(todo: BackendTodoListRead): BackendTodoListRead {
     ...todo,
     title: todo.title ?? "Shared checklist",
     content: todo.content ?? "",
+    revision: todo.revision ?? "",
     items,
     active_count: todo.active_count ?? activeCount,
     completed_count: todo.completed_count ?? completedCount,
@@ -517,6 +548,8 @@ export async function completeProcessingTask(
   payload: {
     sessionIds: string[];
     responseText: string;
+    todoSourceRevision?: string;
+    sourceRevisions: Record<string, string>;
   },
   capabilities?: BackendCapabilities
 ): Promise<ProcessingCompleteResponse> {
@@ -528,7 +561,9 @@ export async function completeProcessingTask(
     },
     body: JSON.stringify({
       session_ids: payload.sessionIds,
-      response_text: payload.responseText
+      response_text: payload.responseText,
+      todo_source_revision: payload.todoSourceRevision,
+      source_revisions: payload.sourceRevisions
     })
   });
   if (!response.ok) {
@@ -1424,21 +1459,34 @@ export async function saveSourceCaptureToBackend(
   payload: SourceCapturePayload,
   capabilities?: BackendCapabilities
 ): Promise<SourceCaptureResponse> {
-  const response = await fetch(backendApiUrl(settings, "/capture/source", capabilities), {
-    method: "POST",
-    headers: buildBackendHeaders(settings),
-    body: JSON.stringify({
-      capture_kind: payload.captureKind,
-      save_mode: payload.saveMode,
-      title: payload.title,
-      page_title: payload.pageTitle,
-      source_url: payload.sourceUrl,
-      selection_text: payload.selectionText,
-      source_text: payload.sourceText,
-      source_markdown: payload.sourceMarkdown,
-      raw_payload: payload.rawPayload
-    })
+  const captureKey = payload.captureKey ?? createSourceCaptureKey();
+  const requestBody = JSON.stringify({
+    capture_key: captureKey,
+    capture_kind: payload.captureKind,
+    save_mode: payload.saveMode,
+    title: payload.title,
+    page_title: payload.pageTitle,
+    source_url: payload.sourceUrl,
+    selection_text: payload.selectionText,
+    source_text: payload.sourceText,
+    source_markdown: payload.sourceMarkdown,
+    raw_payload: payload.rawPayload
   });
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < SOURCE_CAPTURE_MAX_ATTEMPTS; attempt += 1) {
+    response = await fetch(backendApiUrl(settings, "/capture/source", capabilities), {
+      method: "POST",
+      headers: buildBackendHeaders(settings),
+      body: requestBody
+    });
+    if (response.status !== 503 || attempt === SOURCE_CAPTURE_MAX_ATTEMPTS - 1) {
+      break;
+    }
+    await waitForRetry(retryAfterDelayMs(response.headers.get("Retry-After")));
+  }
+  if (response === null) {
+    throw new Error("Source capture failed before receiving a backend response.");
+  }
   if (!response.ok) {
     const details = await response.text();
     throw new Error(`Source capture failed with ${response.status}: ${details.slice(0, 300)}`);
@@ -1446,6 +1494,7 @@ export async function saveSourceCaptureToBackend(
 
   const saved = (await response.json()) as {
     source_id: string;
+    capture_key?: string | null;
     title: string;
     capture_kind: "selection" | "page";
     save_mode: "raw" | "ai";
@@ -1457,6 +1506,7 @@ export async function saveSourceCaptureToBackend(
   return {
     ok: true,
     sourceId: saved.source_id,
+    captureKey: saved.capture_key ?? captureKey,
     title: saved.title,
     captureKind: saved.capture_kind,
     saveMode: saved.save_mode,

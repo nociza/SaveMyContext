@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -110,6 +111,12 @@ def normalize_verification_code(value: str | None) -> str:
 
 def verification_code_required(security_level: ConnectionSecurityLevel) -> bool:
     return security_level == "per_device_code"
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def build_verification_code() -> str:
@@ -222,9 +229,9 @@ async def redeem_connection_grant(
         raise RuntimeError("Connection string is invalid.")
     if not grant.is_active or grant.revoked_at is not None:
         raise RuntimeError("Connection string has been revoked.")
-    if grant.expires_at is not None and grant.expires_at <= utcnow():
+    if grant.expires_at is not None and _as_aware_utc(grant.expires_at) <= utcnow():
         raise RuntimeError("Connection string has expired.")
-    if grant.secret_hash != hash_api_token_secret(secret):
+    if not hmac.compare_digest(grant.secret_hash, hash_api_token_secret(secret)):
         raise RuntimeError("Connection string is invalid.")
     if grant.max_redemptions is not None and grant.redemption_count >= grant.max_redemptions:
         raise RuntimeError("Connection string has already been used.")
@@ -232,8 +239,42 @@ async def redeem_connection_grant(
         normalized_code = normalize_verification_code(verification_code)
         if not normalized_code:
             raise RuntimeError("A verification code is required.")
-        if grant.verification_code_hash != hash_api_token_secret(normalized_code):
+        if grant.verification_code_hash is None or not hmac.compare_digest(
+            grant.verification_code_hash,
+            hash_api_token_secret(normalized_code),
+        ):
             raise RuntimeError("The verification code is invalid.")
+
+    now = utcnow()
+    claim_conditions = [
+        ConnectionGrant.id == grant.id,
+        ConnectionGrant.is_active.is_(True),
+        ConnectionGrant.revoked_at.is_(None),
+        ConnectionGrant.secret_hash == hash_api_token_secret(secret),
+        or_(ConnectionGrant.expires_at.is_(None), ConnectionGrant.expires_at > now),
+        or_(
+            ConnectionGrant.max_redemptions.is_(None),
+            ConnectionGrant.redemption_count < ConnectionGrant.max_redemptions,
+        ),
+    ]
+    if grant.second_factor_mode == "one_time_code":
+        claim_conditions.append(
+            ConnectionGrant.verification_code_hash == hash_api_token_secret(
+                normalize_verification_code(verification_code)
+            )
+        )
+
+    claim = await db.execute(
+        update(ConnectionGrant)
+        .where(*claim_conditions)
+        .values(
+            redemption_count=ConnectionGrant.redemption_count + 1,
+            last_used_at=now,
+        )
+    )
+    if claim.rowcount != 1:
+        await db.rollback()
+        raise RuntimeError("Connection string is no longer redeemable.")
 
     token_name = build_connection_grant_token_name(
         grant,
@@ -245,11 +286,11 @@ async def redeem_connection_grant(
         username=grant.user.username,
         name=token_name,
         scopes=grant.scopes,
+        commit=False,
     )
-    grant.redemption_count += 1
-    grant.last_used_at = utcnow()
     await db.commit()
     await db.refresh(grant)
+    await db.refresh(created.token)
     return grant, created
 
 

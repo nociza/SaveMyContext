@@ -46,6 +46,9 @@ class SessionListItem(BaseModel):
     account_label: str
     title: str | None
     pile_slug: str | None = None
+    pile_assignment_locked: bool = False
+    projection_pending: bool = False
+    processing_pending: bool = False
     is_discarded: bool = False
     discarded_reason: str | None = None
     custom_tags: list[str] = Field(default_factory=list)
@@ -100,6 +103,9 @@ def build_session_list_item(session) -> SessionListItem:  # type: ignore[no-unty
         account_label=session_account_label(session),
         title=session.title,
         pile_slug=session.pile.slug if session.pile else pile_slug_for_category(session.built_in_pile),
+        pile_assignment_locked=session.pile_assignment_locked,
+        projection_pending=session.projection_pending,
+        processing_pending=session.processing_pending,
         is_discarded=session.is_discarded,
         discarded_reason=session.discarded_reason,
         custom_tags=visible_custom_tags(session.custom_tags),

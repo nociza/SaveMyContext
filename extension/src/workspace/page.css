@@ -1,0 +1,16 @@
+body {
+  margin: 0;
+  background: #f6f7f5;
+  font-family: system-ui, sans-serif;
+}
+smc-workspace {
+  display: block;
+  max-width: 1280px;
+  margin: auto;
+  padding: 36px 24px;
+}
+@media (max-width: 600px) {
+  smc-workspace {
+    padding: 20px 14px;
+  }
+}

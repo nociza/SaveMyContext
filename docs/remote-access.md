@@ -143,7 +143,8 @@ This is the best fit when you want device-level approval instead of trusting the
 
 ## Backend behavior
 
-The backend stores connection grants in SQLite.
+The backend stores connection grants in its relational database: SQLite for single-process local installs or
+PostgreSQL for remote and multi-worker deployments.
 
 Each grant records:
 

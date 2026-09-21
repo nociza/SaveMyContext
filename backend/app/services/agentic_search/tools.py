@@ -191,7 +191,7 @@ class VaultSearchToolkit:
             command.extend(["--glob", glob])
         for glob in EXCLUDED_GLOBS:
             command.extend(["--glob", glob])
-        command.extend([query, *[str(root) for root in roots]])
+        command.extend(["--", query, *[str(root) for root in roots]])
 
         completed = self._run_command(command)
         if completed is None or completed.returncode not in {0, 1}:
@@ -239,6 +239,7 @@ class VaultSearchToolkit:
                 "--include=*.md",
                 "--include=*.markdown",
                 "--include=*.txt",
+                "--",
                 query,
                 str(root),
             ]
@@ -310,50 +311,3 @@ class VaultSearchToolkit:
             )
         except (OSError, subprocess.SubprocessError):
             return None
-
-
-class VaultSearchADKTools:
-    def __init__(self, toolkit: VaultSearchToolkit) -> None:
-        self.toolkit = toolkit
-
-    def grep_vault_content(self, query: str, limit: int = 8) -> list[dict[str, object]]:
-        """Search saved note contents with ripgrep or grep.
-
-        Use this first for most user queries. It returns the strongest text
-        matches with absolute paths, snippets, scores, and line numbers.
-        """
-        hits = self.toolkit.content_hits(query, self.toolkit.search_roots())[: max(1, min(limit, 25))]
-        return [
-            {
-                "path": hit.path,
-                "snippet": hit.snippet,
-                "score": hit.score,
-                "line_number": hit.line_number,
-            }
-            for hit in hits
-        ]
-
-    def find_vault_paths(self, query: str, limit: int = 8) -> list[dict[str, object]]:
-        """Search note file paths and titles for likely matches.
-
-        Use this for title-style queries, entity names, or when content search is
-        sparse. Returns absolute paths with lightweight path snippets.
-        """
-        hits = self.toolkit.path_hits(query, self.toolkit.search_roots())[: max(1, min(limit, 25))]
-        return [
-            {
-                "path": hit.path,
-                "snippet": hit.snippet,
-                "score": hit.score,
-            }
-            for hit in hits
-        ]
-
-    def read_vault_note(self, path: str, max_chars: int = 4000) -> str:
-        """Read a saved note file by absolute path.
-
-        Use this only on promising candidates returned by other tools. The path
-        must be inside SaveMyContext's configured markdown or vault roots.
-        """
-        safe_chars = max(400, min(max_chars, 12000))
-        return self.toolkit.read_note(path, max_chars=safe_chars)

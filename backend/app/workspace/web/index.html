@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>SaveMyContext · Your memory, connected</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f6f7f5;
+        font-family: system-ui, sans-serif;
+      }
+      smc-workspace {
+        display: block;
+        max-width: 1280px;
+        margin: auto;
+        padding: 36px 24px;
+      }
+      @media (max-width: 600px) {
+        smc-workspace {
+          padding: 20px 14px;
+        }
+      }
+    </style>
+    <script type="module" src="/workspace-assets/workspace.js"></script>
+  </head>
+  <body>
+    <smc-workspace api-base="/api/v1/workspace" standalone></smc-workspace>
+  </body>
+</html>

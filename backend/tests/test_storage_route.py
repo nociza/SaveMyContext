@@ -109,8 +109,10 @@ async def test_storage_route_rebuilds_vault_in_new_root(tmp_path, monkeypatch) -
         assert (vault_root / "AGENTS.md").exists()
         assert (vault_root / "manifest.json").exists()
         assert (vault_root / "Dashboards" / "Home.md").exists()
-        assert (vault_root / "Sources" / "gemini--storage-route-session--source.md").exists()
-        assert (vault_root / "Factual" / "gemini--storage-route-session.md").exists()
+        source_notes = list((vault_root / "Sources").glob("gemini--storage-route-session--*--source.md"))
+        session_notes = list((vault_root / "Factual").glob("gemini--storage-route-session--*.md"))
+        assert len(source_notes) == 1
+        assert len(session_notes) == 1
         assert str(new_markdown_root.resolve()) in cli_paths.config_path.read_text(encoding="utf-8")
 
         async with session_factory() as db_session:
@@ -118,7 +120,7 @@ async def test_storage_route_rebuilds_vault_in_new_root(tmp_path, monkeypatch) -
                 select(ChatSession).where(ChatSession.external_session_id == "storage-route-session")
             )
             assert session_record is not None
-            assert session_record.markdown_path == str(vault_root / "Factual" / "gemini--storage-route-session.md")
+            assert session_record.markdown_path == str(session_notes[0])
     finally:
         get_settings.cache_clear()
 

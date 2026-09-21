@@ -4,14 +4,17 @@ import asyncio
 import logging
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
+from app.services.locks import file_lock, lock_path_for_vault
 
 
 logger = logging.getLogger(__name__)
+_GIT_LOCK = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -88,15 +91,22 @@ class GitVersioningService:
             )
 
     def _commit_all_sync(self, message: str) -> bool:
-        self._ensure_repo_sync()
-        self._run("add", "--all", ".")
-        status = self._run("status", "--porcelain", "--untracked-files=all", capture_output=True)
-        if not status.stdout.strip():
-            return False
-        self._run("commit", "--no-gpg-sign", "-m", message)
-        return True
+        with _GIT_LOCK:
+            with file_lock(lock_path_for_vault(self.repo_root, purpose="git")):
+                self._ensure_repo_unlocked()
+                self._run("add", "--all", ".")
+                status = self._run("status", "--porcelain", "--untracked-files=all", capture_output=True)
+                if not status.stdout.strip():
+                    return False
+                self._run("commit", "--no-gpg-sign", "-m", message)
+                return True
 
     def _ensure_repo_sync(self) -> bool:
+        with _GIT_LOCK:
+            with file_lock(lock_path_for_vault(self.repo_root, purpose="git")):
+                return self._ensure_repo_unlocked()
+
+    def _ensure_repo_unlocked(self) -> bool:
         self.repo_root.mkdir(parents=True, exist_ok=True)
         git_dir = self.repo_root / ".git"
         if not git_dir.exists():
@@ -106,6 +116,11 @@ class GitVersioningService:
         return True
 
     def _describe_sync(self) -> GitRepositoryStatus:
+        with _GIT_LOCK:
+            with file_lock(lock_path_for_vault(self.repo_root, purpose="git")):
+                return self._describe_unlocked()
+
+    def _describe_unlocked(self) -> GitRepositoryStatus:
         repository_ready = self.repository_ready()
         if not repository_ready:
             return GitRepositoryStatus(

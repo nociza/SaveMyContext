@@ -365,6 +365,61 @@ describe("backend validation helpers", () => {
     expect(todo.git.repository_ready).toBe(false);
   });
 
+  it("sends the shared to-do revision with direct updates", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({
+        title: "Shared checklist",
+        content: "# To-Do List\n",
+        revision: "next-revision",
+        items: [],
+        active_count: 0,
+        completed_count: 0,
+        total_count: 0,
+        git: {}
+      })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { updateTodoList } = await import("../src/background/backend");
+    await updateTodoList(remoteSettings(), {
+      items: [{ text: "Ship revision checks", done: false }],
+      summary: "Add revision checks",
+      expected_revision: "source-revision"
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      items: [{ text: "Ship revision checks", done: false }],
+      summary: "Add revision checks",
+      expected_revision: "source-revision"
+    });
+  });
+
+  it("round-trips the browser worker to-do revision on completion", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => ({ processed_count: 1, results: [] })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { completeProcessingTask } = await import("../src/background/backend");
+    await completeProcessingTask(remoteSettings(), {
+      sessionIds: ["session-1"],
+      responseText: '{"pile":"todo"}',
+      todoSourceRevision: "todo-source-revision",
+      sourceRevisions: { "session-1": "a".repeat(64) }
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      session_ids: ["session-1"],
+      response_text: '{"pile":"todo"}',
+      todo_source_revision: "todo-source-revision",
+      source_revisions: { "session-1": "a".repeat(64) }
+    });
+  });
+
   it("fetches idea projects with backend auth headers", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
@@ -655,20 +710,34 @@ describe("backend validation helpers", () => {
     expect(response.regenerated_session_count).toBe(12);
   });
 
-  it("posts source captures to the backend in the expected shape", async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        source_id: "capture-1",
-        title: "Rust ownership note",
-        capture_kind: "selection",
-        save_mode: "ai",
-        processed: true,
-        pile_slug: "factual",
-        markdown_path: "/srv/knowledge/SaveMyContext/Captures/selection--rust-ownership-note--capture.md",
-        raw_source_path: "/srv/knowledge/SaveMyContext/Sources/selection--rust-ownership-note--capture--source.md"
-      })
-    }));
+  it("retries a recoverable source capture once with the same request key", async () => {
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      attempt += 1;
+      if (attempt === 1) {
+        return {
+          ok: false,
+          status: 503,
+          headers: new Headers({ "Retry-After": "0" })
+        };
+      }
+      return {
+        ok: true,
+        status: 202,
+        headers: new Headers(),
+        json: async () => ({
+          source_id: "capture-1",
+          capture_key: "smc_capture_request-1",
+          title: "Rust ownership note",
+          capture_kind: "selection",
+          save_mode: "ai",
+          processed: true,
+          pile_slug: "factual",
+          markdown_path: "/srv/knowledge/SaveMyContext/Captures/selection--rust-ownership-note--capture.md",
+          raw_source_path: "/srv/knowledge/SaveMyContext/Sources/selection--rust-ownership-note--capture--source.md"
+        })
+      };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const { saveSourceCaptureToBackend } = await import("../src/background/backend");
@@ -692,6 +761,7 @@ describe("backend validation helpers", () => {
         }
       },
       {
+        captureKey: "smc_capture_request-1",
         captureKind: "selection",
         saveMode: "ai",
         title: "Rust ownership note",
@@ -713,6 +783,7 @@ describe("backend validation helpers", () => {
         Authorization: "Bearer savemycontext_pat_test"
       },
       body: JSON.stringify({
+        capture_key: "smc_capture_request-1",
         capture_kind: "selection",
         save_mode: "ai",
         title: "Rust ownership note",
@@ -726,8 +797,11 @@ describe("backend validation helpers", () => {
         }
       })
     });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(fetchMock.mock.calls[1]?.[1]?.body);
     expect(response.ok).toBe(true);
     expect(response.pile_slug).toBe("factual");
     expect(response.sourceId).toBe("capture-1");
+    expect(response.captureKey).toBe("smc_capture_request-1");
   });
 });

@@ -1,5 +1,6 @@
-import type { RuntimeMessage, SourceCapturePayload, SourceCaptureResponse } from "../shared/types";
+import type { RuntimeMessage, SourceCaptureResponse } from "../shared/types";
 import { pageSurfaceScopeAllowsUrl } from "../shared/page-surfaces";
+import { SourceCaptureRetryLifecycle } from "../shared/source-capture";
 
 type RuntimeRequester = <TResponse>(message: RuntimeMessage) => Promise<TResponse>;
 
@@ -256,6 +257,7 @@ function collectPageSnapshot(): PageSnapshot {
 }
 
 export function createSelectionCaptureController(sendMessage: RuntimeRequester): SelectionCaptureController {
+  const captureRetries = new SourceCaptureRetryLifecycle();
   let enabled = false;
   let host: HTMLDivElement | null = null;
   let shadow: ShadowRoot | null = null;
@@ -405,7 +407,7 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
     }
     setSavingState(true);
     showStatus(mode === "ai" ? "Saving selection with AI…" : "Saving selection…");
-    const payload: SourceCapturePayload = {
+    const payload = captureRetries.prepare({
       captureKind: "selection",
       saveMode: mode,
       title: document.title.trim() || undefined,
@@ -418,7 +420,7 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
         pageTitle: document.title.trim() || null,
         selectionLength: currentSelection.text.length
       }
-    };
+    });
     try {
       const response = await sendMessage<SourceCaptureResponse>({
         type: "SAVE_SOURCE_CAPTURE",
@@ -428,6 +430,7 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
         showStatus(response.error ?? "Could not save the selection.", true);
         return;
       }
+      captureRetries.markSucceeded(payload);
       showStatus(`Saved ${response.title ?? "selection"} to SaveMyContext.`);
       window.setTimeout(() => {
         hide();
@@ -447,19 +450,24 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
         error: "Could not extract readable text from the current page."
       };
     }
-    return await sendMessage<SourceCaptureResponse>({
-      type: "SAVE_SOURCE_CAPTURE",
-      payload: {
-        captureKind: "page",
-        saveMode: mode,
-        title: snapshot.title,
-        pageTitle: snapshot.title,
-        sourceUrl: snapshot.sourceUrl,
-        sourceText: snapshot.sourceText,
-        sourceMarkdown: snapshot.sourceMarkdown,
-        rawPayload: snapshot.rawPayload
-      }
+    const payload = captureRetries.prepare({
+      captureKind: "page",
+      saveMode: mode,
+      title: snapshot.title,
+      pageTitle: snapshot.title,
+      sourceUrl: snapshot.sourceUrl,
+      sourceText: snapshot.sourceText,
+      sourceMarkdown: snapshot.sourceMarkdown,
+      rawPayload: snapshot.rawPayload
     });
+    const response = await sendMessage<SourceCaptureResponse>({
+      type: "SAVE_SOURCE_CAPTURE",
+      payload
+    });
+    if (response.ok) {
+      captureRetries.markSucceeded(payload);
+    }
+    return response;
   }
 
   function maybeShowSelectionBubble(): void {

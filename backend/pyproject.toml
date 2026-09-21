@@ -1,6 +1,6 @@
 [project]
 name = "savemycontext"
-version = "0.2.4"
+version = "0.3.0"
 description = "Self-hosted FastAPI backend and Linux/macOS service CLI for SaveMyContext"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,23 +18,24 @@ classifiers = [
 ]
 dependencies = [
   "aiosqlite>=0.21.0",
-  "fastapi>=0.115.0",
+  "asyncpg>=0.31.0",
+  "fastapi>=0.139.0",
   "greenlet>=3.2.4",
   "httpx>=0.28.1",
   "orjson>=3.10.0",
   "python-dotenv>=1.1.1",
   "pwdlib[argon2]>=0.3.0",
-  "pydantic-settings>=2.10.1",
+  "pydantic-settings>=2.14.2",
   "sqlalchemy>=2.0.44",
   "uvicorn[standard]>=0.35.0",
   "uvloop>=0.22.1; platform_system != 'Windows'",
-  "google-adk>=1.29.0",
 ]
 
 [project.scripts]
 dev = "app.dev:main"
 smc = "app.cli:main"
 savemycontext = "app.cli:main"
+smc-workspace = "app.workspace.client:main"
 
 [project.urls]
 Documentation = "https://nociza.github.io/SaveMyContext/"
@@ -43,8 +44,10 @@ Source = "https://github.com/nociza/SaveMyContext"
 
 [dependency-groups]
 dev = [
-  "pytest>=8.4.2",
+  "pip-audit>=2.10.1",
+  "pytest>=9.0.3",
   "pytest-asyncio>=1.2.0",
+  "ruff>=0.15.21",
 ]
 
 [tool.pytest.ini_options]
@@ -58,6 +61,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.workspace" = ["web/*.html", "web/*.js", "web/*.css"]
 
 [tool.uv]
 package = true

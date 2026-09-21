@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import ChatMessage, ChatSession, SyncEvent
+from app.models import ChatMessage, ChatSession
 from app.models.base import utcnow
 from app.schemas.context import (
     CONTEXT_BUNDLE_SCHEMA_VERSION,

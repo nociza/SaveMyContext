@@ -44,6 +44,9 @@ class ChatSession(TimestampMixin, Base):
         ForeignKey("piles.id", ondelete="SET NULL"),
         index=True,
     )
+    pile_assignment_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    projection_pending: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    processing_pending: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     is_discarded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     discarded_reason: Mapped[str | None] = mapped_column(Text)
     pile_outputs: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -55,6 +58,7 @@ class ChatSession(TimestampMixin, Base):
     idea_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     share_post: Mapped[str | None] = mapped_column(Text)
     last_captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     last_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
     pile = relationship("Pile", lazy="joined")

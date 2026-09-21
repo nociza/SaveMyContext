@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,27 @@ const backendPython = resolve(backendRoot, ".venv/bin/python");
 const HEALTHCHECK_TIMEOUT_MS = 15_000;
 const EVENTUAL_TIMEOUT_MS = 30_000;
 const eventually = expect.configure({ timeout: EVENTUAL_TIMEOUT_MS });
+// This suite covers retained pre-workspace provider/projection compatibility.
+// The default workspace pipeline has its own end-to-end suite.
+process.env.SAVEMYCONTEXT_WORKSPACE_ENABLED = "false";
+
+async function extensionFixtureWithAllPageAccess(): Promise<{ root: string; dist: string }> {
+  const root = await mkdtemp(join(tmpdir(), "savemycontext-extension-all-pages-"));
+  const dist = join(root, "dist");
+  await cp(extensionDist, dist, { recursive: true });
+  const manifestPath = join(dist, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+    host_permissions?: string[];
+    optional_host_permissions?: string[];
+  };
+  const allPageOrigins = ["https://*/*", "http://*/*"];
+  manifest.host_permissions = [...new Set([...(manifest.host_permissions ?? []), ...allPageOrigins])];
+  manifest.optional_host_permissions = (manifest.optional_host_permissions ?? []).filter(
+    (origin) => !allPageOrigins.includes(origin)
+  );
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+  return { root, dist };
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolvePromise) => {
@@ -3224,6 +3245,10 @@ test("renders the dashboard with backend corpus, graph, and storage statistics",
       const dashboardPage = await dashboardPagePromise;
       await dashboardPage.waitForLoadState("domcontentloaded");
 
+      await expect(dashboardPage.getByRole("heading", { name: "A little clarity." })).toBeVisible();
+      // The new entry point is shared; the legacy explorer remains explicitly accessible.
+      await dashboardPage.goto(`chrome-extension://${extensionId}/dashboard.html`);
+
       await expect(dashboardPage.locator("#backend-alert")).toBeHidden();
       await expect(dashboardPage.locator("#metric-sessions")).toHaveText("3");
       await expect(dashboardPage.locator("#metric-messages")).toHaveText("6");
@@ -3256,6 +3281,7 @@ test("searches the knowledge base and injects a fact into the focused page field
   const backendLogs: string[] = [];
   let backendProcess: ReturnType<typeof spawn> | undefined;
   let backendBaseUrl = configuredBackendBaseUrl();
+  const extensionFixture = await extensionFixtureWithAllPageAccess();
 
   try {
     if (backendBaseUrl) {
@@ -3318,7 +3344,10 @@ test("searches the knowledge base and injects a fact into the focused page field
     const context = await chromium.launchPersistentContext(userDataDir, {
       channel: "chromium",
       headless: testInfo.project.use.headless ?? true,
-      args: [`--disable-extensions-except=${extensionDist}`, `--load-extension=${extensionDist}`]
+      args: [
+        `--disable-extensions-except=${extensionFixture.dist}`,
+        `--load-extension=${extensionFixture.dist}`
+      ]
     });
 
     try {
@@ -3385,6 +3414,7 @@ test("searches the knowledge base and injects a fact into the focused page field
     await stopBackend(backendProcess);
     await rm(userDataDir, { recursive: true, force: true });
     await rm(backendDataDir, { recursive: true, force: true });
+    await rm(extensionFixture.root, { recursive: true, force: true });
   }
 });
 
@@ -3394,6 +3424,7 @@ test("shows the selection capture pop-up and saves the selected text into the ba
   const backendLogs: string[] = [];
   let backendProcess: ReturnType<typeof spawn> | undefined;
   let backendBaseUrl = configuredBackendBaseUrl();
+  const extensionFixture = await extensionFixtureWithAllPageAccess();
 
   try {
     if (backendBaseUrl) {
@@ -3429,7 +3460,10 @@ test("shows the selection capture pop-up and saves the selected text into the ba
     const context = await chromium.launchPersistentContext(userDataDir, {
       channel: "chromium",
       headless: testInfo.project.use.headless ?? true,
-      args: [`--disable-extensions-except=${extensionDist}`, `--load-extension=${extensionDist}`]
+      args: [
+        `--disable-extensions-except=${extensionFixture.dist}`,
+        `--load-extension=${extensionFixture.dist}`
+      ]
     });
 
     try {
@@ -3526,5 +3560,6 @@ test("shows the selection capture pop-up and saves the selected text into the ba
     await stopBackend(backendProcess);
     await rm(userDataDir, { recursive: true, force: true });
     await rm(backendDataDir, { recursive: true, force: true });
+    await rm(extensionFixture.root, { recursive: true, force: true });
   }
 });

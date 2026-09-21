@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import MessageRole, ProviderName
-from app.schemas.ingest import IngestResponse
+from app.schemas.ingest import IngestResponse, MAX_CAPTURE_CLOCK_SKEW
 from app.schemas.session import TripletRead
 
 
@@ -50,6 +50,16 @@ class ContextMigrationImportRequest(BaseModel):
     raw_transcript: dict[str, Any] | list[Any] | None = None
     route_to_discard: bool = False
     discard_word_match: str | None = Field(default=None, max_length=64)
+
+    @field_validator("captured_at")
+    @classmethod
+    def reject_implausible_future_capture_time(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        comparable = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        if comparable.astimezone(timezone.utc) > datetime.now(timezone.utc) + MAX_CAPTURE_CLOCK_SKEW:
+            raise ValueError("captured_at cannot be more than 24 hours in the future.")
+        return value
 
     @model_validator(mode="after")
     def validate_unique_message_ids(self) -> "ContextMigrationImportRequest":

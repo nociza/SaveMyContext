@@ -67,6 +67,7 @@ class ProxyResponseMetadata(BaseModel):
     source_url: str
     title: str | None = None
     store: bool
+    storage_pending: bool = False
     stored_session_id: str | None = None
     stored_markdown_path: str | None = None
 

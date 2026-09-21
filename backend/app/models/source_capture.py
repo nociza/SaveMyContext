@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Boolean, ForeignKey, JSON, String, Text
+from sqlalchemy import Boolean, ForeignKey, JSON, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,8 +13,13 @@ from app.models.enums import BuiltInPileSlug
 
 class SourceCapture(TimestampMixin, Base):
     __tablename__ = "source_captures"
+    __table_args__ = (
+        UniqueConstraint("capture_key", name="uq_source_captures_capture_key"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    capture_key: Mapped[str | None] = mapped_column(String(128))
+    capture_payload_hash: Mapped[str | None] = mapped_column(String(64))
     capture_kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     save_mode: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(Text)

@@ -177,6 +177,7 @@ async def recover_discarded_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     markdown_path = await exporter.write_session(session)
     session.markdown_path = str(markdown_path)
+    session.projection_pending = False
     await db.commit()
     refreshed = await _reload_session_for_response(db, session.id)
     if refreshed is None:
@@ -197,9 +198,14 @@ async def manually_discard_session(
     processor = SessionProcessor(db)
     exporter = MarkdownExporter(db)
     processor.base_dir = exporter.base_dir
-    session = await processor.route_to_discard(session_id, reason=reason or "Manually moved to Discarded.")
+    session = await processor.route_to_discard(
+        session_id,
+        reason=reason or "Manually moved to Discarded.",
+        manual_assignment=True,
+    )
     markdown_path = await exporter.write_session(session)
     session.markdown_path = str(markdown_path)
+    session.projection_pending = False
     await db.commit()
     refreshed = await _reload_session_for_response(db, session.id)
     if refreshed is None:
@@ -504,6 +510,7 @@ async def assign_session_to_pile(
 
     markdown_path = await exporter.write_session(session)
     session.markdown_path = str(markdown_path)
+    session.projection_pending = False
     await db.commit()
     refreshed = await _reload_session_for_response(db, session.id)
     if refreshed is None:

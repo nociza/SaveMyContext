@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 
 import pytest
@@ -8,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.router import api_router
+from app.db.engine import create_configured_async_engine
 from app.db.session import get_db_session
 from app.models import User
 from app.models.base import Base
@@ -179,6 +181,48 @@ async def test_per_device_code_requires_a_second_factor_and_allows_only_one_rede
 
     assert reused.status_code == 401
     assert reused.json()["detail"] == "Connection string has already been used."
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_single_use_connection_grant_is_claimed_atomically(tmp_path) -> None:
+    engine = create_configured_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-connection-grants-race.db'}"
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    await _create_admin(session_factory)
+    async with session_factory() as session:
+        created = await create_connection_grant(
+            session,
+            username="admin",
+            name="One Device",
+            base_url="https://notes.example.com",
+            scopes=["ingest", "read"],
+            security_level="per_device",
+        )
+
+    decoded = decode_connection_bundle(created.connection_string)
+    app = _build_test_app(session_factory)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://notes.example.com") as client:
+        async def redeem(installation_id: str):
+            return await client.post(
+                "/api/v1/auth/connections/redeem",
+                json={
+                    "grant_id": decoded.grant_id,
+                    "secret": decoded.secret,
+                    "installation_id": installation_id,
+                },
+            )
+
+        responses = await asyncio.gather(redeem("install-one"), redeem("install-two"))
+
+    assert sorted(response.status_code for response in responses) == [200, 401]
+    assert sum(response.json().get("token", "").startswith("savemycontext_pat_") for response in responses) == 1
 
     await engine.dispose()
 

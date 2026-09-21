@@ -1,6 +1,16 @@
 ## Project Specification: SaveMyContext (SaveMyContext)
 
-**Objective:** Build a unified "second brain" that automatically intercepts, stores, categorizes, and processes user chat sessions from major web-based AI platforms (ChatGPT, Gemini, Grok) into actionable notes, knowledge graphs, and shareable content.
+> Version 0.3 implements the unified [workspace design](docs/workspace-design.md).
+> SQLite is authoritative for tasks and memory; Markdown/graph material below
+> describes the retained legacy implementation, not the default writable model.
+
+**Objective:** Build a private, provider-independent memory layer that captures user-authorized source material from
+AI tools, preserves auditable evidence, and derives rebuildable notes, tasks, graph data, and portable Markdown.
+SaveMyContext is not another chat client and its derived output is not the source of truth.
+
+**Current product boundary:** the supported product is the single-tenant backend, Chrome extension, CLI, and
+user-owned vault in this repository. The private cloud repository is a control-plane preview for a future managed
+service; it must deploy this core rather than fork ingestion or processing behavior.
 
 ### 1. Frontend: Chrome Extension (The Scraper)
 
@@ -15,7 +25,8 @@ The frontend acts as a silent observer, capturing the delta (diff) of conversati
     * **Grok:** Intercepts xAI's chat API requests.
 * **Web Chat Markdown Dumps:** On ChatGPT, Gemini, Grok, and Claude pages, the extension popup can dump the current chat as Markdown, copy it to the clipboard, and store the Markdown handoff in the backend. Scraped sessions use the saved backend context when available; Claude web uses the visible-page fallback.
 * **Agent Context Migration:** A portable context bundle path supports Codex and Claude transcripts outside the browser extension. Codex and Claude Code also expose `save-context` plugin skills that let the agent author a large Markdown handoff, copy it to the clipboard, and dump that exact Markdown into the backend as the intermediate exchange artifact.
-* **Sync Logic:** Captures only the newest messages (the diff) during an active session and POSTs them to the local FastAPI backend.
+* **Sync Logic:** Sends incremental diffs or ordered full snapshots with capture timestamps and replay-safe raw
+  evidence. Older snapshots cannot destructively replace newer incremental state.
 
 ### 2. Backend: Core Infrastructure
 
@@ -23,16 +34,23 @@ The backend receives the raw chat diffs, stores them securely, and orchestrates 
 
 * **Framework:** FastAPI running on Uvicorn with `uvloop` for maximum asynchronous performance.
 * **Dependency Management:** Managed via `uv` (by Astral) for lightning-fast, reproducible Python environments.
-* **Primary Storage (Relational):** SQLite managed via an ORM (like SQLAlchemy or SQLModel). This keeps the local setup lightweight while making it trivial to update the connection string to PostgreSQL or MySQL later.
+* **Primary Storage (Relational):** SQLite through SQLAlchemy for local installs, with PostgreSQL as the supported
+  remote and multi-worker database target. SQLite is a single-process local mode. Database portability and
+  cross-worker phase-two serialization are verified in CI; MySQL is not a supported target.
 * **Secondary Storage (File System):** A dedicated directory of Markdown (`.md`) files. Every time a session is updated, the backend overwrites or appends to a cleanly formatted Markdown file for that specific session, ensuring the user always has local, vendor-independent access to their raw transcripts.
+* **Reliability Boundary:** Accepted source rows and raw evidence commit before fallible enrichment and projection
+  work. The next architecture step is a transactional outbox plus leased worker so retries happen automatically
+  without another capture request.
 
 ### 3. Backend: AI Processing & Abstraction
 
 The backend doesn't just store data; it actively reads and organizes it using LLM APIs.
 
 * **Provider Abstraction:** A unified Python wrapper that standardizes calls to the OpenAI API (ChatGPT) and Google GenAI API (Gemini) for backend processing tasks.
-* **The Classifier:** When a new QA pair or session is ingested, a lightweight LLM call categorizes the interaction into one of three predefined buckets.
-* **Custom Categories:** Users can define custom tags, but the system defaults to the three primary pipelines below.
+* **The Classifier:** When a session changes, the configured processor categorizes it into a built-in or
+  user-defined pile. Explicit manual pile assignments remain locked across later captures.
+* **Custom Categories:** Users can define first-class piles and pipeline attributes; the system also supplies the
+  five built-in piles below.
 
 ### 4. The Pile Model
 

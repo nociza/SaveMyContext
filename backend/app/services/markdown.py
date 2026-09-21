@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import func, inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +16,10 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import NO_VALUE
 
 from app.core.config import get_settings
-from app.models import ChatMessage, ChatSession, FactTriplet, BuiltInPileSlug, SourceCapture, SyncEvent
+from app.models import ChatMessage, ChatSession, FactTriplet, BuiltInPileSlug, Pile, SourceCapture, SyncEvent
+from app.services.files import atomic_write_text
 from app.services.git_versioning import GitVersioningService
+from app.services.locks import async_file_lock, lock_path_for_vault
 from app.services.text import take_sentences
 from app.services.todo import TodoListService, TODO_TITLE
 from app.services.extra_piles import extract_extra_piles, visible_custom_tags
@@ -28,6 +33,16 @@ CATEGORY_LABELS = {
 }
 
 DISCARDED_FOLDER = "Discarded"
+_EXPORT_LOCKS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = WeakKeyDictionary()
+
+
+def _export_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _EXPORT_LOCKS.get(loop)
+    if lock is None:
+        lock = asyncio.Lock()
+        _EXPORT_LOCKS[loop] = lock
+    return lock
 
 
 def slugify(value: str) -> str:
@@ -84,22 +99,31 @@ class MarkdownExporter:
         self.vault_root_name = settings.vault_root_name
 
     async def write_session(self, session: ChatSession) -> Path:
-        self._ensure_directories()
-        target = self._write_session_files(session)
-        await self._write_graph_notes()
-        await self._write_dashboards()
-        await self._commit_vault(session)
-        return target
+        async with _export_lock():
+            async with async_file_lock(lock_path_for_vault(self.vault_root)):
+                self._ensure_directories()
+                target = self._write_session_files(session)
+                await self._write_graph_notes()
+                await self._write_dashboards()
+                await self._commit_vault(session)
+                return target
 
     async def write_source_capture(self, source_capture: SourceCapture) -> tuple[Path, Path]:
-        self._ensure_directories()
-        note_path, source_path = self._write_source_capture_files(source_capture)
-        await self._write_graph_notes()
-        await self._write_dashboards()
-        await self._commit_source_capture(source_capture)
-        return note_path, source_path
+        async with _export_lock():
+            async with async_file_lock(lock_path_for_vault(self.vault_root)):
+                self._ensure_directories()
+                note_path, source_path = self._write_source_capture_files(source_capture)
+                await self._write_graph_notes()
+                await self._write_dashboards()
+                await self._commit_source_capture(source_capture)
+                return note_path, source_path
 
     async def rebuild_vault(self) -> int:
+        async with _export_lock():
+            async with async_file_lock(lock_path_for_vault(self.vault_root)):
+                return await self._rebuild_vault_locked()
+
+    async def _rebuild_vault_locked(self) -> int:
         self._ensure_directories()
         await self._write_dashboards()
         if self.db is None:
@@ -152,7 +176,7 @@ class MarkdownExporter:
             "",
             f"- Provider: `{session.provider.value}`",
             f"- External Session ID: `{session.external_session_id}`",
-            f"- Pile: `{session.built_in_pile.value if session.built_in_pile else 'unclassified'}`",
+            f"- Pile: {self._session_pile_display(session)}",
             f"- Tags: {', '.join(session.custom_tags) if session.custom_tags else 'none'}",
             f"- Last Captured: {datetime_isoformat(session.last_captured_at) or 'n/a'}",
             "",
@@ -373,10 +397,6 @@ class MarkdownExporter:
             return
         entities_dir = self.vault_root / "Graph" / "Entities"
         indexes_dir = self.vault_root / "Graph" / "Indexes"
-        for managed_file in entities_dir.glob("*.md"):
-            managed_file.unlink()
-        for managed_file in indexes_dir.glob("*.md"):
-            managed_file.unlink()
 
         triplets = (
             await self.db.execute(select(FactTriplet).options(selectinload(FactTriplet.session)))
@@ -387,15 +407,17 @@ class MarkdownExporter:
             if triplet.object != triplet.subject:
                 by_entity[triplet.object].append(triplet)
 
+        projections: dict[Path, tuple[str, str]] = {}
         for entity, entity_triplets in by_entity.items():
             note_path = self._entity_note_path(entity)
             entity_token = stable_note_token(entity, fallback="entity")
+            entity_id = f"savemycontext-entity-{entity_token}"
             related_sessions = {
                 triplet.session for triplet in entity_triplets if triplet.session is not None
             }
             lines = [
                 "---",
-                f"id: {yaml_scalar(f'savemycontext-entity-{entity_token}')}",
+                f"id: {yaml_scalar(entity_id)}",
                 f"type: {yaml_scalar('entity')}",
                 f"entity: {yaml_scalar(entity)}",
                 "---",
@@ -412,9 +434,15 @@ class MarkdownExporter:
                 lines.append(
                     f"- {self._wiki_link(self._session_note_path(session), session.title or session.external_session_id)}"
                 )
-            note_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+            projections[note_path] = ("\n".join(lines).strip() + "\n", entity_id)
 
+        entity_index_id = "savemycontext-graph-index-entities"
         entity_index_lines = [
+            "---",
+            f"id: {yaml_scalar(entity_index_id)}",
+            f"type: {yaml_scalar('graph_index')}",
+            "---",
+            "",
             "# Entity Index",
             "",
             f"- Total entities: {len(by_entity)}",
@@ -422,21 +450,66 @@ class MarkdownExporter:
         ]
         for entity in sorted(by_entity):
             entity_index_lines.append(f"- {self._wiki_link(self._entity_note_path(entity), entity)}")
-        (self.vault_root / "Graph" / "Indexes" / "Entity Index.md").write_text(
+        projections[indexes_dir / "Entity Index.md"] = (
             "\n".join(entity_index_lines).strip() + "\n",
-            encoding="utf-8",
+            entity_index_id,
         )
 
+        relationship_index_id = "savemycontext-graph-index-relationships"
         relationship_lines = [
+            "---",
+            f"id: {yaml_scalar(relationship_index_id)}",
+            f"type: {yaml_scalar('graph_index')}",
+            "---",
+            "",
             "# Relationship Index",
             "",
         ]
         for triplet in sorted(triplets, key=lambda item: (item.subject.lower(), item.predicate.lower(), item.object.lower())):
             relationship_lines.append(f"- {triplet.subject} | {triplet.predicate} | {triplet.object}")
-        (self.vault_root / "Graph" / "Indexes" / "Relationship Index.md").write_text(
+        projections[indexes_dir / "Relationship Index.md"] = (
             "\n".join(relationship_lines).strip() + "\n",
-            encoding="utf-8",
+            relationship_index_id,
         )
+
+        # Render every projection before mutating the last known-good graph.
+        # Files are staged on the same filesystem, preflighted for ownership,
+        # then atomically replaced one by one. Stale managed files are retired
+        # only after all current projections have been installed successfully.
+        graph_root = self.vault_root / "Graph"
+        graph_root.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix=".savemycontext-graph-", dir=graph_root) as temporary_directory:
+            staging_root = Path(temporary_directory)
+            staged_by_target: dict[Path, Path] = {}
+            for target, (content, _expected_id) in projections.items():
+                staged = staging_root / target.relative_to(graph_root)
+                atomic_write_text(staged, content)
+                staged_by_target[target] = staged
+
+            for target, (_content, expected_id) in projections.items():
+                if not target.exists():
+                    continue
+                if self._path_is_owned_graph_projection(target, expected_id):
+                    continue
+                if self._path_is_legacy_graph_index(target, expected_id):
+                    continue
+                raise FileExistsError(
+                    f"Refusing to overwrite unmanaged graph note: {target}"
+                )
+
+            for target in sorted(staged_by_target, key=lambda item: item.as_posix()):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(
+                    target,
+                    staged_by_target[target].read_text(encoding="utf-8"),
+                )
+
+        desired_paths = set(projections)
+        for candidate in [*entities_dir.glob("*.md"), *indexes_dir.glob("*.md")]:
+            if candidate in desired_paths:
+                continue
+            if self._path_is_owned_graph_projection(candidate):
+                candidate.unlink()
 
     async def _write_dashboards(self) -> None:
         if self.db is None:
@@ -476,10 +549,7 @@ class MarkdownExporter:
                     lines.append(
                         f"- {self._wiki_link(self._source_capture_note_path(capture), self._capture_display_title(capture))}"
                     )
-            (dashboards_dir / f"{label} Index.md").write_text(
-                "\n".join(lines).strip() + "\n",
-                encoding="utf-8",
-            )
+            atomic_write_text(dashboards_dir / f"{label} Index.md", "\n".join(lines).strip() + "\n")
 
         discarded_lines = [
             "# Discarded Index",
@@ -501,10 +571,7 @@ class MarkdownExporter:
                 discarded_lines.append(
                     f"- {captured_at} — {self._wiki_link(self._session_note_path(session), title)}"
                 )
-        (dashboards_dir / "Discarded Index.md").write_text(
-            "\n".join(discarded_lines).strip() + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_text(dashboards_dir / "Discarded Index.md", "\n".join(discarded_lines).strip() + "\n")
 
         graph_index_lines = [
             "# Graph Index",
@@ -512,10 +579,7 @@ class MarkdownExporter:
             f"- {self._wiki_link(self.vault_root / 'Graph' / 'Indexes' / 'Entity Index.md', 'Entity Index')}",
             f"- {self._wiki_link(self.vault_root / 'Graph' / 'Indexes' / 'Relationship Index.md', 'Relationship Index')}",
         ]
-        (dashboards_dir / "Graph Index.md").write_text(
-            "\n".join(graph_index_lines).strip() + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_text(dashboards_dir / "Graph Index.md", "\n".join(graph_index_lines).strip() + "\n")
         capture_index_lines = [
             "# Captures Index",
             "",
@@ -528,26 +592,45 @@ class MarkdownExporter:
             label = self._capture_display_title(capture)
             suffix = f" [{capture.save_mode}]"
             capture_index_lines.append(f"- {self._wiki_link(self._source_capture_note_path(capture), label)}{suffix}")
-        (dashboards_dir / "Captures Index.md").write_text(
-            "\n".join(capture_index_lines).strip() + "\n",
-            encoding="utf-8",
-        )
-        (dashboards_dir / "Home.md").write_text(
+        atomic_write_text(dashboards_dir / "Captures Index.md", "\n".join(capture_index_lines).strip() + "\n")
+        atomic_write_text(
+            dashboards_dir / "Home.md",
             self._render_home_dashboard(sessions, source_captures, triplet_count),
-            encoding="utf-8",
         )
-        (self.vault_root / "README.md").write_text(
+        atomic_write_text(
+            self.vault_root / "README.md",
             self._render_vault_readme(sessions, source_captures, triplet_count),
-            encoding="utf-8",
         )
-        (self.vault_root / "AGENTS.md").write_text(
+        atomic_write_text(
+            self.vault_root / "AGENTS.md",
             self._render_agents_guide(sessions, source_captures, triplet_count),
-            encoding="utf-8",
         )
-        (self.vault_root / "manifest.json").write_text(
+        atomic_write_text(
+            self.vault_root / "manifest.json",
             self._render_manifest_json(sessions, source_captures, triplet_count),
-            encoding="utf-8",
         )
+
+    @staticmethod
+    def _session_pile(session: ChatSession) -> Pile | None:
+        pile = session.pile
+        if pile is None or pile.id != session.pile_id:
+            return None
+        return pile
+
+    def _session_pile_slug(self, session: ChatSession) -> str:
+        pile = self._session_pile(session)
+        if pile is not None:
+            return pile.slug
+        if session.built_in_pile is not None:
+            return session.built_in_pile.value
+        return "unclassified"
+
+    def _session_pile_display(self, session: ChatSession) -> str:
+        slug = self._session_pile_slug(session)
+        pile = self._session_pile(session)
+        if pile is not None and session.built_in_pile is None:
+            return f"`{slug}` ({pile.name})"
+        return f"`{slug}`"
 
     def _session_front_matter(self, session: ChatSession) -> list[str]:
         extra_piles = extract_extra_piles(session.custom_tags)
@@ -557,7 +640,7 @@ class MarkdownExporter:
             f"type: {yaml_scalar('session')}",
             f"provider: {yaml_scalar(session.provider.value)}",
             f"external_session_id: {yaml_scalar(session.external_session_id)}",
-            f"pile: {yaml_scalar(session.built_in_pile.value if session.built_in_pile else 'unclassified')}",
+            f"pile: {yaml_scalar(self._session_pile_slug(session))}",
             f"source_url: {yaml_scalar(session.source_url or '')}",
             f"captured_at: {yaml_scalar(session.last_captured_at)}",
             f"updated_at: {yaml_scalar(session.updated_at)}",
@@ -589,12 +672,26 @@ class MarkdownExporter:
         target = self._session_note_path(session)
         source_target = self._source_note_path(session)
         previous_path = Path(session.markdown_path).expanduser() if session.markdown_path else None
-        if previous_path and previous_path != target and previous_path.exists():
-            previous_path.unlink()
         target.parent.mkdir(parents=True, exist_ok=True)
         source_target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(self.render_session(session), encoding="utf-8")
-        source_target.write_text(self.render_source_session(session), encoding="utf-8")
+        atomic_write_text(target, self.render_session(session))
+        atomic_write_text(source_target, self.render_source_session(session))
+        if (
+            previous_path
+            and previous_path != target
+            and self._path_is_owned_by_session(previous_path, session.id)
+        ):
+            previous_path.unlink()
+        legacy_source_path = (
+            self.vault_root
+            / "Sources"
+            / f"{session.provider.value}--{slugify(session.external_session_id)}--source.md"
+        )
+        if (
+            legacy_source_path != source_target
+            and self._path_is_owned_by_session(legacy_source_path, session.id)
+        ):
+            legacy_source_path.unlink()
         return target
 
     def _write_source_capture_files(self, source_capture: SourceCapture) -> tuple[Path, Path]:
@@ -602,45 +699,170 @@ class MarkdownExporter:
         raw_target = self._source_capture_source_path(source_capture)
         previous_path = Path(source_capture.markdown_path).expanduser() if source_capture.markdown_path else None
         previous_raw_path = Path(source_capture.raw_source_path).expanduser() if source_capture.raw_source_path else None
-        if previous_path and previous_path != target and previous_path.exists():
+        atomic_write_text(target, self.render_source_capture(source_capture))
+        atomic_write_text(raw_target, self.render_source_capture_source(source_capture))
+        if (
+            previous_path
+            and not self._paths_resolve_same(previous_path, target)
+            and not self._paths_resolve_same(previous_path, raw_target)
+            and self._path_is_owned_by_source_capture(previous_path, source_capture.id)
+        ):
             previous_path.unlink()
-        if previous_raw_path and previous_raw_path != raw_target and previous_raw_path.exists():
+        if (
+            previous_raw_path
+            and not self._paths_resolve_same(previous_raw_path, raw_target)
+            and not self._paths_resolve_same(previous_raw_path, target)
+            and self._path_is_owned_by_source_capture(previous_raw_path, source_capture.id)
+        ):
             previous_raw_path.unlink()
-        target.write_text(self.render_source_capture(source_capture), encoding="utf-8")
-        raw_target.write_text(self.render_source_capture_source(source_capture), encoding="utf-8")
         return target, raw_target
 
     def _session_note_path(self, session: ChatSession) -> Path:
+        identity = self._session_file_identity(session)
         if session.is_discarded:
             timestamp = normalize_datetime(
                 session.last_captured_at or session.updated_at or datetime.now(timezone.utc)
             )
             year = f"{timestamp.year:04d}"
             day = f"{timestamp.month:02d}-{timestamp.day:02d}"
-            filename = f"{day}--{session.provider.value}--{slugify(session.external_session_id)}.md"
+            filename = f"{day}--{session.provider.value}--{identity}.md"
             return self.vault_root / DISCARDED_FOLDER / year / filename
-        pile_dir = CATEGORY_LABELS.get(session.built_in_pile, "Sessions")
-        filename = f"{session.provider.value}--{slugify(session.external_session_id)}.md"
+        pile = self._session_pile(session)
+        pile_dir = pile.folder_label if pile is not None else CATEGORY_LABELS.get(session.built_in_pile, "Sessions")
+        filename = f"{session.provider.value}--{identity}.md"
         return self.vault_root / pile_dir / filename
 
     def _entity_note_path(self, entity: str) -> Path:
         return self.vault_root / "Graph" / "Entities" / f"{stable_note_token(entity, fallback='entity')}.md"
 
     def _source_note_path(self, session: ChatSession) -> Path:
-        filename = f"{session.provider.value}--{slugify(session.external_session_id)}--source.md"
+        filename = f"{session.provider.value}--{self._session_file_identity(session)}--source.md"
         return self.vault_root / "Sources" / filename
+
+    @staticmethod
+    def _session_file_identity(session: ChatSession) -> str:
+        # The external ID remains recognizable while the canonical database ID
+        # makes the filename collision-free even when punctuation or case in
+        # two provider IDs slugifies to the same text.
+        external_slug = slugify(session.external_session_id)[:64].rstrip("-") or "session"
+        return f"{external_slug}--{session.id}"
+
+    def _path_is_owned_by_session(self, path: Path, session_id: str) -> bool:
+        if not path.exists() or not path.is_file():
+            return False
+        try:
+            path.resolve().relative_to(self.vault_root.resolve())
+            with path.open("r", encoding="utf-8") as handle:
+                head = "".join(handle.readline() for _ in range(20))
+        except (OSError, RuntimeError, ValueError):
+            return False
+        owned_ids = (session_id, f"savemycontext-source-{session_id}")
+        return any(f"id: {yaml_scalar(owned_id)}\n" in head for owned_id in owned_ids)
+
+    @staticmethod
+    def _paths_resolve_same(left: Path, right: Path) -> bool:
+        try:
+            return left.resolve() == right.resolve()
+        except (OSError, RuntimeError):
+            return False
+
+    def _path_is_owned_by_source_capture(self, path: Path, capture_id: str) -> bool:
+        if not path.exists() or not path.is_file():
+            return False
+        try:
+            resolved_path = path.resolve()
+            resolved_vault = self.vault_root.resolve()
+            resolved_path.relative_to(resolved_vault)
+        except (OSError, RuntimeError, ValueError):
+            return False
+        front_matter = self._front_matter_lines(path)
+        if front_matter is None:
+            return False
+        owned_pairs = (
+            (capture_id, "source_capture"),
+            (f"savemycontext-capture-source-{capture_id}", "source_capture_source"),
+        )
+        return any(
+            f"id: {yaml_scalar(owned_id)}" in front_matter
+            and f"type: {yaml_scalar(owned_type)}" in front_matter
+            for owned_id, owned_type in owned_pairs
+        )
+
+    @staticmethod
+    def _front_matter_lines(path: Path) -> set[str] | None:
+        if not path.exists() or not path.is_file():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                lines = [handle.readline().rstrip("\r\n") for _ in range(20)]
+        except OSError:
+            return None
+        if not lines or lines[0] != "---":
+            return None
+        try:
+            closing_index = lines.index("---", 1)
+        except ValueError:
+            return None
+        return set(lines[1:closing_index])
+
+    @classmethod
+    def _path_is_owned_graph_projection(cls, path: Path, expected_id: str | None = None) -> bool:
+        front_matter = cls._front_matter_lines(path)
+        if front_matter is None:
+            return False
+        if expected_id is not None:
+            expected_type = "entity" if expected_id.startswith("savemycontext-entity-") else "graph_index"
+            return (
+                f"id: {yaml_scalar(expected_id)}" in front_matter
+                and f"type: {yaml_scalar(expected_type)}" in front_matter
+            )
+        front_matter_text = "\n".join(front_matter)
+        return (
+            f"type: {yaml_scalar('entity')}" in front_matter
+            and bool(re.search(r'^id: "savemycontext-entity-[^"]+"$', front_matter_text, flags=re.MULTILINE))
+        ) or (
+            f"type: {yaml_scalar('graph_index')}" in front_matter
+            and bool(
+                re.search(
+                    r'^id: "savemycontext-graph-index-[^"]+"$',
+                    front_matter_text,
+                    flags=re.MULTILINE,
+                )
+            )
+        )
+
+    @staticmethod
+    def _path_is_legacy_graph_index(path: Path, expected_id: str) -> bool:
+        legacy_heading = {
+            "savemycontext-graph-index-entities": "# Entity Index",
+            "savemycontext-graph-index-relationships": "# Relationship Index",
+        }.get(expected_id)
+        if legacy_heading is None or not path.exists() or not path.is_file():
+            return False
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return False
+        if not lines or lines[0] != legacy_heading:
+            return False
+        body_lines = [line for line in lines[1:] if line.strip()]
+        if expected_id == "savemycontext-graph-index-entities":
+            return bool(body_lines) and body_lines[0].startswith("- Total entities: ")
+        return all(line.startswith("- ") and " | " in line for line in body_lines)
 
     def _todo_list_path(self) -> Path:
         return TodoListService(base_dir=self.base_dir, vault_root_name=self.vault_root_name).path
 
     def _source_capture_note_path(self, source_capture: SourceCapture) -> Path:
-        filename = f"{source_capture.capture_kind}--{slugify(self._capture_slug_seed(source_capture))}--{source_capture.id[:8]}.md"
+        capture_slug = slugify(self._capture_slug_seed(source_capture))[:64].rstrip("-") or "capture"
+        filename = f"{source_capture.capture_kind}--{capture_slug}--{source_capture.id}.md"
         return self.vault_root / "Captures" / filename
 
     def _source_capture_source_path(self, source_capture: SourceCapture) -> Path:
+        capture_slug = slugify(self._capture_slug_seed(source_capture))[:64].rstrip("-") or "capture"
         filename = (
-            f"{source_capture.capture_kind}--{slugify(self._capture_slug_seed(source_capture))}"
-            f"--{source_capture.id[:8]}--source.md"
+            f"{source_capture.capture_kind}--{capture_slug}"
+            f"--{source_capture.id}--source.md"
         )
         return self.vault_root / "Sources" / filename
 

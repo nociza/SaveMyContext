@@ -45,11 +45,16 @@ import {
   setStatus
 } from "../shared/storage";
 import { parseConnectionString } from "../shared/connection";
+import {
+  ALL_REGULAR_PAGE_ORIGINS,
+  hasOptionalHostPermissions
+} from "../shared/host-permissions";
 import { evaluateDiscardWords, evaluateIndexingRules, indexingRulesFingerprint } from "../shared/indexing-rules";
 import {
   normalizePageSurfaceScope,
   pageSurfaceScopeAllowsUrl
 } from "../shared/page-surfaces";
+import { createSourceCaptureKey } from "../shared/source-capture";
 import type {
   ActiveChatContextResponse,
   ActiveChatContextSnapshot,
@@ -107,7 +112,7 @@ const PAGE_SURFACE_HOST_IDS = [
   "savemycontext-context-suggestions-root",
   "savemycontext-quick-search-host"
 ];
-const ALL_REGULAR_PAGE_MATCHES = ["https://*/*", "http://*/*"];
+const ALL_REGULAR_PAGE_MATCHES = [...ALL_REGULAR_PAGE_ORIGINS];
 const AI_PROVIDER_PAGE_MATCHES = [
   "https://chatgpt.com/*",
   "https://chat.openai.com/*",
@@ -937,12 +942,18 @@ async function handleSaveSourceCapture(payload: SourceCapturePayload): Promise<S
   }
 
   try {
+    const requestPayload = payload.captureKey
+      ? payload
+      : {
+          ...payload,
+          captureKey: createSourceCaptureKey()
+        };
     const response = await saveSourceCaptureToBackend(
       {
         ...settings,
         backendUrl: status.backendUrl ?? settings.backendUrl
       },
-      payload
+      requestPayload
     );
     await setExtensionStatus({
       lastError: null
@@ -1295,6 +1306,24 @@ async function syncPageSurfaceContentScript(settings?: ExtensionSettings): Promi
   const registeredForAllPages = registered.length > 0;
   const shouldRegisterForAllPages = normalizePageSurfaceScope(resolvedSettings.pageSurfaceScope) === "all_pages";
 
+  if (
+    shouldRegisterForAllPages &&
+    !(await hasOptionalHostPermissions(ALL_REGULAR_PAGE_MATCHES))
+  ) {
+    if (registeredForAllPages) {
+      await chrome.scripting.unregisterContentScripts({
+        ids: [PAGE_SURFACE_SCRIPT_ID]
+      });
+    }
+    await cleanupDisallowedPageSurfaceTabs({
+      ...resolvedSettings,
+      pageSurfaceScope: "ai_providers"
+    });
+    throw new Error(
+      "All-page surfaces require optional access to regular HTTP and HTTPS pages. Grant access in Settings."
+    );
+  }
+
   if (!shouldRegisterForAllPages) {
     if (registeredForAllPages) {
       await chrome.scripting.unregisterContentScripts({
@@ -1375,7 +1404,11 @@ async function handleScheduledProviderRefresh(provider: ProviderName): Promise<v
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage().then(async () => {
     await syncProviderRefreshAlarms();
-    await syncPageSurfaceContentScript();
+    try {
+      await syncPageSurfaceContentScript();
+    } catch (error) {
+      console.warn("SaveMyContext page surfaces remain disabled", error);
+    }
     await refreshBackendStatus(true);
   });
 });
@@ -1383,7 +1416,11 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   void initializeStorage().then(async () => {
     await syncProviderRefreshAlarms();
-    await syncPageSurfaceContentScript();
+    try {
+      await syncPageSurfaceContentScript();
+    } catch (error) {
+      console.warn("SaveMyContext page surfaces remain disabled", error);
+    }
     await refreshBackendStatus(true);
   });
 });
@@ -1621,12 +1658,22 @@ function isRecoverableProcessingCompletionError(error: unknown): boolean {
 
 async function submitProcessingCompletion(
   settings: ExtensionSettings,
-  taskRefs: Array<{ sessionId: string; taskKey?: string }>,
-  responseText: string
+  taskRefs: Array<{ sessionId: string; taskKey?: string; sourceRevision?: string }>,
+  responseText: string,
+  todoSourceRevision: string | undefined
 ): Promise<number> {
+  const sourceRevisions: Record<string, string> = {};
+  for (const task of taskRefs) {
+    if (!task.sourceRevision) {
+      throw new Error("The processing task is missing its source revision. Fetch a new task and retry.");
+    }
+    sourceRevisions[task.sessionId] = task.sourceRevision;
+  }
   await completeProcessingTask(settings, {
     sessionIds: taskRefs.map((task) => task.sessionId),
-    responseText
+    responseText,
+    todoSourceRevision,
+    sourceRevisions
   });
   return taskRefs.length;
 }
@@ -1636,11 +1683,13 @@ async function completeProcessingTaskWithRecovery(
   provider: ProviderName,
   tabId: number,
   tasks: ProcessingTaskItem[],
-  initialResponseText: string
+  initialResponseText: string,
+  todoSourceRevision: string | undefined
 ): Promise<number> {
   const taskRefs = tasks.map((task) => ({
     sessionId: task.session_id,
-    taskKey: task.task_key
+    taskKey: task.task_key,
+    sourceRevision: task.source_revision
   }));
   let candidate = initialResponseText;
   let lastError = "The provider did not return valid JSON.";
@@ -1649,7 +1698,12 @@ async function completeProcessingTaskWithRecovery(
     const normalized = normalizeProcessingResponseJson(candidate, taskRefs);
     if (normalized.ok) {
       try {
-        return await submitProcessingCompletion(settings, taskRefs, normalized.jsonText);
+        return await submitProcessingCompletion(
+          settings,
+          taskRefs,
+          normalized.jsonText,
+          todoSourceRevision
+        );
       } catch (error) {
         if (!isRecoverableProcessingCompletionError(error)) {
           throw error;
@@ -1662,7 +1716,12 @@ async function completeProcessingTaskWithRecovery(
         const partial = normalizePartialProcessingResponseJson(candidate, taskRefs);
         if (partial.ok && partial.tasks.length < taskRefs.length) {
           try {
-            return await submitProcessingCompletion(settings, partial.tasks, partial.jsonText);
+            return await submitProcessingCompletion(
+              settings,
+              partial.tasks,
+              partial.jsonText,
+              todoSourceRevision
+            );
           } catch (error) {
             if (!isRecoverableProcessingCompletionError(error)) {
               throw error;
@@ -1734,7 +1793,8 @@ async function runProcessingWorkerLoop(
         provider,
         tabId,
         task.tasks,
-        proxyResult.responseText
+        proxyResult.responseText,
+        task.todo_source_revision
       );
 
       processedCount += completedCount;
@@ -2283,6 +2343,15 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
     ...currentSettings,
     ...update
   };
+  if (
+    normalizePageSurfaceScope(candidateSettings.pageSurfaceScope) === "all_pages" &&
+    !(await hasOptionalHostPermissions(ALL_REGULAR_PAGE_MATCHES))
+  ) {
+    return {
+      ok: false,
+      error: "Grant optional access to regular HTTP and HTTPS pages before enabling all-page surfaces."
+    };
+  }
   backendValidationGeneration += 1;
   backendValidationInFlight = null;
   backendValidationInFlightKey = "";

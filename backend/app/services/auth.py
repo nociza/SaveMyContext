@@ -111,6 +111,7 @@ async def create_api_token(
     username: str,
     name: str,
     scopes: list[str],
+    commit: bool = True,
 ) -> CreatedToken:
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
@@ -129,8 +130,9 @@ async def create_api_token(
     db.add(token)
     await db.flush()
     plain_text = build_plain_text_token(token.id, secret)
-    await db.commit()
-    await db.refresh(token)
+    if commit:
+        await db.commit()
+        await db.refresh(token)
     return CreatedToken(token=token, plain_text=plain_text)
 
 

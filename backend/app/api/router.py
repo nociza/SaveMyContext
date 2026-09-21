@@ -13,9 +13,11 @@ from app.api.routes_prompts import router as prompts_router
 from app.api.routes_processing import router as processing_router
 from app.api.routes_sessions import router as sessions_router
 from app.api.routes_todo import router as todo_router
+from app.workspace.api import router as workspace_router
 
 
 api_router = APIRouter()
+api_router.include_router(workspace_router, tags=["workspace"])
 api_router.include_router(health_router, tags=["health"])
 api_router.include_router(meta_router, tags=["meta"])
 api_router.include_router(auth_router, tags=["auth"])

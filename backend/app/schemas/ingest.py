@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.enums import MessageRole, ProviderName
+
+
+MAX_CAPTURE_CLOCK_SKEW = timedelta(hours=24)
 
 
 class IngestMessage(BaseModel):
@@ -15,6 +19,12 @@ class IngestMessage(BaseModel):
     content: str = Field(min_length=1)
     occurred_at: datetime | None = None
     raw_payload: dict[str, Any] | list[Any] | None = None
+
+    @field_validator("raw_payload")
+    @classmethod
+    def validate_raw_payload_json(cls, value):  # type: ignore[no-untyped-def]
+        _validate_json_value(value, field_name="raw_payload")
+        return value
 
 
 class IngestDiffRequest(BaseModel):
@@ -32,6 +42,22 @@ class IngestDiffRequest(BaseModel):
     route_to_discard: bool = False
     discard_word_match: str | None = Field(default=None, max_length=64)
 
+    @field_validator("raw_capture")
+    @classmethod
+    def validate_raw_capture_json(cls, value):  # type: ignore[no-untyped-def]
+        _validate_json_value(value, field_name="raw_capture")
+        return value
+
+    @field_validator("captured_at")
+    @classmethod
+    def reject_implausible_future_capture_time(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        comparable = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        if comparable.astimezone(timezone.utc) > datetime.now(timezone.utc) + MAX_CAPTURE_CLOCK_SKEW:
+            raise ValueError("captured_at cannot be more than 24 hours in the future.")
+        return value
+
     @model_validator(mode="after")
     def validate_unique_message_ids(self) -> "IngestDiffRequest":
         seen: set[str] = set()
@@ -45,6 +71,15 @@ class IngestDiffRequest(BaseModel):
             duplicate_list = ", ".join(sorted(duplicates))
             raise ValueError(f"Duplicate external_message_id values are not allowed: {duplicate_list}")
         return self
+
+
+def _validate_json_value(value: object, *, field_name: str) -> None:
+    if value is None:
+        return
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field_name} must contain finite JSON-compatible values.") from error
 
 
 class IngestResponse(BaseModel):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -12,11 +14,13 @@ from app.db.session import get_db_session
 from app.models import APIToken
 from app.models.base import utcnow
 from app.services.auth import hash_api_token_secret
+from app.core.config import get_settings
 
 
 security = HTTPBearer(auto_error=False)
 LOCAL_CLIENT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 TOKEN_PREFIX = "savemycontext_"
+TOKEN_USAGE_WRITE_INTERVAL = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,12 @@ def _normalize_host(value: str | None) -> str | None:
     if value is None:
         return None
     return value.removeprefix("[").removesuffix("]").lower()
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def is_trusted_loopback_request(request: Request) -> bool:
@@ -60,12 +70,40 @@ async def authenticate_bearer_token(
 ) -> AuthContext | None:
     if credentials and credentials.scheme.lower() == "bearer":
         token_value = credentials.credentials.strip()
+        token_dir = get_settings().workspace_token_dir
+        if token_dir and 24 <= len(token_value) <= 4096:
+            # Protected host-local service credentials. Never return their content.
+            for path in sorted(token_dir.iterdir()):
+                if path.is_file() and not path.is_symlink():
+                    expected = path.read_text().strip()
+                    if expected and hmac.compare_digest(
+                        token_value.encode(), expected.encode()
+                    ):
+                        scopes = (
+                            {"ingest"}
+                            if path.name.startswith("capture-")
+                            else {"read", "ingest", "workspace:write"}
+                        )
+                        return AuthContext(
+                            token_id=f"service:{path.name}",
+                            token_name=path.name,
+                            username=None,
+                            scopes=frozenset(scopes),
+                        )
         if not token_value.startswith(TOKEN_PREFIX):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format."
+            )
 
-        _, _, token_id, secret = token_value.split("_", 3) if token_value.count("_") >= 3 else ("", "", "", "")
+        _, _, token_id, secret = (
+            token_value.split("_", 3)
+            if token_value.count("_") >= 3
+            else ("", "", "", "")
+        )
         if not token_id or not secret:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format."
+            )
 
         result = await db.execute(
             select(APIToken)
@@ -77,11 +115,20 @@ async def authenticate_bearer_token(
             )
         )
         token = result.scalar_one_or_none()
-        if token is None or token.token_hash != hash_api_token_secret(secret):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
+        if token is None or not hmac.compare_digest(
+            token.token_hash, hash_api_token_secret(secret)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token."
+            )
 
-        token.last_used_at = utcnow()
-        await db.flush()
+        now = utcnow()
+        if (
+            token.last_used_at is None
+            or _as_aware_utc(token.last_used_at) <= now - TOKEN_USAGE_WRITE_INTERVAL
+        ):
+            token.last_used_at = now
+            await db.commit()
         return AuthContext(
             token_id=token.id,
             token_name=token.name,
@@ -99,7 +146,10 @@ async def require_bearer_token_context(
 ) -> AuthContext:
     context = await authenticate_bearer_token(request, credentials, db)
     if context is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="A SaveMyContext app token is required.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A SaveMyContext app token is required.",
+        )
     return context
 
 
@@ -121,8 +171,18 @@ async def resolve_auth_context(
         return token_context
 
     active_token_count = await _active_token_count(db)
-    if active_token_count == 0 and is_trusted_loopback_request(request):
-        return AuthContext(token_id=None, token_name=None, username=None, scopes=frozenset({"*"}), bootstrap_request=True)
+    if (
+        active_token_count == 0
+        and get_settings().workspace_token_dir is None
+        and is_trusted_loopback_request(request)
+    ):
+        return AuthContext(
+            token_id=None,
+            token_name=None,
+            username=None,
+            scopes=frozenset({"*"}),
+            bootstrap_request=True,
+        )
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -131,7 +191,9 @@ async def resolve_auth_context(
 
 
 def require_scope(scope: str):
-    async def dependency(context: AuthContext = Depends(resolve_auth_context)) -> AuthContext:
+    async def dependency(
+        context: AuthContext = Depends(resolve_auth_context),
+    ) -> AuthContext:
         if not context.has_scope(scope):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

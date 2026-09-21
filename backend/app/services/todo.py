@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.services.files import atomic_write_text
+from app.services.locks import file_lock, lock_path_for_vault
 from app.models import ChatMessage
 from app.models.enums import MessageRole
 from app.schemas.processing import TodoItemDetail, TodoResult
@@ -29,6 +33,14 @@ COMPLETE_PATTERNS = (
 REOPEN_PATTERNS = (
     re.compile(r"\b(?:reopen|uncheck|mark)\s+(?P<item>.+?)\s+as\s+(?:active|open|not done|incomplete)\b", re.I),
 )
+
+
+class TodoListConflictError(RuntimeError):
+    """Raised when the shared list changed after a processor read it."""
+
+
+def todo_content_revision(markdown: str) -> str:
+    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -56,19 +68,40 @@ class TodoListService:
     def path(self) -> Path:
         return self.vault_root / "Dashboards" / TODO_FILE_NAME
 
+    @property
+    def lock_path(self) -> Path:
+        return lock_path_for_vault(self.vault_root, purpose="todo")
+
     def ensure_exists(self) -> Path:
+        with file_lock(self.lock_path):
+            return self._ensure_exists_unlocked()
+
+    def _ensure_exists_unlocked(self) -> Path:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
-            self.path.write_text(default_todo_markdown(), encoding="utf-8")
+            atomic_write_text(self.path, default_todo_markdown())
         return self.path
 
     def read_markdown(self) -> str:
-        return self.ensure_exists().read_text(encoding="utf-8")
+        markdown, _ = self.read_with_revision()
+        return markdown
 
-    def write_markdown(self, markdown: str) -> Path:
-        target = self.ensure_exists()
-        target.write_text(normalize_todo_markdown(markdown), encoding="utf-8")
-        return target
+    def read_with_revision(self) -> tuple[str, str]:
+        with file_lock(self.lock_path):
+            markdown = self._ensure_exists_unlocked().read_text(encoding="utf-8")
+            return markdown, todo_content_revision(markdown)
+
+    def write_markdown(self, markdown: str, *, expected_revision: str | None = None) -> Path:
+        with file_lock(self.lock_path):
+            target = self._ensure_exists_unlocked()
+            if expected_revision is not None:
+                current = target.read_text(encoding="utf-8")
+                if not hmac.compare_digest(todo_content_revision(current), expected_revision):
+                    raise TodoListConflictError(
+                        "The shared to-do list changed while this update was being prepared. Retry with the latest list."
+                    )
+            atomic_write_text(target, normalize_todo_markdown(markdown))
+            return target
 
 
 def default_todo_markdown() -> str:

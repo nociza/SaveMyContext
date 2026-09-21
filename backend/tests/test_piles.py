@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.migrations import apply_schema_migrations
@@ -57,6 +57,50 @@ async def test_apply_schema_migrations_is_idempotent(tmp_path) -> None:
         count = (await session.execute(select(Pile))).scalars().all()
     assert len(count) == len(DEFAULT_PILES)
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_schema_migration_adds_source_capture_idempotency_contract(tmp_path) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'capture-idempotency-migration.db'}")
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.exec_driver_sql("DROP TABLE source_captures")
+        await connection.exec_driver_sql(
+            """
+            CREATE TABLE source_captures (
+                id VARCHAR(36) NOT NULL PRIMARY KEY,
+                capture_kind VARCHAR(32) NOT NULL,
+                save_mode VARCHAR(16) NOT NULL,
+                category VARCHAR(32),
+                source_text TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        await connection.run_sync(apply_schema_migrations)
+        await connection.run_sync(apply_schema_migrations)
+
+        def inspect_contract(sync_connection):  # type: ignore[no-untyped-def]
+            inspector = inspect(sync_connection)
+            columns = {column["name"] for column in inspector.get_columns("source_captures")}
+            unique_columns = {
+                tuple(constraint.get("column_names") or ())
+                for constraint in inspector.get_unique_constraints("source_captures")
+            }
+            unique_columns.update(
+                tuple(index.get("column_names") or ())
+                for index in inspector.get_indexes("source_captures")
+                if index.get("unique")
+            )
+            return columns, unique_columns
+
+        columns, unique_columns = await connection.run_sync(inspect_contract)
+
+    assert {"capture_key", "capture_payload_hash"} <= columns
+    assert ("capture_key",) in unique_columns
     await engine.dispose()
 
 
@@ -160,5 +204,112 @@ async def test_apply_schema_migrations_backfills_pile_id_from_category(tmp_path)
 
         journal_pile = (await session.execute(select(Pile).where(Pile.slug == "journal"))).scalar_one()
         assert loaded.pile_id == journal_pile.id
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_apply_schema_migrations_backfills_overall_ingest_watermark(tmp_path) -> None:
+    from datetime import datetime, timezone
+
+    from app.models import ChatSession, ProviderName
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'ingest-watermark-backfill.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    captured_at = datetime(2026, 4, 18, 12, 0, tzinfo=timezone.utc)
+    stale_watermark = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    async with session_factory() as session:
+        missing = ChatSession(
+            provider=ProviderName.GEMINI,
+            external_session_id="missing-watermark",
+            last_captured_at=captured_at,
+        )
+        stale = ChatSession(
+            provider=ProviderName.GEMINI,
+            external_session_id="stale-watermark",
+            last_captured_at=captured_at,
+            last_snapshot_at=stale_watermark,
+        )
+        session.add_all([missing, stale])
+        await session.commit()
+        session_ids = [missing.id, stale.id]
+
+    async with engine.begin() as connection:
+        await connection.run_sync(apply_schema_migrations)
+        await connection.run_sync(apply_schema_migrations)
+
+    async with session_factory() as session:
+        loaded = (
+            await session.execute(select(ChatSession).where(ChatSession.id.in_(session_ids)))
+        ).scalars().all()
+        assert len(loaded) == 2
+        assert all(item.last_snapshot_at == item.last_captured_at for item in loaded)
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_apply_schema_migrations_backfills_distinct_sync_event_hashes(tmp_path) -> None:
+    from app.models import ChatSession, ProviderName, SyncEvent
+    from app.models.sync_event import raw_capture_hash
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'sync-event-hash-backfill.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    duplicate_capture = {"metadata": {"a": 1, "b": 2}, "revision": 1}
+    distinct_capture = {"revision": 2}
+    async with session_factory() as session:
+        first_session = ChatSession(provider=ProviderName.GEMINI, external_session_id="hash-session-1")
+        second_session = ChatSession(provider=ProviderName.GEMINI, external_session_id="hash-session-2")
+        session.add_all([first_session, second_session])
+        await session.flush()
+        session.add_all(
+            [
+                SyncEvent(session_id=first_session.id, message_count=1, raw_capture=duplicate_capture),
+                SyncEvent(
+                    session_id=first_session.id,
+                    message_count=0,
+                    raw_capture={"revision": 1, "metadata": {"b": 2, "a": 1}},
+                ),
+                SyncEvent(session_id=first_session.id, message_count=0, raw_capture=distinct_capture),
+                SyncEvent(session_id=second_session.id, message_count=1, raw_capture=duplicate_capture),
+            ]
+        )
+        await session.commit()
+        first_session_id = first_session.id
+        second_session_id = second_session.id
+
+    async with engine.begin() as connection:
+        await connection.run_sync(apply_schema_migrations)
+        await connection.run_sync(apply_schema_migrations)
+
+    async with session_factory() as session:
+        first_hashes = list(
+            (
+                await session.execute(
+                    select(SyncEvent.capture_hash).where(SyncEvent.session_id == first_session_id)
+                )
+            ).scalars()
+        )
+        second_hashes = list(
+            (
+                await session.execute(
+                    select(SyncEvent.capture_hash).where(SyncEvent.session_id == second_session_id)
+                )
+            ).scalars()
+        )
+
+    duplicate_hash = raw_capture_hash(duplicate_capture)
+    assert first_hashes.count(duplicate_hash) == 1
+    assert first_hashes.count(raw_capture_hash(distinct_capture)) == 1
+    assert first_hashes.count(None) == 1
+    assert second_hashes == [duplicate_hash]
 
     await engine.dispose()

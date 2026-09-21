@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -22,7 +23,7 @@ from app.schemas.openai_proxy import (
     ProxyResponseMetadata,
 )
 from app.services.browser_proxy.providers import resolve_provider_adapter
-from app.services.ingest import IngestService
+from app.services.ingest import IngestPhaseTwoError, IngestService
 
 if TYPE_CHECKING:
     from app.services.browser_proxy.service import BrowserProxyService
@@ -34,6 +35,7 @@ GENERIC_PAGE_TITLES = {
     "grok",
     "new chat",
 }
+logger = logging.getLogger(__name__)
 
 FAST_PROXY_PREAMBLE = (
     "Respond directly and quickly. Do not use extended reasoning, chain-of-thought, or thinking mode "
@@ -68,8 +70,26 @@ class OpenAIProxyService:
         )
 
         stored_session: ChatSession | None = None
+        stored_session_id: str | None = None
+        storage_pending = False
         if request.store:
-            stored_session = await self._store_completion(adapter.provider, completion, request)
+            try:
+                stored_session = await self._store_completion(adapter.provider, completion, request)
+                stored_session_id = stored_session.id
+            except IngestPhaseTwoError as exc:
+                # Provider generation succeeded and ingest already committed
+                # the canonical source. Return the expensive completion instead
+                # of making the client regenerate it; metadata tells the caller
+                # that enrichment/projection still needs a retry.
+                storage_pending = True
+                stored_session_id = exc.session_id
+                try:
+                    stored_session = await self._session_by_id(exc.session_id)
+                except Exception:  # noqa: BLE001 - never discard a completed provider response
+                    logger.exception(
+                        "Could not refresh pending proxy storage session %s; returning the generated completion.",
+                        exc.session_id,
+                    )
 
         prompt_tokens = self._estimate_tokens(browser_prompt)
         completion_tokens = self._estimate_tokens(completion.response_text)
@@ -94,7 +114,8 @@ class OpenAIProxyService:
                 source_url=completion.source_url,
                 title=completion.title,
                 store=request.store,
-                stored_session_id=stored_session.id if stored_session else None,
+                storage_pending=storage_pending,
+                stored_session_id=stored_session_id,
                 stored_markdown_path=stored_session.markdown_path if stored_session else None,
             ),
         )
@@ -170,6 +191,12 @@ class OpenAIProxyService:
                 ChatSession.provider == provider,
                 ChatSession.external_session_id == external_session_id,
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def _session_by_id(self, session_id: str) -> ChatSession | None:
+        result = await self.db.execute(
+            select(ChatSession).where(ChatSession.id == session_id)
         )
         return result.scalar_one_or_none()
 

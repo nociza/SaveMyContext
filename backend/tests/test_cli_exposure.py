@@ -79,7 +79,7 @@ def test_expose_bundle_create_can_emit_a_per_device_code_bundle(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     reset_runtime_env(monkeypatch)
-    paths = configure_xdg(monkeypatch, tmp_path)
+    configure_xdg(monkeypatch, tmp_path)
     assert main(["config", "init", "--public-url", "https://host.example.ts.net"]) == 0
 
     assert main(

@@ -308,6 +308,9 @@ export interface BackendSessionListItem {
   account_label?: string | null;
   title?: string | null;
   pile_slug?: string | null;
+  pile_assignment_locked?: boolean;
+  projection_pending?: boolean;
+  processing_pending?: boolean;
   is_discarded?: boolean;
   discarded_reason?: string | null;
   custom_tags: string[];
@@ -619,6 +622,7 @@ export interface BackendTodoGitStatus {
 export interface BackendTodoListRead {
   title: string;
   content: string;
+  revision: string;
   items: BackendTodoItem[];
   active_count: number;
   completed_count: number;
@@ -629,6 +633,7 @@ export interface BackendTodoListRead {
 export interface BackendTodoListUpdate {
   items: BackendTodoItem[];
   summary?: string;
+  expected_revision: string;
 }
 
 export interface BackendSessionNoteRead extends BackendSessionRead {
@@ -682,6 +687,7 @@ export interface KnowledgeSearchRequest {
 export interface ProcessingTaskItem {
   task_key: string;
   session_id: string;
+  source_revision: string;
   source_provider?: ProviderName;
   source_session_id?: string;
   title?: string;
@@ -693,6 +699,7 @@ export interface ProcessingTaskResponse {
   task_count: number;
   prompt?: string;
   worker_model?: string;
+  todo_source_revision?: string;
 }
 
 export interface ProcessingCompleteResult {
@@ -1021,6 +1028,7 @@ export interface SaveKnowledgePathResponse {
 }
 
 export interface SourceCapturePayload {
+  captureKey?: string;
   captureKind: SourceCaptureKind;
   saveMode: SourceSaveMode;
   title?: string;
@@ -1035,6 +1043,7 @@ export interface SourceCapturePayload {
 export interface SourceCaptureResponse {
   ok: boolean;
   sourceId?: string;
+  captureKey?: string;
   title?: string;
   captureKind?: SourceCaptureKind;
   saveMode?: SourceSaveMode;

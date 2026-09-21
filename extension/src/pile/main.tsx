@@ -1353,18 +1353,25 @@ function App() {
     if (!settings || route.pile !== "todo") {
       return;
     }
+    if (!todo?.revision) {
+      setTodoActionError("Refresh the shared checklist before updating it.");
+      await todoQuery.refetch();
+      return;
+    }
 
     setTodoActionError(null);
     setTodoSavingSummary(summary);
     try {
       await updateTodoList(settings as ExtensionSettings, {
         items: nextItems,
-        summary
+        summary,
+        expected_revision: todo.revision
       });
       setTodoDraft("");
       await todoQuery.refetch();
     } catch (todoError) {
       setTodoActionError(todoError instanceof Error ? todoError.message : "Could not update the shared checklist.");
+      await todoQuery.refetch();
     } finally {
       setTodoSavingSummary(null);
     }

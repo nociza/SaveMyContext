@@ -8,10 +8,25 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import get_settings
 from app.models import ChatMessage, ChatSession, FactTriplet, MessageRole, ProviderName, BuiltInPileSlug, SourceCapture
 from app.models.base import Base
-from app.services.agentic_search import AgenticSearchCandidate
+from app.services.agentic_search import VaultSearchCandidate, VaultSearchToolkit
 from app.services.graph import GraphService
 from app.services.search import SearchService
 from app.services.todo import TodoListService
+
+
+def test_local_vault_search_treats_leading_dashes_as_query_text(tmp_path, monkeypatch) -> None:
+    markdown_dir = tmp_path / "markdown"
+    note_path = markdown_dir / "SaveMyContext" / "Factual" / "flags.md"
+    note_path.parent.mkdir(parents=True)
+    note_path.write_text("Use the --hidden flag only when requested.\n", encoding="utf-8")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(markdown_dir))
+    get_settings.cache_clear()
+    try:
+        hits = VaultSearchToolkit().search("--hidden")
+    finally:
+        get_settings.cache_clear()
+
+    assert any(hit.path == str(note_path.resolve()) for hit in hits)
 
 
 @pytest.mark.asyncio
@@ -177,7 +192,7 @@ async def test_search_reads_capture_source_files_with_shell_search(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_search_uses_adk_candidates_when_google_is_configured(tmp_path, monkeypatch) -> None:
+async def test_search_uses_local_vault_candidates(tmp_path, monkeypatch) -> None:
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-search-adk.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -185,7 +200,6 @@ async def test_search_uses_adk_candidates_when_google_is_configured(tmp_path, mo
         await connection.run_sync(Base.metadata.create_all)
 
     monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
-    monkeypatch.setenv("SAVEMYCONTEXT_GOOGLE_API_KEY", "test-google-key")
     get_settings.cache_clear()
     try:
         note_path = tmp_path / "markdown" / "SaveMyContext" / "Factual" / "adk-note.md"
@@ -205,28 +219,28 @@ async def test_search_uses_adk_candidates_when_google_is_configured(tmp_path, mo
             await session.commit()
             session_id = chat_session.id
 
-        class FakeADKVaultSearchService:
+        class FakeLocalVaultSearchService:
             def __init__(self, settings=None) -> None:
                 self.settings = settings
 
-            async def search(self, query: str, *, limit: int = 10) -> list[AgenticSearchCandidate]:
+            async def search(self, query: str, *, limit: int = 10) -> list[VaultSearchCandidate]:
                 assert query == "rare adk token"
                 assert limit >= 24
                 return [
-                    AgenticSearchCandidate(
+                    VaultSearchCandidate(
                         path=str(note_path.resolve()),
-                        reason="ADK selected the best matching note.",
-                        snippet="ADK snippet for a query that is not in the database.",
+                        reason="Local search selected the best matching note.",
+                        snippet="Local snippet for a query that is not in the database.",
                     )
                 ]
 
-        monkeypatch.setattr("app.services.search.ADKVaultSearchService", FakeADKVaultSearchService)
+        monkeypatch.setattr("app.services.search.LocalVaultSearchService", FakeLocalVaultSearchService)
 
         async with session_factory() as session:
             search = await SearchService(session).search("rare adk token")
             assert any(result.session_id == session_id for result in search.results)
             assert any(
-                "adk snippet" in result.snippet.lower()
+                "local snippet" in result.snippet.lower()
                 for result in search.results
                 if result.session_id == session_id
             )

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.models import ChatMessage, ChatSession, FactTriplet, Pile, ProviderName, SourceCapture
 from app.schemas.search import SearchResult, SearchResponse
-from app.services.agentic_search import ADKVaultSearchService, VaultSearchToolkit
+from app.services.agentic_search import LocalVaultSearchService
 from app.services.accounts import session_account_key, session_account_label, session_matches_account
 from app.services.graph import entity_note_path
 from app.services.todo import TODO_TITLE, TodoListService
@@ -302,7 +302,7 @@ class SearchService:
                 )
             )
 
-        agentic_results = await self._agentic_results(
+        local_vault_results = await self._local_vault_results(
             query,
             limit=max(limit * 4, 24),
             pile=pile,
@@ -312,10 +312,10 @@ class SearchService:
             allowed_kinds=allowed_kinds,
             include_discarded=include_discarded,
         )
-        ordered = self._merge_results(agentic_results, results, limit=limit)
+        ordered = self._merge_results(local_vault_results, results, limit=limit)
         return SearchResponse(query=query, count=len(ordered), results=ordered)
 
-    async def _agentic_results(
+    async def _local_vault_results(
         self,
         query: str,
         *,
@@ -330,7 +330,7 @@ class SearchService:
         if not {"session", "source_capture"} & allowed_kinds:
             return []
 
-        hits = await self._agentic_candidates(query, limit=limit)
+        hits = await self._local_vault_candidates(query, limit=limit)
         if not hits:
             return []
 
@@ -422,18 +422,13 @@ class SearchService:
 
         return resolved
 
-    async def _agentic_candidates(self, query: str, *, limit: int):
+    async def _local_vault_candidates(self, query: str, *, limit: int):
         settings = get_settings()
-        if settings.google_api_key:
-            try:
-                candidates = await ADKVaultSearchService(settings=settings).search(query, limit=limit)
-                if candidates:
-                    return candidates
-            except Exception as exc:
-                logger.warning("ADK vault search failed; falling back to local grep search: %s", exc)
-
-        toolkit = VaultSearchToolkit(settings)
-        return toolkit.search(query, limit=limit)
+        try:
+            return await LocalVaultSearchService(settings=settings).search(query, limit=limit)
+        except Exception as exc:
+            logger.warning("Local vault search failed: %s", exc)
+            return []
 
     def _merge_results(
         self,

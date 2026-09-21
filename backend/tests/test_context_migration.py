@@ -9,6 +9,44 @@ from app.api.routes_context import router as context_router
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.models.base import Base
+from app.services.context_migration import ContextMigrationService
+from app.services.ingest import IngestPhaseTwoError
+
+
+@pytest.mark.asyncio
+async def test_context_import_maps_durable_phase_two_failure_to_retryable_503(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-context-failure.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    async def fail_after_source_commit(self, payload):  # type: ignore[no-untyped-def]
+        raise IngestPhaseTwoError("durable-session-id")
+
+    monkeypatch.setattr(ContextMigrationService, "import_context", fail_after_source_commit)
+    app = FastAPI()
+    app.include_router(context_router, prefix="/api/v1")
+
+    async def override_db_session():
+        async with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_db_session
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
+            response = await client.post(
+                "/api/v1/context/import",
+                json={
+                    "provider": "codex",
+                    "external_session_id": "phase-two-failure",
+                    "messages": [{"id": "message-1", "role": "user", "content": "Keep this."}],
+                },
+            )
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "5"
+        assert "source capture was preserved" in response.json()["detail"]
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

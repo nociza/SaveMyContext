@@ -55,6 +55,7 @@ export function extractFirstBalancedJsonObject(value: string): string | null {
 export interface ProcessingTaskReference {
   sessionId: string;
   taskKey?: string;
+  sourceRevision?: string;
 }
 
 interface ParsedProcessingResponse {
@@ -80,7 +81,8 @@ function normalizeExpectedTasks(expectedTasks: string[] | ProcessingTaskReferenc
     .filter((task) => Boolean(task.sessionId))
     .map((task, index) => ({
       sessionId: task.sessionId,
-      taskKey: task.taskKey || `task_${index + 1}`
+      taskKey: task.taskKey || `task_${index + 1}`,
+      sourceRevision: task.sourceRevision
     }));
 }
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,15 @@ from app.schemas.todo import TodoGitStatus, TodoListItem, TodoListRead, TodoList
 from app.services.git_versioning import GitVersioningService, GitRepositoryStatus
 from app.services.accounts import session_account_key, session_account_label
 from app.services.text import normalize_whitespace
-from app.services.todo import TODO_TITLE, TodoItem, TodoListService, parse_todo_items, render_todo_markdown, sanitize_todo_items
+from app.services.todo import (
+    TODO_TITLE,
+    TodoItem,
+    TodoListConflictError,
+    TodoListService,
+    parse_todo_items,
+    render_todo_markdown,
+    sanitize_todo_items,
+)
 
 
 router = APIRouter()
@@ -59,13 +67,14 @@ async def _build_todo_response(
     git_service: GitVersioningService,
     db: AsyncSession,
 ) -> TodoListRead:
-    content = todo_service.read_markdown()
+    content, revision = todo_service.read_with_revision()
     items = parse_todo_items(content)
     accounts = await _todo_item_accounts(db, items)
     completed_count = sum(1 for item in items if item.done)
     return TodoListRead(
         title=TODO_TITLE,
         content=content,
+        revision=revision,
         items=[
             TodoListItem(
                 text=item.text,
@@ -101,7 +110,13 @@ async def update_todo_list(
     todo_service = TodoListService()
     git_service = GitVersioningService(repo_root=todo_service.vault_root)
     items = sanitize_todo_items([TodoItem(text=item.text, done=item.done) for item in payload.items])
-    todo_service.write_markdown(render_todo_markdown(items))
+    try:
+        todo_service.write_markdown(
+            render_todo_markdown(items),
+            expected_revision=payload.expected_revision,
+        )
+    except TodoListConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     summary = normalize_whitespace(payload.summary or "") or "Update shared to-do list"
     await git_service.ensure_repo()
     await git_service.commit_all(message=summary)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -10,6 +12,7 @@ from app.models import ChatSession, ProviderName
 from app.models.base import Base
 from app.schemas.openai_proxy import ChatCompletionMessage, ChatCompletionRequest
 from app.services.browser_proxy.types import BrowserCompletionResult
+from app.services.ingest import IngestPhaseTwoError
 from app.services.openai_proxy import OpenAIProxyService
 
 
@@ -228,6 +231,59 @@ async def test_openai_proxy_without_store_does_not_persist_session(tmp_path) -> 
         assert not stored_sessions
         assert "Respond directly and quickly." in str(fake_browser.calls[0]["prompt_text"])
         assert "Conversation so far:" in str(fake_browser.calls[0]["prompt_text"])
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_openai_proxy_returns_generated_completion_when_storage_projection_is_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-openai-pending.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    completion = BrowserCompletionResult(
+        provider=ProviderName.CHATGPT,
+        model="browser-chatgpt",
+        provider_session_url="https://chatgpt.com/c/pending-session",
+        source_url="https://chatgpt.com/",
+        title="Pending projection",
+        prompt_text="Keep the expensive answer.",
+        response_text="Generated answer that must not be discarded.",
+        raw_capture={"source": "test"},
+        snapshot=None,
+    )
+
+    async with session_factory() as session:
+        service = OpenAIProxyService(
+            session,
+            FakeBrowserProxyService([completion]),  # type: ignore[arg-type]
+        )
+
+        async def fail_projection(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise IngestPhaseTwoError("durable-proxy-session")
+
+        monkeypatch.setattr(service, "_store_completion", fail_projection)
+        monkeypatch.setattr(
+            service,
+            "_session_by_id",
+            AsyncMock(side_effect=RuntimeError("database refresh unavailable")),
+        )
+        response = await service.create_chat_completion(
+            ChatCompletionRequest(
+                model="browser-chatgpt",
+                store=True,
+                messages=[ChatCompletionMessage(role="user", content="Keep the expensive answer.")],
+            )
+        )
+
+        assert response.choices[0].message.content == "Generated answer that must not be discarded."
+        assert response.savemycontext.storage_pending is True
+        assert response.savemycontext.stored_session_id == "durable-proxy-session"
+        assert response.savemycontext.stored_markdown_path is None
 
     await engine.dispose()
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +28,10 @@ from app.services.todo import TodoListService
 MAX_USER_PILES_IN_CLASSIFIER_PROMPT = 8
 
 
+class ManualPileAssignmentConflictError(RuntimeError):
+    """Automatic processing lost a race to an authoritative user assignment."""
+
+
 class SessionProcessor:
     def __init__(self, db: AsyncSession, *, llm_model: str | None = None) -> None:
         self.db = db
@@ -37,7 +41,11 @@ class SessionProcessor:
         self.base_dir = TodoListService().base_dir
 
     async def process(self, session_id: str) -> ChatSession:
-        session = await self._load_session(session_id)
+        # Claim before reading source messages or invoking an LLM. Holding this
+        # database write lock through the pipeline deliberately serializes a
+        # concurrent ingest; otherwise stale output could clear the newer
+        # capture's processing_pending flag after checking only pile state.
+        session = await self._claim_automatic_assignment(session_id)
         if not session.messages:
             return session
 
@@ -70,56 +78,68 @@ class SessionProcessor:
             auto_discard_categories=auto_discard_categories,
         )
 
-        if classification.pile == BuiltInPileSlug.DISCARDED:
-            reason = classification.reason or "LLM matched an auto-discard pile hint."
-            return await self.route_to_discard(session_id, reason=reason)
+        return await self._process_as_built_in_pile(
+            session,
+            classification.pile,
+            reason=classification.reason,
+        )
 
-        if classification.pile == BuiltInPileSlug.JOURNAL:
-            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
-            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
+    async def _process_as_built_in_pile(
+        self,
+        session: ChatSession,
+        built_in_pile: BuiltInPileSlug,
+        *,
+        reason: str,
+        manual_assignment: bool = False,
+    ) -> ChatSession:
+        if built_in_pile == BuiltInPileSlug.DISCARDED:
+            return await self.route_to_discard(
+                session.id,
+                reason=reason or "LLM matched an auto-discard pile hint.",
+            )
+
+        prompt_addendum = await self._prompt_addendum_for_built_in_pile(built_in_pile)
+        orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(built_in_pile))
+
+        if built_in_pile == BuiltInPileSlug.JOURNAL:
             result = SessionPipelineResult(
-                pile=classification.pile,
-                classification_reason=classification.reason,
+                pile=built_in_pile,
+                classification_reason=reason,
                 journal=await self._invoke_pipeline(
                     orchestrator.journal,
                     session.messages,
                     prompt_addendum=prompt_addendum,
                 ),
             )
-        elif classification.pile == BuiltInPileSlug.FACTUAL:
-            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
-            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
+        elif built_in_pile == BuiltInPileSlug.FACTUAL:
             factual = await self._invoke_pipeline(
                 orchestrator.factual,
                 session.messages,
                 prompt_addendum=prompt_addendum,
             )
             result = SessionPipelineResult(
-                pile=classification.pile,
-                classification_reason=classification.reason,
+                pile=built_in_pile,
+                classification_reason=reason,
                 factual=factual,
                 factual_triplets=factual.triplets,
             )
-        elif classification.pile == BuiltInPileSlug.TODO:
-            todo_markdown = TodoListService(base_dir=self.base_dir).read_markdown()
-            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
-            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
+        elif built_in_pile == BuiltInPileSlug.TODO:
+            todo_markdown, todo_source_revision = TodoListService(base_dir=self.base_dir).read_with_revision()
             result = SessionPipelineResult(
-                pile=classification.pile,
-                classification_reason=classification.reason,
+                pile=built_in_pile,
+                classification_reason=reason,
                 todo=await self._invoke_pipeline(
                     orchestrator.todo,
                     session.messages,
                     todo_markdown,
                     prompt_addendum=prompt_addendum,
                 ),
+                todo_source_revision=todo_source_revision,
             )
         else:
-            prompt_addendum = await self._prompt_addendum_for_built_in_pile(classification.pile)
-            orchestrator = self._orchestrator_for_model(await self._llm_model_for_built_in_pile(classification.pile))
             result = SessionPipelineResult(
-                pile=classification.pile,
-                classification_reason=classification.reason,
+                pile=built_in_pile,
+                classification_reason=reason,
                 idea=await self._invoke_pipeline(
                     orchestrator.ideas,
                     session.messages,
@@ -127,7 +147,11 @@ class SessionProcessor:
                 ),
             )
 
-        return await self.apply_pipeline_result(session_id, result)
+        return await self.apply_pipeline_result(
+            session.id,
+            result,
+            manual_assignment=manual_assignment,
+        )
 
     async def _classify_into_user_pile(
         self,
@@ -188,8 +212,11 @@ class SessionProcessor:
             attributes=attributes,
             custom_prompt_addendum=custom_addendum,
         )
+        session = await self._claim_automatic_assignment(session_id)
         session.built_in_pile = None
         session.pile_id = target.id
+        session.pile_assignment_locked = False
+        session.pile = target
         session.is_discarded = False
         session.discarded_reason = None
         session.classification_reason = reason
@@ -201,6 +228,7 @@ class SessionProcessor:
         session.pile_outputs = outputs or None
         await self._replace_triplets(session, [])
         session.last_processed_at = utcnow()
+        session.processing_pending = False
         await self.db.flush()
         return session
 
@@ -228,7 +256,7 @@ class SessionProcessor:
         factual_summaries: list[str] = []
 
         todo_service = TodoListService(base_dir=self.base_dir)
-        current_todo = todo_service.read_markdown()
+        current_todo, todo_source_revision = todo_service.read_with_revision()
         built_in_prompt_addendums = await self._built_in_prompt_addendum_map()
         built_in_llm_models = await self._built_in_llm_model_map()
 
@@ -299,6 +327,8 @@ class SessionProcessor:
         if not segment_records:
             return session
 
+        session = await self._claim_automatic_assignment(session_id)
+
         # Pick the dominant segment as the session's primary pile.
         dominant = max(
             segment_records,
@@ -309,6 +339,7 @@ class SessionProcessor:
 
         session.built_in_pile = dominant_pile
         session.pile_id = await self._resolve_pile_id_for_built_in_pile(dominant_pile)
+        session.pile_assignment_locked = False
         session.is_discarded = False
         session.discarded_reason = None
         session.classification_reason = str(dominant.get("reason") or "Segmented classification.")
@@ -345,7 +376,7 @@ class SessionProcessor:
             session.share_post = share_posts[0]
 
         if todo_markdown is not None:
-            todo_service.write_markdown(todo_markdown)
+            todo_service.write_markdown(todo_markdown, expected_revision=todo_source_revision)
             session.todo_summary = "; ".join(part for part in todo_summary_parts if part) or None
 
         session.pile_outputs = {"factual_summaries": factual_summaries} if factual_summaries else None
@@ -353,6 +384,7 @@ class SessionProcessor:
 
         await self._replace_triplets(session, triplets)
         session.last_processed_at = utcnow()
+        session.processing_pending = False
         await self.db.flush()
         return session
 
@@ -406,26 +438,28 @@ class SessionProcessor:
 
     async def mark_pending(self, session_id: str) -> ChatSession:
         session = await self._load_session(session_id)
-        session.built_in_pile = None
-        session.pile_id = None
-        session.is_discarded = False
-        session.discarded_reason = None
-        session.pile_outputs = None
-        session.segments = None
-        session.classification_reason = None
-        session.journal_entry = None
-        session.todo_summary = None
-        session.idea_summary = None
-        session.share_post = None
-        session.last_processed_at = None
-        await self._replace_triplets(session, [])
+        # Keep the last good derived projection visible while the browser
+        # worker computes a replacement. Freshness is represented explicitly
+        # instead of destroying useful output or comparing client/server clocks.
+        session.processing_pending = True
         await self.db.flush()
         return session
 
-    async def apply_pipeline_result(self, session_id: str, result: SessionPipelineResult) -> ChatSession:
-        session = await self._load_session(session_id)
+    async def apply_pipeline_result(
+        self,
+        session_id: str,
+        result: SessionPipelineResult,
+        *,
+        manual_assignment: bool = False,
+    ) -> ChatSession:
+        session = (
+            await self._claim_manual_assignment(session_id)
+            if manual_assignment
+            else await self._claim_automatic_assignment(session_id)
+        )
         session.built_in_pile = result.pile
         session.pile_id = await self._resolve_pile_id_for_built_in_pile(result.pile)
+        session.pile_assignment_locked = manual_assignment
         session.is_discarded = result.pile == BuiltInPileSlug.DISCARDED
         session.classification_reason = result.classification_reason
         session.segments = None
@@ -444,7 +478,10 @@ class SessionProcessor:
             session.pile_outputs = {"journal": result.journal.model_dump(exclude_none=True)}
             await self._replace_triplets(session, [])
         elif result.pile == BuiltInPileSlug.TODO and result.todo is not None:
-            TodoListService(base_dir=self.base_dir).write_markdown(result.todo.updated_markdown)
+            TodoListService(base_dir=self.base_dir).write_markdown(
+                result.todo.updated_markdown,
+                expected_revision=result.todo_source_revision,
+            )
             session.todo_summary = result.todo.summary
             session.pile_outputs = {"todo": result.todo.model_dump(exclude_none=True)}
             await self._replace_triplets(session, [])
@@ -473,14 +510,26 @@ class SessionProcessor:
             await self._replace_triplets(session, [])
 
         session.last_processed_at = utcnow()
+        session.processing_pending = False
         await self.db.flush()
         return session
 
-    async def route_to_discard(self, session_id: str, *, reason: str) -> ChatSession:
-        session = await self._load_session(session_id)
+    async def route_to_discard(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+        manual_assignment: bool = False,
+    ) -> ChatSession:
+        session = (
+            await self._claim_manual_assignment(session_id)
+            if manual_assignment
+            else await self._claim_automatic_assignment(session_id)
+        )
         discarded_pile = await self.piles.discarded_pile()
         session.built_in_pile = BuiltInPileSlug.DISCARDED
         session.pile_id = discarded_pile.id if discarded_pile else None
+        session.pile_assignment_locked = manual_assignment
         session.is_discarded = True
         session.discarded_reason = reason
         session.classification_reason = reason
@@ -491,6 +540,7 @@ class SessionProcessor:
         session.pile_outputs = None
         session.segments = None
         session.last_processed_at = utcnow()
+        session.processing_pending = False
         await self._replace_triplets(session, [])
         await self.db.flush()
         return session
@@ -499,12 +549,26 @@ class SessionProcessor:
         session = await self._load_session(session_id)
         if not session.is_discarded:
             return session
+        claimed = await self.db.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.is_discarded.is_(True),
+            )
+            .values(pile_assignment_locked=True)
+            .execution_options(synchronize_session=False)
+        )
+        if claimed.rowcount != 1:
+            return await self._load_session(session_id, refresh=True)
+        session = await self._load_session(session_id, refresh=True)
         session.is_discarded = False
         session.discarded_reason = None
         session.built_in_pile = None
         session.pile_id = None
+        session.pile_assignment_locked = False
         session.classification_reason = None
         session.last_processed_at = None
+        session.processing_pending = True
         await self.db.flush()
         return await self.process(session_id)
 
@@ -526,17 +590,33 @@ class SessionProcessor:
         return [str(item).strip() for item in raw if str(item).strip()]
 
     async def reassign_to_pile(self, session_id: str, pile_slug: str) -> ChatSession:
-        session = await self._load_session(session_id)
+        # A manual assignment must be based on one stable source revision.
+        # Claim and lock the row before reading messages so a concurrent ingest
+        # follows this transaction and can reprocess the newly locked pile.
+        session = await self._claim_manual_assignment(session_id)
         target = await self.piles.require_by_slug(pile_slug)
         from app.services.pile_service import PileService
 
         if PileService.is_built_in(target):
-            # Built-in piles use the existing typed pipeline. Fall back to a fresh
-            # process() call and overwrite the session's built-in pile to match.
-            session.built_in_pile = PileService.built_in_pile_for_pile(target)
-            session.pile_id = target.id
-            await self.db.flush()
-            return await self.process(session_id)
+            built_in_pile = PileService.built_in_pile_for_pile(target)
+            if built_in_pile is None:
+                raise ValueError(f"Pile '{target.slug}' does not map to a built-in pipeline.")
+            if built_in_pile == BuiltInPileSlug.DISCARDED:
+                return await self.route_to_discard(
+                    session_id,
+                    reason="Manually assigned to pile 'discarded'.",
+                    manual_assignment=True,
+                )
+
+            session.is_discarded = False
+            session.discarded_reason = None
+            reassigned = await self._process_as_built_in_pile(
+                session,
+                built_in_pile,
+                reason=f"Manually assigned to pile '{target.slug}'.",
+                manual_assignment=True,
+            )
+            return reassigned
 
         # User-defined pile: run the generic attribute-driven pipeline.
         attributes = list(target.attributes or [])
@@ -548,8 +628,11 @@ class SessionProcessor:
             attributes=attributes,
             custom_prompt_addendum=custom_addendum,
         )
+        session = await self._claim_manual_assignment(session_id)
         session.built_in_pile = None
         session.pile_id = target.id
+        session.pile_assignment_locked = True
+        session.pile = target
         session.is_discarded = False
         session.discarded_reason = None
         session.classification_reason = f"Manually assigned to pile '{target.slug}'."
@@ -560,6 +643,7 @@ class SessionProcessor:
         session.pile_outputs = outputs or None
         await self._replace_triplets(session, [])
         session.last_processed_at = utcnow()
+        session.processing_pending = False
         await self.db.flush()
         return session
 
@@ -577,7 +661,38 @@ class SessionProcessor:
             self.db.add(fact_triplet)
         await self.db.flush()
 
-    async def _load_session(self, session_id: str) -> ChatSession:
+    async def _claim_automatic_assignment(self, session_id: str) -> ChatSession:
+        result = await self.db.execute(
+            update(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.pile_assignment_locked.is_(False),
+            )
+            # A conditional no-op update is deliberate: it atomically proves
+            # the manual lock is still clear and holds the row until commit on
+            # both PostgreSQL and SQLite. A later user action waits and wins;
+            # an earlier one makes rowcount zero and cannot be overwritten.
+            .values(pile_assignment_locked=False)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise ManualPileAssignmentConflictError(
+                "A user manually assigned this session while automatic processing was running."
+            )
+        return await self._load_session(session_id, refresh=True)
+
+    async def _claim_manual_assignment(self, session_id: str) -> ChatSession:
+        result = await self.db.execute(
+            update(ChatSession)
+            .where(ChatSession.id == session_id)
+            .values(pile_assignment_locked=True)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise ValueError(f"Session '{session_id}' was not found.")
+        return await self._load_session(session_id, refresh=True)
+
+    async def _load_session(self, session_id: str, *, refresh: bool = False) -> ChatSession:
         statement = (
             select(ChatSession)
             .options(
@@ -588,6 +703,8 @@ class SessionProcessor:
             )
             .where(ChatSession.id == session_id)
         )
+        if refresh:
+            statement = statement.execution_options(populate_existing=True)
         result = await self.db.execute(statement)
         session = result.scalar_one()
         return session

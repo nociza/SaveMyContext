@@ -23,4 +23,12 @@ describe("extension manifest", () => {
 
     expect(manifest.permissions).toContain("clipboardWrite");
   });
+
+  it("requests arbitrary backend origins only when the user connects one", () => {
+    const manifest = JSON.parse(readFileSync(resolve("public/manifest.json"), "utf8"));
+
+    expect(manifest.host_permissions).not.toContain("https://*/*");
+    expect(manifest.host_permissions).not.toContain("http://*/*");
+    expect(manifest.optional_host_permissions).toEqual(["https://*/*", "http://*/*"]);
+  });
 });

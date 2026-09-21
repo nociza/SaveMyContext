@@ -1,15 +1,16 @@
 ---
 title: Service Options
-description: Choose between a hosted SaveMyContext backend and a self-hosted backend.
+description: Use the self-hosted backend today and understand the managed-service roadmap.
 ---
 
 # Service Options
 
-SaveMyContext is designed around one extension API and two deployment paths: a hosted backend for users who want a managed service, and a self-hosted backend for users who want to run the service themselves.
+SaveMyContext is designed around one extension API and two deployment paths. The self-hosted backend is available
+today. The hosted path is an architectural roadmap and control-plane preview, not an operating managed data plane.
 
-## Hosted Backend
+## Managed Backend Roadmap
 
-The hosted path is for users who want SaveMyContext to provide and operate the backend.
+The intended hosted path is for users who want SaveMyContext to provide and operate the backend.
 
 This path should handle:
 
@@ -21,6 +22,10 @@ This path should handle:
 - operational limits that protect the service from abuse
 
 The extension should not need a separate hosted implementation. It should connect to the hosted backend through the same public SaveMyContext API contract that self-hosted users use.
+
+The current cloud workspace does not yet provision Railway resources, persistent storage, secrets, backups, or
+extension-compatible connection strings. Its customer signup, plan-change, key-creation, and instance-plan mutations
+therefore fail closed on production-like deployments.
 
 ## Self-Hosted Backend
 
@@ -55,6 +60,7 @@ Hosted-only code should stay focused on account management, billing, deployment,
 
 ## What To Read Next
 
+- [Architecture and Production Roadmap](architecture.md)
 - [Getting Started](getting-started.md)
 - [Remote Access](remote-access.md)
 - [Security and Access](security-and-access.md)

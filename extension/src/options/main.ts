@@ -11,6 +11,13 @@ import type {
   SyncStatus
 } from "../shared/types";
 import { describeIndexingMode, normalizeRuleWords } from "../shared/indexing-rules";
+import { parseConnectionString } from "../shared/connection";
+import {
+  acquireOptionalHostPermissions,
+  optionalHostPermissionsForSettings,
+  removeOptionalHostPermissions,
+  safelyRemovableHostPermissions
+} from "../shared/host-permissions";
 import {
   normalizeProviderRefreshIntervalMinutes,
   PROVIDER_REFRESH_MAX_INTERVAL_MINUTES,
@@ -382,6 +389,42 @@ form?.addEventListener("submit", async (event) => {
     return;
   }
 
+  let requestedBackendUrl = nextSettings.backendUrl ?? "";
+  if (connectionString) {
+    try {
+      requestedBackendUrl = parseConnectionString(connectionString).baseUrl;
+    } catch (error) {
+      if (saveStatus) {
+        saveStatus.textContent = error instanceof Error ? error.message : "Connection string is invalid.";
+      }
+      return;
+    }
+  }
+  let newlyGrantedOrigins: string[] = [];
+  try {
+    const requestedOrigins = optionalHostPermissionsForSettings(
+      requestedBackendUrl,
+      nextSettings.pageSurfaceScope
+    );
+    const acquisition = await acquireOptionalHostPermissions(requestedOrigins);
+    newlyGrantedOrigins = acquisition.newlyGrantedOrigins;
+    if (!acquisition.granted) {
+      await removeOptionalHostPermissions(newlyGrantedOrigins);
+      if (saveStatus) {
+        saveStatus.textContent =
+          nextSettings.pageSurfaceScope === "all_pages"
+            ? "SaveMyContext needs all-page access before page surfaces can be enabled."
+            : "SaveMyContext needs access to the selected backend origin before it can connect.";
+      }
+      return;
+    }
+  } catch (error) {
+    if (saveStatus) {
+      saveStatus.textContent = error instanceof Error ? error.message : "Could not request backend access.";
+    }
+    return;
+  }
+
   const response = connectionString
     ? await sendMessage<SaveConnectionBundleResponse>({
         type: "SAVE_CONNECTION_BUNDLE",
@@ -396,6 +439,11 @@ form?.addEventListener("submit", async (event) => {
         payload: nextSettings
       });
   if (!response.ok) {
+    try {
+      await removeOptionalHostPermissions(newlyGrantedOrigins);
+    } catch (error) {
+      console.warn("SaveMyContext could not roll back newly granted host access", error);
+    }
     if (saveStatus) {
       saveStatus.textContent = response.error ?? "Could not validate the backend.";
     }
@@ -406,6 +454,20 @@ form?.addEventListener("submit", async (event) => {
   }
 
   formDirty = false;
+  if (currentSettings) {
+    try {
+      await removeOptionalHostPermissions(
+        safelyRemovableHostPermissions(
+          currentSettings.backendUrl,
+          currentSettings.pageSurfaceScope,
+          requestedBackendUrl,
+          nextSettings.pageSurfaceScope
+        )
+      );
+    } catch (error) {
+      console.warn("SaveMyContext could not remove obsolete host access", error);
+    }
+  }
   if (connectionStringInput) {
     connectionStringInput.value = "";
   }
@@ -514,7 +576,7 @@ for (const input of Object.values(providerInputs)) {
 }
 
 openDashboardButton?.addEventListener("click", () => {
-  void chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  void chrome.tabs.create({ url: chrome.runtime.getURL("workspace.html") });
 });
 
 saveKnowledgePathButton?.addEventListener("click", async () => {

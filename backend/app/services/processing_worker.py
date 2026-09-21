@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import hmac
+import hashlib
 import json
 from dataclasses import dataclass
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import Settings, get_settings
-from app.models import ChatSession
+from app.models import ChatMessage, ChatSession
 from app.schemas.processing_worker import (
     ProcessingCompleteResponse,
     ProcessingCompleteResult,
@@ -25,7 +27,7 @@ from app.services.idea_projects import IdeaProjectService
 from app.services.processing import SessionProcessor
 from app.services.prompt_templates import PromptTemplateService
 from app.services.text import extract_json_object
-from app.services.todo import TodoListService
+from app.services.todo import TodoListConflictError, TodoListService
 
 
 def browser_automation_enabled(settings: Settings | None = None) -> bool:
@@ -57,10 +59,39 @@ def immediate_processing_model(settings: Settings | None = None) -> str | None:
 class PendingProcessingTask:
     task_key: str
     session_id: str
+    source_revision: str
     source_provider: str
     source_session_id: str
     title: str | None
     transcript: str
+
+
+class ProcessingTaskConflictError(RuntimeError):
+    """Raised when a queued browser result no longer owns the session state."""
+
+
+def processing_source_revision(messages: list[ChatMessage]) -> str:
+    canonical_messages = [
+        {
+            "external_message_id": message.external_message_id,
+            "parent_external_message_id": message.parent_external_message_id,
+            "role": message.role.value,
+            "content": message.content,
+            "sequence_index": message.sequence_index,
+            "occurred_at": message.occurred_at.isoformat() if message.occurred_at else None,
+        }
+        for message in sorted(
+            messages,
+            key=lambda item: (item.sequence_index, item.external_message_id),
+        )
+    ]
+    canonical = json.dumps(
+        canonical_messages,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ExtensionBrowserProcessingService:
@@ -109,12 +140,16 @@ class ExtensionBrowserProcessingService:
         if not tasks:
             return ProcessingTaskResponse(available=False, worker_model=self.settings.browser_llm_model)
 
+        todo_markdown, todo_source_revision = TodoListService(
+            base_dir=self.exporter.base_dir
+        ).read_with_revision()
         return ProcessingTaskResponse(
             available=True,
             tasks=[
                 ProcessingTaskItem(
                     task_key=task.task_key,
                     session_id=task.session_id,
+                    source_revision=task.source_revision,
                     source_provider=task.source_provider,
                     source_session_id=task.source_session_id,
                     title=task.title,
@@ -123,16 +158,38 @@ class ExtensionBrowserProcessingService:
             ],
             prompt=await self._build_prompt(
                 tasks,
-                current_todo_markdown=TodoListService(base_dir=self.exporter.base_dir).read_markdown(),
+                current_todo_markdown=todo_markdown,
             ),
             worker_model=self.settings.browser_llm_model,
+            todo_source_revision=todo_source_revision,
         )
 
-    async def complete_task(self, session_ids: list[str], response_text: str) -> ProcessingCompleteResponse:
+    async def complete_task(
+        self,
+        session_ids: list[str],
+        response_text: str,
+        *,
+        todo_source_revision: str | None = None,
+        source_revisions: dict[str, str],
+    ) -> ProcessingCompleteResponse:
         try:
             parsed = self._parse_pipeline_results(session_ids, response_text)
         except ValueError as exc:
             raise ValueError(f"Could not parse the processing response as valid JSON: {exc}") from exc
+
+        await self._lock_completion_sessions(session_ids, source_revisions=source_revisions)
+        todo_service = TodoListService(base_dir=self.exporter.base_dir)
+        current_todo_revision = todo_source_revision
+        if any(item.todo is not None for item in parsed):
+            if current_todo_revision is None:
+                raise TodoListConflictError(
+                    "The processing task is missing its to-do source revision. Fetch a new task and retry."
+                )
+            _, actual_revision = todo_service.read_with_revision()
+            if not hmac.compare_digest(actual_revision, current_todo_revision):
+                raise TodoListConflictError(
+                    "The shared to-do list changed while this browser task was running. Fetch a new task and retry."
+                )
 
         results: list[ProcessingCompleteResult] = []
         self.processor.base_dir = self.exporter.base_dir
@@ -144,11 +201,14 @@ class ExtensionBrowserProcessingService:
                     classification_reason=item.classification_reason,
                     journal=item.journal,
                     todo=item.todo,
+                    todo_source_revision=current_todo_revision if item.todo is not None else None,
                     factual=item.factual,
                     factual_triplets=item.factual_triplets,
                     idea=item.idea,
                 ),
             )
+            if item.todo is not None:
+                _, current_todo_revision = todo_service.read_with_revision()
             markdown_path = await self.exporter.write_session(session)
             session.markdown_path = str(markdown_path)
             results.append(
@@ -156,11 +216,80 @@ class ExtensionBrowserProcessingService:
                     session_id=session.id,
                     pile_slug=session.pile.slug if session.pile else session.built_in_pile.value if session.built_in_pile else None,
                     markdown_path=session.markdown_path,
-                    processed=session.last_processed_at is not None,
+                    processed=not session.processing_pending,
                 )
             )
         await self.db.commit()
         return ProcessingCompleteResponse(processed_count=len(results), results=results)
+
+    async def _lock_completion_sessions(
+        self,
+        session_ids: list[str],
+        *,
+        source_revisions: dict[str, str],
+    ) -> None:
+        expected_ids = list(dict.fromkeys(session_ids))
+        if set(source_revisions) != set(expected_ids):
+            raise ProcessingTaskConflictError(
+                "The browser task is missing source revisions. Discard the stale result and fetch a new task."
+            )
+        rows = (
+            await self.db.execute(
+                select(
+                    ChatSession.id,
+                    ChatSession.pile_assignment_locked,
+                    ChatSession.processing_pending,
+                )
+                .where(ChatSession.id.in_(expected_ids))
+                .with_for_update()
+            )
+        ).all()
+        state_by_id = {
+            session_id: (is_locked, processing_pending)
+            for session_id, is_locked, processing_pending in rows
+        }
+        missing_ids = [session_id for session_id in expected_ids if session_id not in state_by_id]
+        if missing_ids:
+            raise ValueError(f"Processing sessions no longer exist: {', '.join(missing_ids)}.")
+        locked_ids = [session_id for session_id in expected_ids if state_by_id[session_id][0]]
+        if locked_ids:
+            raise ProcessingTaskConflictError(
+                "A user manually assigned a pile while this browser task was running. "
+                "Discard the stale result and fetch a new task."
+            )
+        completed_ids = [
+            session_id
+            for session_id in expected_ids
+            if not state_by_id[session_id][1]
+        ]
+        if completed_ids:
+            raise ProcessingTaskConflictError(
+                "This browser task was already completed or superseded. "
+                "Discard the stale result and fetch a new task."
+            )
+        message_rows = (
+            await self.db.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id.in_(expected_ids))
+                .order_by(ChatMessage.session_id, ChatMessage.sequence_index)
+            )
+        ).scalars().all()
+        messages_by_session: dict[str, list[ChatMessage]] = {session_id: [] for session_id in expected_ids}
+        for message in message_rows:
+            messages_by_session[message.session_id].append(message)
+        stale_ids = [
+            session_id
+            for session_id in expected_ids
+            if not hmac.compare_digest(
+                processing_source_revision(messages_by_session[session_id]),
+                source_revisions[session_id],
+            )
+        ]
+        if stale_ids:
+            raise ProcessingTaskConflictError(
+                "The source conversation changed while this browser task was running. "
+                "Discard the stale result and fetch a new task."
+            )
 
     async def _build_prompt(self, tasks: list[PendingProcessingTask], *, current_todo_markdown: str) -> str:
         prompt_tasks = [
@@ -218,6 +347,7 @@ class ExtensionBrowserProcessingService:
                 PendingProcessingTask(
                     task_key=f"task_{len(tasks) + 1}",
                     session_id=session.id,
+                    source_revision=processing_source_revision(session.messages),
                     source_provider=session.provider,
                     source_session_id=session.external_session_id,
                     title=session.title,
@@ -308,7 +438,7 @@ class ExtensionBrowserProcessingService:
         return [result_map[session_id] for session_id in expected_ids]
 
     def _pending_condition(self):
-        return or_(
-            ChatSession.last_processed_at.is_(None),
-            ChatSession.last_processed_at < ChatSession.last_captured_at,
+        return and_(
+            ChatSession.pile_assignment_locked.is_(False),
+            ChatSession.processing_pending.is_(True),
         )

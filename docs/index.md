@@ -39,17 +39,17 @@ smc install --remote
 </section>
 
 <section class="section">
-  <h2>One extension, two backend paths</h2>
+  <h2>One extension contract, one working path today</h2>
   <p class="section-lede">
-    Use the managed backend when you want the hosted service, or run the same core backend yourself.
-    The extension connects through the same API contract either way.
+    Run the self-hosted backend today. A future managed backend should deploy the same core and preserve the same
+    extension API and enrollment contract, but that managed data plane is not available yet.
   </p>
   <div class="grid two">
     <div class="card accent">
-      <h3>Hosted backend</h3>
+      <h3>Managed backend roadmap</h3>
       <p>
-        A managed SaveMyContext backend can handle account management, paid plans, hosted storage,
-        and service operations while preserving the extension's normal connection flow.
+        The control-plane preview still needs real provisioning, storage, backups, billing entitlement,
+        extension enrollment, and service operations before it can be offered as a hosted product.
       </p>
     </div>
     <div class="card accent">

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
 from app.schemas.ingest import IngestDiffRequest, IngestResponse
-from app.services.ingest import IngestService
+from app.services.ingest import IngestPhaseTwoError, IngestService
 
 
 router = APIRouter()
@@ -21,12 +21,19 @@ async def ingest_diff(
     if not payload.messages:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No messages supplied.")
 
-    session, new_message_count = await IngestService(db).ingest(payload)
+    try:
+        session, new_message_count = await IngestService(db).ingest(payload)
+    except IngestPhaseTwoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"Retry-After": "5"},
+        ) from exc
     return IngestResponse(
         session_id=session.id,
         pile_slug=session.pile.slug if session.pile else session.built_in_pile.value if session.built_in_pile else None,
         is_discarded=session.is_discarded,
         new_message_count=new_message_count,
         markdown_path=session.markdown_path,
-        processed=session.last_processed_at is not None,
+        processed=IngestService.processing_is_current(session),
     )

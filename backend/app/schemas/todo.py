@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TodoListItem(BaseModel):
@@ -26,6 +26,7 @@ class TodoGitStatus(BaseModel):
 class TodoListRead(BaseModel):
     title: str
     content: str
+    revision: str
     items: list[TodoListItem]
     active_count: int
     completed_count: int
@@ -36,3 +37,4 @@ class TodoListRead(BaseModel):
 class TodoListUpdate(BaseModel):
     items: list[TodoListItem]
     summary: str | None = None
+    expected_revision: str = Field(min_length=1, max_length=128)

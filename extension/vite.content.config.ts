@@ -5,11 +5,11 @@ import { defineConfig } from "vite";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   build: {
     emptyOutDir: false,
     outDir: "dist",
-    sourcemap: true,
+    sourcemap: mode === "development",
     lib: {
       entry: resolve(rootDir, "src/content/index.ts"),
       name: "savemycontextContent",
@@ -22,4 +22,4 @@ export default defineConfig({
       }
     }
   }
-});
+}));

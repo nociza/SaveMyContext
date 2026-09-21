@@ -11,6 +11,7 @@ from app.schemas.context import (
     ContextMigrationImportResponse,
 )
 from app.services.context_migration import ContextMigrationService
+from app.services.ingest import IngestPhaseTwoError
 
 
 router = APIRouter()
@@ -26,7 +27,14 @@ async def import_context(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No messages supplied.")
 
     service = ContextMigrationService(db)
-    session, new_message_count = await service.import_context(payload)
+    try:
+        session, new_message_count = await service.import_context(payload)
+    except IngestPhaseTwoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+            headers={"Retry-After": "5"},
+        ) from exc
     bundle = service.build_bundle(session)
     return ContextMigrationImportResponse(
         session_id=session.id,
@@ -34,7 +42,7 @@ async def import_context(
         is_discarded=session.is_discarded,
         new_message_count=new_message_count,
         markdown_path=session.markdown_path,
-        processed=session.last_processed_at is not None,
+        processed=not session.processing_pending,
         bundle=bundle,
     )
 

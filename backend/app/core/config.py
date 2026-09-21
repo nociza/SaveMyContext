@@ -47,6 +47,14 @@ def env_alias(name: str, *extra_names: str) -> AliasChoices:
 
 
 class Settings(BaseSettings):
+    workspace_enabled: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_ENABLED"))
+    workspace_worker: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_WORKER"))
+    workspace_token_dir: Path | None = Field(default=None, validation_alias=env_alias("WORKSPACE_TOKEN_DIR"))
+    workspace_external_processing: bool = Field(default=False, validation_alias=env_alias("WORKSPACE_EXTERNAL_PROCESSING"))
+    workspace_generate: bool = Field(default=False, validation_alias=env_alias("WORKSPACE_GENERATE"))
+    jev_api_key: str | None = Field(default=None, validation_alias=env_alias("JEV_API_KEY"))
+    jev_model: str = Field(default="typesafe/jev-1.13", validation_alias=env_alias("JEV_MODEL"))
+    jev_url: str = Field(default="https://openrouter.ai/api/alpha/decisions", validation_alias=env_alias("JEV_URL"))
     app_name: str = Field(default="SaveMyContext API", validation_alias=env_alias("APP_NAME"))
     debug: bool = Field(default=False, validation_alias=env_alias("DEBUG"))
     api_v1_prefix: str = "/api/v1"
@@ -57,7 +65,7 @@ class Settings(BaseSettings):
     markdown_dir: Path = Field(default=BACKEND_DIR / "data" / "markdown", validation_alias=env_alias("MARKDOWN_DIR"))
     vault_root_name: str = Field(default="SaveMyContext", validation_alias=env_alias("VAULT_ROOT_NAME"))
     public_url: str | None = Field(default=None, validation_alias=env_alias("PUBLIC_URL"))
-    minimum_extension_version: str = Field(default="0.2.0", validation_alias=env_alias("MINIMUM_EXTENSION_VERSION"))
+    minimum_extension_version: str = Field(default="0.2.1", validation_alias=env_alias("MINIMUM_EXTENSION_VERSION"))
     llm_backend: str = Field(default="auto", validation_alias=env_alias("LLM_BACKEND"))
     experimental_browser_automation: bool = Field(
         default=False,
@@ -135,6 +143,12 @@ class Settings(BaseSettings):
     google_api_key: str | None = Field(default=None, validation_alias=env_alias("GOOGLE_API_KEY"))
     google_model: str = Field(default="gemini-2.5-flash", validation_alias=env_alias("GOOGLE_MODEL"))
     request_timeout_seconds: float = Field(default=30.0, validation_alias=env_alias("REQUEST_TIMEOUT_SECONDS"))
+    max_request_body_bytes: int = Field(
+        default=25 * 1024 * 1024,
+        ge=1024,
+        le=256 * 1024 * 1024,
+        validation_alias=env_alias("MAX_REQUEST_BODY_BYTES"),
+    )
     git_versioning_enabled: bool = Field(default=True, validation_alias=env_alias("GIT_VERSIONING_ENABLED"))
     git_executable: str = Field(default="git", validation_alias=env_alias("GIT_EXECUTABLE"))
     git_author_name: str = Field(default="SaveMyContext", validation_alias=env_alias("GIT_AUTHOR_NAME"))

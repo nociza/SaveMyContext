@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
+from app.models import APIToken
 from app.models.base import Base
 from app.services.auth import create_api_token, ensure_admin_user
 
@@ -104,5 +106,10 @@ async def test_loopback_access_requires_a_token_once_any_token_exists(tmp_path) 
     assert unauthorized.status_code == 401
     assert authorized.status_code == 200
     assert authorized.json() == {"ok": True}
+
+    async with session_factory() as session:
+        persisted_token = await session.scalar(select(APIToken))
+        assert persisted_token is not None
+        assert persisted_token.last_used_at is not None
 
     await engine.dispose()

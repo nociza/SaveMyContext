@@ -1,18 +1,59 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import DEFAULT_OPENROUTER_MODEL, get_settings
-from app.models import ChatSession
+from app.models import ChatMessage, ChatSession
 from app.models.base import Base
-from app.models.enums import MessageRole, ProviderName
+from app.models.enums import BuiltInPileSlug, MessageRole, ProviderName
 from app.schemas.ingest import IngestDiffRequest, IngestMessage
 from app.services.ingest import IngestService
 from app.services.idea_projects import IdeaProjectService
-from app.services.processing_worker import ExtensionBrowserProcessingService, PendingProcessingTask, immediate_processing_model
+from app.services.processing_worker import (
+    ExtensionBrowserProcessingService,
+    PendingProcessingTask,
+    ProcessingTaskConflictError,
+    immediate_processing_model,
+    processing_source_revision,
+)
+from app.services.todo import TodoListConflictError, TodoListService
+
+
+def _source_revision_map(*sessions: ChatSession) -> dict[str, str]:
+    return {
+        session.id: processing_source_revision(list(session.messages))
+        for session in sessions
+    }
+
+
+def _task_source_revision_map(task) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    return {item.session_id: item.source_revision for item in task.tasks}
+
+
+async def _create_pending_session(session, *, external_id: str, captured_at: datetime) -> ChatSession:
+    stored = ChatSession(
+        provider=ProviderName.GEMINI,
+        external_session_id=external_id,
+        title=external_id,
+        last_captured_at=captured_at,
+        processing_pending=True,
+    )
+    stored.messages.append(
+        ChatMessage(
+            external_message_id=f"message-{external_id}",
+            role=MessageRole.USER,
+            content=f"Please update the list for {external_id}.",
+            sequence_index=1,
+        )
+    )
+    session.add(stored)
+    await session.commit()
+    await session.refresh(stored)
+    return stored
 
 
 @pytest.mark.asyncio
@@ -78,6 +119,7 @@ async def test_processing_worker_complete_applies_pipeline_result_batch_and_writ
                     "]}"
                 )
                 % (first_session.id, second_session.id),
+                source_revisions=_source_revision_map(first_session, second_session),
             )
 
             refreshed_first = await session.get(ChatSession, first_session.id)
@@ -133,6 +175,7 @@ async def test_processing_worker_prompt_includes_active_idea_projects(tmp_path, 
                     PendingProcessingTask(
                         task_key="task_1",
                         session_id="session-1",
+                        source_revision="0" * 64,
                         source_provider="gemini",
                         source_session_id="source-1",
                         title="Workflow badge",
@@ -191,6 +234,7 @@ async def test_processing_worker_complete_rejects_invalid_json_with_clear_error(
                 await worker.complete_task(
                     [stored_session.id],
                     '{"pile":"journal","classification_reason":"broken \\q"}',
+                    source_revisions=_source_revision_map(stored_session),
                 )
     finally:
         get_settings.cache_clear()
@@ -237,6 +281,7 @@ async def test_processing_worker_complete_accepts_task_key_reply_and_maps_to_exp
             result = await worker.complete_task(
                 [stored_session.id],
                 '{"results":[{"task_key":"task_1","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+                source_revisions=_source_revision_map(stored_session),
             )
 
             assert result.processed_count == 1
@@ -286,6 +331,7 @@ async def test_processing_worker_complete_accepts_single_result_with_wrong_sessi
             result = await worker.complete_task(
                 [stored_session.id],
                 '{"results":[{"session_id":"made-up-id","pile":"journal","classification_reason":"ok","journal":{"entry":"hello","action_items":[]},"factual_triplets":[],"idea":null}]}',
+                source_revisions=_source_revision_map(stored_session),
             )
 
             assert result.processed_count == 1
@@ -293,4 +339,302 @@ async def test_processing_worker_complete_accepts_single_result_with_wrong_sessi
     finally:
         get_settings.cache_clear()
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_rejects_stale_todo_revision(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-todo-stale.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        async with session_factory() as session:
+            stored = await _create_pending_session(
+                session,
+                external_id="todo-stale",
+                captured_at=datetime(2026, 7, 11, 10, 0, tzinfo=timezone.utc),
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            task = await worker.next_task()
+            assert task.todo_source_revision is not None
+
+            todo_service = TodoListService(base_dir=worker.exporter.base_dir)
+            todo_service.write_markdown("# To-Do List\n\n## Active\n- [ ] Manual edit\n\n## Done\n")
+            response_text = json.dumps(
+                {
+                    "results": [
+                        {
+                            "task_key": "task_1",
+                            "pile": "todo",
+                            "classification_reason": "Explicit task.",
+                            "todo": {
+                                "summary": "Stale update",
+                                "updated_markdown": "# To-Do List\n\n## Active\n- [ ] Stale AI edit\n\n## Done\n",
+                                "items": [],
+                            },
+                        }
+                    ]
+                }
+            )
+
+            with pytest.raises(TodoListConflictError, match="changed"):
+                await worker.complete_task(
+                    [stored.id],
+                    response_text,
+                    todo_source_revision=task.todo_source_revision,
+                    source_revisions=_task_source_revision_map(task),
+                )
+
+            assert "Manual edit" in todo_service.read_markdown()
+            assert "Stale AI edit" not in todo_service.read_markdown()
+    finally:
+        get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_chains_revision_across_multiple_todo_results(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-todo-batch.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    monkeypatch.setenv("SAVEMYCONTEXT_PROCESSING_BATCH_SIZE", "2")
+    get_settings.cache_clear()
+    try:
+        async with session_factory() as session:
+            await _create_pending_session(
+                session,
+                external_id="todo-first",
+                captured_at=datetime(2026, 7, 11, 10, 0, tzinfo=timezone.utc),
+            )
+            await _create_pending_session(
+                session,
+                external_id="todo-second",
+                captured_at=datetime(2026, 7, 11, 10, 5, tzinfo=timezone.utc),
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            task = await worker.next_task()
+            assert task.todo_source_revision is not None
+            assert len(task.tasks) == 2
+
+            first_markdown = "# To-Do List\n\n## Active\n- [ ] First cumulative task\n\n## Done\n"
+            final_markdown = (
+                "# To-Do List\n\n## Active\n- [ ] First cumulative task\n- [ ] Second cumulative task\n\n## Done\n"
+            )
+            response_text = json.dumps(
+                {
+                    "results": [
+                        {
+                            "task_key": "task_1",
+                            "pile": "todo",
+                            "classification_reason": "First explicit task.",
+                            "todo": {"summary": "First", "updated_markdown": first_markdown, "items": []},
+                        },
+                        {
+                            "task_key": "task_2",
+                            "pile": "todo",
+                            "classification_reason": "Second explicit task.",
+                            "todo": {"summary": "Second", "updated_markdown": final_markdown, "items": []},
+                        },
+                    ]
+                }
+            )
+
+            result = await worker.complete_task(
+                [item.session_id for item in task.tasks],
+                response_text,
+                todo_source_revision=task.todo_source_revision,
+                source_revisions=_task_source_revision_map(task),
+            )
+
+            assert result.processed_count == 2
+            stored_markdown = TodoListService(base_dir=worker.exporter.base_dir).read_markdown()
+            assert "First cumulative task" in stored_markdown
+            assert "Second cumulative task" in stored_markdown
+    finally:
+        get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_rejects_completion_after_manual_pile_lock(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-lock.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        async with session_factory() as session:
+            stored = await _create_pending_session(
+                session,
+                external_id="manual-lock",
+                captured_at=datetime(2026, 7, 11, 10, 0, tzinfo=timezone.utc),
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            task = await worker.next_task()
+            assert [item.session_id for item in task.tasks] == [stored.id]
+
+            stored.built_in_pile = BuiltInPileSlug.FACTUAL
+            stored.pile_assignment_locked = True
+            await session.commit()
+            response_text = json.dumps(
+                {
+                    "results": [
+                        {
+                            "task_key": "task_1",
+                            "pile": "journal",
+                            "classification_reason": "Stale automatic result.",
+                            "journal": {"entry": "Should not apply", "action_items": []},
+                        }
+                    ]
+                }
+            )
+
+            with pytest.raises(ProcessingTaskConflictError, match="manually assigned"):
+                await worker.complete_task(
+                    [stored.id],
+                    response_text,
+                    source_revisions=_task_source_revision_map(task),
+                )
+
+            await session.refresh(stored)
+            assert stored.pile_assignment_locked is True
+            assert stored.built_in_pile == BuiltInPileSlug.FACTUAL
+            assert stored.last_processed_at is None
+            assert stored.journal_entry is None
+    finally:
+        get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_rejects_completion_after_source_changes(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-source-race.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        async with session_factory() as session:
+            stored = await _create_pending_session(
+                session,
+                external_id="source-race",
+                captured_at=datetime(2026, 7, 11, 10, 0, tzinfo=timezone.utc),
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            task = await worker.next_task()
+            assert [item.session_id for item in task.tasks] == [stored.id]
+
+            session.add(
+                ChatMessage(
+                    session_id=stored.id,
+                    external_message_id="message-arrived-later",
+                    role=MessageRole.ASSISTANT,
+                    content="This arrived while the browser worker was running.",
+                    sequence_index=2,
+                )
+            )
+            stored.last_captured_at = datetime(2026, 7, 11, 10, 5, tzinfo=timezone.utc)
+            await session.commit()
+
+            response_text = json.dumps(
+                {
+                    "results": [
+                        {
+                            "task_key": "task_1",
+                            "pile": "journal",
+                            "classification_reason": "Stale automatic result.",
+                            "journal": {"entry": "Should not apply", "action_items": []},
+                        }
+                    ]
+                }
+            )
+            with pytest.raises(ProcessingTaskConflictError, match="source conversation changed"):
+                await worker.complete_task(
+                    [stored.id],
+                    response_text,
+                    source_revisions=_task_source_revision_map(task),
+                )
+
+            await session.refresh(stored)
+            assert stored.last_processed_at is None
+            assert stored.journal_entry is None
+    finally:
+        get_settings.cache_clear()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_processing_worker_rejects_replayed_completion(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-processing-worker-replay.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_LLM_BACKEND", "browser_proxy")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    get_settings.cache_clear()
+    try:
+        async with session_factory() as session:
+            stored = await _create_pending_session(
+                session,
+                external_id="completion-replay",
+                captured_at=datetime(2099, 7, 11, 10, 0, tzinfo=timezone.utc),
+            )
+            worker = ExtensionBrowserProcessingService(session)
+            task = await worker.next_task()
+            response_text = json.dumps(
+                {
+                    "results": [
+                        {
+                            "task_key": "task_1",
+                            "pile": "journal",
+                            "classification_reason": "Journal entry.",
+                            "journal": {"entry": "Applied exactly once", "action_items": []},
+                        }
+                    ]
+                }
+            )
+            source_revisions = _task_source_revision_map(task)
+
+            first = await worker.complete_task(
+                [stored.id],
+                response_text,
+                source_revisions=source_revisions,
+            )
+            assert first.processed_count == 1
+            assert await worker.pending_count() == 0
+
+            with pytest.raises(ProcessingTaskConflictError, match="already completed"):
+                await worker.complete_task(
+                    [stored.id],
+                    response_text,
+                    source_revisions=source_revisions,
+                )
+    finally:
+        get_settings.cache_clear()
     await engine.dispose()

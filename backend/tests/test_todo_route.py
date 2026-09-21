@@ -44,6 +44,7 @@ async def test_todo_route_returns_shared_document(tmp_path, monkeypatch) -> None
         assert response.status_code == 200
         payload = response.json()
         assert payload["title"] == "To-Do List"
+        assert len(payload["revision"]) == 64
         assert "- [ ] Buy milk" in payload["content"]
         assert payload["items"] == [{"text": "Buy milk", "done": False}]
         assert payload["active_count"] == 1
@@ -70,6 +71,7 @@ async def test_todo_route_updates_shared_document_and_records_git_status(tmp_pat
     try:
         todo_service = TodoListService()
         todo_service.write_markdown("# To-Do List\n\n## Active\n- [ ] Buy milk\n- [ ] Call Alice\n\n## Done\n")
+        _, expected_revision = todo_service.read_with_revision()
 
         app = FastAPI()
         app.include_router(todo_router, prefix="/api/v1")
@@ -89,7 +91,8 @@ async def test_todo_route_updates_shared_document_and_records_git_status(tmp_pat
                         {"text": "Call Alice", "done": False},
                         {"text": "Plan release", "done": False}
                     ],
-                    "summary": "Check off buy milk and add plan release"
+                    "summary": "Check off buy milk and add plan release",
+                    "expected_revision": expected_revision,
                 },
             )
 
@@ -117,6 +120,52 @@ async def test_todo_route_updates_shared_document_and_records_git_status(tmp_pat
                 text=True,
             )
             assert "Check off buy milk and add plan release" in log.stdout
+    finally:
+        get_settings.cache_clear()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_todo_route_rejects_stale_revision_without_overwriting_manual_edit(tmp_path, monkeypatch) -> None:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-todo-route-conflict.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setenv("SAVEMYCONTEXT_MARKDOWN_DIR", str(tmp_path / "markdown"))
+    monkeypatch.setenv("SAVEMYCONTEXT_GIT_VERSIONING_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        todo_service = TodoListService()
+        todo_service.write_markdown("# To-Do List\n\n## Active\n- [ ] Original\n\n## Done\n")
+        _, stale_revision = todo_service.read_with_revision()
+        todo_service.write_markdown("# To-Do List\n\n## Active\n- [ ] Manual edit\n\n## Done\n")
+
+        app = FastAPI()
+        app.include_router(todo_router, prefix="/api/v1")
+
+        async def override_db_session():
+            async with session_factory() as session:
+                yield session
+
+        app.dependency_overrides[get_db_session] = override_db_session
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:18888") as client:
+            response = await client.put(
+                "/api/v1/todo",
+                json={
+                    "items": [{"text": "Stale replacement", "done": False}],
+                    "summary": "Stale update",
+                    "expected_revision": stale_revision,
+                },
+            )
+
+        assert response.status_code == 409
+        assert "changed" in response.json()["detail"]
+        assert "Manual edit" in todo_service.read_markdown()
+        assert "Stale replacement" not in todo_service.read_markdown()
     finally:
         get_settings.cache_clear()
 

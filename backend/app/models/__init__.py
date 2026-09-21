@@ -10,6 +10,7 @@ from app.models.session import ChatSession
 from app.models.sync_event import SyncEvent
 from app.models.triplet import FactTriplet
 from app.models.user import User
+from app.workspace import models as workspace_models  # noqa: F401 - registers additive tables on shared Base.
 
 __all__ = [
     "APIToken",

@@ -6,12 +6,11 @@ import getpass
 import json
 import os
 import shutil
-import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.cli_exposure import (
     TAILSCALE_PROVIDER,
@@ -43,6 +42,8 @@ from app.cli_service import (
     stream_service_logs,
     write_service_definition,
 )
+from app.db.engine import create_configured_async_engine
+from app.db.migrations import apply_schema_migrations
 from app.models import APIToken, ProviderName
 from app.models.base import Base
 from app.services.auth import create_api_token, ensure_admin_user, revoke_api_token
@@ -131,7 +132,7 @@ def effective_connection_base_url(config: CLIConfig) -> str:
 
 
 def resolve_connection_scopes(args: argparse.Namespace) -> list[str]:
-    return sorted(set(args.scope or ["ingest", "read"]))
+    return sorted(set(args.scope or ["ingest", "read", "workspace:write"]))
 
 
 def connection_bundle_payload(
@@ -251,10 +252,11 @@ async def open_cli_session(config: CLIConfig, paths: CLIPaths):
     ensure_cli_directories(config, paths)
     ensure_env_file(paths.env_path)
     apply_runtime_environment(config, paths.env_path)
-    engine = create_async_engine(config.database_url)
+    engine = create_configured_async_engine(config.database_url)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(apply_schema_migrations)
     return engine, session_factory
 
 
@@ -649,7 +651,7 @@ def command_init_admin(args: argparse.Namespace) -> int:
 
 def command_token_create(args: argparse.Namespace) -> int:
     paths, config = load_effective_config(args)
-    scopes = sorted(set(args.scope or ["ingest", "read"]))
+    scopes = sorted(set(args.scope or ["ingest", "read", "workspace:write"]))
 
     async def run() -> dict[str, object]:
         engine, session_factory = await open_cli_session(config, paths)

@@ -34,6 +34,20 @@ Remote SaveMyContext backends must use `https://`.
 
 The extension refuses remote `http://` backends during validation.
 
+The extension's install-time host access is limited to supported AI providers and local backends. When you connect
+an arbitrary remote backend, Chrome asks for access to that backend origin specifically; broad HTTP/HTTPS access is
+optional rather than granted at installation.
+
+Use PostgreSQL for remote or multi-worker deployments. SQLite is supported only for a single local backend process.
+Terminate TLS and enforce distributed request/rate limits at a trusted reverse proxy; the application-level limits
+are defense in depth and do not coordinate across replicas.
+
+## Request limits
+
+The backend rejects request bodies larger than 25 MiB by default, including chunked requests. This accommodates
+large conversation snapshots while bounding memory use. Set `SAVEMYCONTEXT_MAX_REQUEST_BODY_BYTES` to a value from
+1 KiB through 256 MiB only when the reverse proxy and host have matching limits.
+
 ## Token scopes
 
 SaveMyContext uses scope-limited tokens:

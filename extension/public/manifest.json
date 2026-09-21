@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SaveMyContext",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Capture AI chat deltas from supported providers and sync them to a local SaveMyContext backend.",
   "permissions": ["storage", "tabs", "scripting", "activeTab", "alarms", "clipboardWrite"],
   "host_permissions": [
@@ -10,11 +10,10 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://claude.ai/*",
-    "https://*/*",
-    "http://*/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "assets/background.js",
     "type": "module"

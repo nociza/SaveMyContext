@@ -18,7 +18,7 @@ from app.services.piles import (
     restructure_config_from_pipeline_config,
     restructure_llm_model_from_config,
 )
-from app.services.processing import SessionProcessor
+from app.services.processing import ManualPileAssignmentConflictError, SessionProcessor
 
 
 class PileRestructureService:
@@ -115,6 +115,7 @@ class PileRestructureService:
             )
             .where(condition)
             .where(ChatSession.messages.any())
+            .where(ChatSession.pile_assignment_locked.is_(False))
             .order_by(ChatSession.last_processed_at.asc().nulls_first(), ChatSession.updated_at.asc())
             .limit(max(1, min(limit, 500)))
         )
@@ -132,6 +133,7 @@ class PileRestructureService:
                 selectinload(ChatSession.pile),
             )
             .where(ChatSession.messages.any())
+            .where(ChatSession.pile_assignment_locked.is_(False))
             .order_by(ChatSession.last_processed_at.asc().nulls_first(), ChatSession.updated_at.asc())
             .limit(max(1, min(limit, 500)))
         )
@@ -156,11 +158,20 @@ class PileRestructureService:
         processed_ids: list[str] = []
 
         for session in sessions:
-            before_slug = await self._session_pile_slug(session)
-            processed = await processor.process(session.id)
-            markdown_path = await self.exporter.write_session(processed)
-            processed.markdown_path = str(markdown_path)
-            after_slug = await self._session_pile_slug(processed)
+            try:
+                # Keep each automatic rewrite in a savepoint. A manual lock
+                # committed after selection but before the early processing
+                # claim skips this session without rolling back earlier work.
+                # Once claimed, source/manual writers wait and then win in the
+                # following transaction instead of racing the LLM result.
+                async with self.db.begin_nested():
+                    before_slug = await self._session_pile_slug(session)
+                    processed = await processor.process(session.id)
+                    markdown_path = await self.exporter.write_session(processed)
+                    processed.markdown_path = str(markdown_path)
+                    after_slug = await self._session_pile_slug(processed)
+            except ManualPileAssignmentConflictError:
+                continue
             if before_slug != after_slug:
                 moved_count += 1
             processed_ids.append(session.id)

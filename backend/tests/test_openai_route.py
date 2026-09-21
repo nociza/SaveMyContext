@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api.routes_openai import router as openai_router
 from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.models import ProviderName
 from app.models.base import Base
 from app.services.browser_proxy.providers import resolve_provider_adapter
 from app.services.browser_proxy.types import BrowserCompletionResult

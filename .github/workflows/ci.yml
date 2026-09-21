@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.8.11"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked dependencies
+        run: uv sync --frozen --group dev
+      - name: Audit Python dependencies
+        run: uv run --frozen pip-audit
+      - name: Lint backend
+        run: uv run --frozen ruff check app tests scripts
+      - name: Run backend tests
+        run: uv run --frozen python -m pytest -q
+      - name: Build distribution
+        run: uv build --no-sources
+      - name: Smoke-test installed wheel
+        run: >-
+          uv run --isolated --no-project --with ./dist/savemycontext-0.3.0-py3-none-any.whl python -c
+          "from app.core.version import get_app_version; from app.main import app;
+          assert app.title == 'SaveMyContext API'; print(get_app_version())"
+
+  postgres-smoke:
+    name: PostgreSQL schema smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: savemycontext
+          POSTGRES_USER: savemycontext
+          POSTGRES_PASSWORD: savemycontext
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U savemycontext -d savemycontext"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      SAVEMYCONTEXT_DATABASE_URL: postgresql+asyncpg://savemycontext:savemycontext@127.0.0.1:5432/savemycontext
+      SAVEMYCONTEXT_GIT_VERSIONING_ENABLED: "false"
+      SAVEMYCONTEXT_WORKSPACE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.8.11"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Initialize and probe PostgreSQL twice
+        run: uv run --frozen python scripts/postgres_smoke.py
+
+  extension:
+    name: Extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level=high
+      - name: Run extension tests
+        run: pnpm test
+      - name: Type-check extension
+        run: pnpm typecheck
+      - name: Build clean production bundle
+        run: |
+          mkdir -p dist
+          touch dist/stale-artifact.js
+          pnpm build
+          test ! -e dist/stale-artifact.js
+          test -f dist/manifest.json
+          test -z "$(find dist -type f -name '*.map' -print -quit)"
+
+  extension-e2e:
+    name: Extension end-to-end
+    needs: [backend, extension]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.8.11"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install locked backend dependencies
+        working-directory: backend
+        run: uv sync --frozen
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - name: Install locked extension dependencies
+        working-directory: extension
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        working-directory: extension
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run extension end-to-end tests
+        working-directory: extension
+        run: pnpm test:e2e
+      - name: Run shared workspace end-to-end test
+        shell: bash
+        run: |
+          test_dir=$(mktemp -d)
+          export SAVEMYCONTEXT_DATABASE_URL="sqlite+aiosqlite:///$test_dir/workspace.sqlite"
+          export SAVEMYCONTEXT_MARKDOWN_DIR="$test_dir/vault"
+          export SAVEMYCONTEXT_WORKSPACE_ENABLED=true
+          export SAVEMYCONTEXT_WORKSPACE_EXTERNAL_PROCESSING=false
+          cd backend
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 18890 &
+          service_pid=$!
+          trap 'kill "$service_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18890/health && break
+            sleep 1
+          done
+          cd ../extension
+          SMC_WORKSPACE_TEST_URL=http://127.0.0.1:18890 pnpm exec playwright test e2e/workspace.spec.ts

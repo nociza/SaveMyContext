@@ -15,6 +15,9 @@ ENV_PREFIXES = ("SAVEMYCONTEXT_", "OPENAI_", "OPENROUTER_")
 def isolate_runtime_environment() -> Iterator[None]:
     original = {key: value for key, value in os.environ.items() if key.startswith(ENV_PREFIXES)}
     get_settings.cache_clear()
+    # Existing tests explicitly exercise the retained legacy compatibility path.
+    # Workspace tests opt into the new default and its independent invariants.
+    os.environ["SAVEMYCONTEXT_WORKSPACE_ENABLED"] = "false"
 
     try:
         yield

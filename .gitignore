@@ -9,6 +9,10 @@ __pycache__/
 backend/.env
 backend/.coverage
 backend/*.egg-info/
+backend/build/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
 backend/data/
 extension/dist/
 extension/node_modules/

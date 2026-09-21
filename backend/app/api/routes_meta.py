@@ -29,7 +29,7 @@ async def capabilities(
             APIToken.revoked_at.is_(None),
         )
     )
-    auth_mode = "app_token" if active_tokens else "bootstrap_local"
+    auth_mode = "app_token" if active_tokens or settings.workspace_token_dir else "bootstrap_local"
     local_unauthenticated_access = auth_mode == "bootstrap_local"
     include_storage_paths = is_trusted_loopback_request(request) or auth_context is not None
     return CapabilityResponse(

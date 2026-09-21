@@ -9,7 +9,7 @@ import {
   LoaderCircle,
   Search,
   Settings2,
-  Sparkles
+  Sparkles,
 } from "lucide-react";
 
 import { fetchDashboardSummary, fetchSessions } from "../background/backend";
@@ -21,9 +21,8 @@ import {
   pileOrder,
   pilePageUrl,
   pilePalette,
-  notePageUrl,
   providerLabels,
-  titleFromSession
+  titleFromSession,
 } from "../shared/explorer";
 import { detectProviderFromUrl } from "../shared/provider";
 import type {
@@ -33,7 +32,7 @@ import type {
   ActiveChatMarkdownDumpResponse,
   BuiltInPileSlug,
   SourceCaptureResponse,
-  SyncStatus
+  SyncStatus,
 } from "../shared/types";
 import { mountApp } from "../ui/boot";
 import { Button } from "../ui/components/button";
@@ -44,7 +43,7 @@ import {
   formatProcessing,
   formatHistorySync,
   formatProviderDriftAlert,
-  processingButtonState
+  processingButtonState,
 } from "../ui/lib/format";
 import { sendRuntimeMessage, useExtensionBootstrap } from "../ui/lib/runtime";
 
@@ -55,10 +54,15 @@ type DashboardRouteState = {
 };
 
 function dashboardUrl(state: DashboardRouteState = {}): string {
-  const url = new URL(chrome.runtime.getURL("dashboard.html"));
-  if (state.pile) url.searchParams.set("pile", state.pile);
-  if (state.view) url.searchParams.set("view", state.view);
-  if (state.focus) url.searchParams.set("focus", state.focus);
+  const url = new URL(chrome.runtime.getURL("workspace.html"));
+  url.searchParams.set(
+    "view",
+    state.pile === "todo"
+      ? "tasks"
+      : state.view === "notes"
+        ? "memory"
+        : "inbox",
+  );
   return url.toString();
 }
 
@@ -73,13 +77,16 @@ function openPile(pile: BuiltInPileSlug): void {
 }
 
 function openNote(session: BackendSessionListItem): void {
-  void chrome.tabs.create({
-    url: notePageUrl({ id: session.id, pile: session.pile_slug ?? "factual" })
-  });
+  const url = new URL(dashboardUrl({ view: "notes" }));
+  url.searchParams.set("q", titleFromSession(session));
+  void chrome.tabs.create({ url: url.toString() });
   window.close();
 }
 
-function summaryOrNull(summary: BackendDashboardSummary | undefined, status: SyncStatus | null): BackendDashboardSummary | null {
+function summaryOrNull(
+  summary: BackendDashboardSummary | undefined,
+  status: SyncStatus | null,
+): BackendDashboardSummary | null {
   if (!summary || status?.backendValidationError) return null;
   return summary;
 }
@@ -90,58 +97,86 @@ function PopupApp() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDumping, setIsDumping] = useState(false);
-  const [activeTabInfo, setActiveTabInfo] = useState<{ url?: string; title?: string } | null>(null);
+  const [activeTabInfo, setActiveTabInfo] = useState<{
+    url?: string;
+    title?: string;
+  } | null>(null);
 
   useEffect(() => {
-    void chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-      const tab = tabs[0];
-      if (tab) setActiveTabInfo({ url: tab.url, title: tab.title });
-    });
+    void chrome.tabs
+      .query({ active: true, currentWindow: true })
+      .then((tabs) => {
+        const tab = tabs[0];
+        if (tab) setActiveTabInfo({ url: tab.url, title: tab.title });
+      });
   }, []);
 
   const summaryQuery = useQuery({
     queryKey: ["popup-summary", settings?.backendUrl, settings?.backendToken],
     queryFn: () => fetchDashboardSummary(settings as ExtensionSettings),
-    enabled: Boolean(settings && !status?.backendValidationError)
+    enabled: Boolean(settings && !status?.backendValidationError),
   });
 
   const sessionsQuery = useQuery({
     queryKey: ["popup-sessions", settings?.backendUrl, settings?.backendToken],
     queryFn: () => fetchSessions(settings as ExtensionSettings),
-    enabled: Boolean(settings && !status?.backendValidationError)
+    enabled: Boolean(settings && !status?.backendValidationError),
   });
 
   const summary = summaryOrNull(summaryQuery.data, status);
   const recentSessions = useMemo(
-    () => [...(sessionsQuery.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 3),
-    [sessionsQuery.data]
+    () =>
+      [...(sessionsQuery.data ?? [])]
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+        .slice(0, 3),
+    [sessionsQuery.data],
   );
 
-  const connection = status ? connectionTone(status) : { label: "Checking", tone: "neutral" as const };
-  const runQueueState = status ? processingButtonState(status) : { disabled: true, label: "Run queue", title: "Loading" };
+  const connection = status
+    ? connectionTone(status)
+    : { label: "Checking", tone: "neutral" as const };
+  const runQueueState = status
+    ? processingButtonState(status)
+    : { disabled: true, label: "Run queue", title: "Loading" };
 
   const pileData = useMemo(() => {
-    const counts = new Map((summary?.piles ?? []).map((item) => [item.pile_slug, item.count] as const));
+    const counts = new Map(
+      (summary?.piles ?? []).map(
+        (item) => [item.pile_slug, item.count] as const,
+      ),
+    );
     return pileOrder
       .filter((pile) => pile !== "discarded")
       .map((pile) => ({
         pile,
         label: pileLabels[pile],
         count: counts.get(pile) ?? 0,
-        accent: pilePalette[pile].accent
+        accent: pilePalette[pile].accent,
       }));
   }, [summary]);
 
   const activeProvider = detectProviderFromUrl(activeTabInfo?.url ?? "");
   const isProviderTab = Boolean(activeProvider);
-  const canDumpActiveChat = Boolean(activeProvider && activeProvider !== "codex");
-  const primaryLabel = isProviderTab && activeProvider
-    ? `Capture this ${providerLabels[activeProvider]} chat`
-    : "Save this page";
-  const dumpLabel = activeProvider ? `Dump ${providerLabels[activeProvider]} Markdown` : "Dump chat Markdown";
+  const canDumpActiveChat = Boolean(
+    activeProvider && activeProvider !== "codex",
+  );
+  const primaryLabel =
+    isProviderTab && activeProvider
+      ? `Capture this ${providerLabels[activeProvider]} chat`
+      : "Save this page";
+  const dumpLabel = activeProvider
+    ? `Dump ${providerLabels[activeProvider]} Markdown`
+    : "Dump chat Markdown";
 
-  const lastErrorText = status?.lastError ?? status?.historySyncLastError ?? status?.processingLastError ?? "None";
-  const lastSyncLabel = formatCompactDate(summary?.latest_sync_at ?? status?.lastSuccessAt, "never");
+  const lastErrorText =
+    status?.lastError ??
+    status?.historySyncLastError ??
+    status?.processingLastError ??
+    "None";
+  const lastSyncLabel = formatCompactDate(
+    summary?.latest_sync_at ?? status?.lastSuccessAt,
+    "never",
+  );
   const totalNotes = summary?.total_sessions ?? 0;
   const historySyncing = Boolean(status?.historySyncInProgress);
   const historySyncProcessed = status?.historySyncProcessedCount ?? 0;
@@ -156,22 +191,38 @@ function PopupApp() {
   const showHistorySyncBanner = Boolean(
     historySyncing &&
       activeProvider &&
-      historySyncCurrentProvider === activeProvider
+      historySyncCurrentProvider === activeProvider,
   );
-  const historySyncKnownTotal = typeof historySyncTotal === "number" && historySyncTotal > 0 ? historySyncTotal : null;
-  const historySyncProgressCount = historySyncKnownTotal !== null
-    ? Math.min(historySyncProcessed, historySyncKnownTotal)
-    : historySyncProcessed;
-  const historySyncProgress = historySyncKnownTotal !== null
-    ? Math.min(100, Math.max(4, Math.round((historySyncProgressCount / historySyncKnownTotal) * 100)))
-    : null;
-  const historySyncProgressLabel = historySyncKnownTotal !== null
-    ? `${formatNumber(historySyncProgressCount)}/${formatNumber(historySyncKnownTotal)} chats${
-        historySyncSkipped ? ` · ${formatNumber(historySyncSkipped)} skipped` : ""
-      }`
-    : historySyncProcessed > 0
-      ? `${formatNumber(historySyncProcessed)} chats synced${historySyncSkipped ? ` · ${formatNumber(historySyncSkipped)} skipped` : ""}`
-      : "Scanning chats…";
+  const historySyncKnownTotal =
+    typeof historySyncTotal === "number" && historySyncTotal > 0
+      ? historySyncTotal
+      : null;
+  const historySyncProgressCount =
+    historySyncKnownTotal !== null
+      ? Math.min(historySyncProcessed, historySyncKnownTotal)
+      : historySyncProcessed;
+  const historySyncProgress =
+    historySyncKnownTotal !== null
+      ? Math.min(
+          100,
+          Math.max(
+            4,
+            Math.round(
+              (historySyncProgressCount / historySyncKnownTotal) * 100,
+            ),
+          ),
+        )
+      : null;
+  const historySyncProgressLabel =
+    historySyncKnownTotal !== null
+      ? `${formatNumber(historySyncProgressCount)}/${formatNumber(historySyncKnownTotal)} chats${
+          historySyncSkipped
+            ? ` · ${formatNumber(historySyncSkipped)} skipped`
+            : ""
+        }`
+      : historySyncProcessed > 0
+        ? `${formatNumber(historySyncProcessed)} chats synced${historySyncSkipped ? ` · ${formatNumber(historySyncSkipped)} skipped` : ""}`
+        : "Scanning chats…";
 
   async function handleSave(): Promise<void> {
     setCaptureStatus("");
@@ -181,16 +232,20 @@ function PopupApp() {
     try {
       const response = await sendRuntimeMessage<SourceCaptureResponse>({
         type: "SAVE_CURRENT_PAGE_SOURCE",
-        payload: { saveMode: "raw" }
+        payload: { saveMode: "raw" },
       });
 
-      if (!response.ok) throw new Error(response.error ?? "Could not save the current page.");
+      if (!response.ok)
+        throw new Error(response.error ?? "Could not save the current page.");
 
       setCaptureStatus(`Saved · ${response.title ?? "page"}`);
       await reload();
       await summaryQuery.refetch();
     } catch (captureError) {
-      const message = captureError instanceof Error ? captureError.message : "Could not save the current page.";
+      const message =
+        captureError instanceof Error
+          ? captureError.message
+          : "Could not save the current page.";
       setCaptureStatus(message);
       setActionError(message);
     } finally {
@@ -200,9 +255,13 @@ function PopupApp() {
 
   async function handleQuickSearch(): Promise<void> {
     setActionError(null);
-    const response = await sendRuntimeMessage<{ ok: boolean; error?: string }>({ type: "OPEN_QUICK_SEARCH" });
+    const response = await sendRuntimeMessage<{ ok: boolean; error?: string }>({
+      type: "OPEN_QUICK_SEARCH",
+    });
     if (!response.ok) {
-      setActionError(response.error ?? "Could not open quick search on the current page.");
+      setActionError(
+        response.error ?? "Could not open quick search on the current page.",
+      );
       return;
     }
     window.close();
@@ -214,18 +273,22 @@ function PopupApp() {
     setIsDumping(true);
 
     try {
-      const response = await sendRuntimeMessage<ActiveChatMarkdownDumpResponse>({
-        type: "DUMP_ACTIVE_CHAT_MARKDOWN"
-      });
+      const response = await sendRuntimeMessage<ActiveChatMarkdownDumpResponse>(
+        {
+          type: "DUMP_ACTIVE_CHAT_MARKDOWN",
+        },
+      );
       if (!response.ok || !response.markdown) {
-        throw new Error(response.error ?? "Could not dump Markdown for this chat.");
+        throw new Error(
+          response.error ?? "Could not dump Markdown for this chat.",
+        );
       }
       await navigator.clipboard.writeText(response.markdown);
       const title = response.title ?? "chat";
       setCaptureStatus(
         response.backendStored === false
           ? `Copied · backend not updated · ${title}`
-          : `Copied Markdown · ${title}`
+          : `Copied Markdown · ${title}`,
       );
       if (response.warning) {
         setActionError(response.warning);
@@ -233,7 +296,10 @@ function PopupApp() {
       await reload();
       await summaryQuery.refetch();
     } catch (dumpError) {
-      const message = dumpError instanceof Error ? dumpError.message : "Could not dump Markdown for this chat.";
+      const message =
+        dumpError instanceof Error
+          ? dumpError.message
+          : "Could not dump Markdown for this chat.";
       setCaptureStatus(message);
       setActionError(message);
     } finally {
@@ -243,7 +309,9 @@ function PopupApp() {
 
   async function handleRunQueue(): Promise<void> {
     setActionError(null);
-    const response = await sendRuntimeMessage<{ ok: boolean; error?: string }>({ type: "START_PROCESSING" });
+    const response = await sendRuntimeMessage<{ ok: boolean; error?: string }>({
+      type: "START_PROCESSING",
+    });
     if (!response.ok) {
       setActionError(response.error ?? "AI processing failed.");
       return;
@@ -253,7 +321,11 @@ function PopupApp() {
   }
 
   const summaryErrorMessage =
-    summaryQuery.error instanceof Error ? summaryQuery.error.message : summaryQuery.error ? "Could not load summary." : "";
+    summaryQuery.error instanceof Error
+      ? summaryQuery.error.message
+      : summaryQuery.error
+        ? "Could not load summary."
+        : "";
   const toastMessage = actionError || summaryErrorMessage;
   const hasDrift = Boolean(status?.providerDriftAlert);
 
@@ -274,21 +346,29 @@ function PopupApp() {
       <div className="sr-only">
         <span id="last-session">{status?.lastSessionKey ?? ""}</span>
         <span id="last-error">{lastErrorText}</span>
-        <span id="history-sync">{settings && status ? formatHistorySync(settings, status) : "Loading"}</span>
-        <span id="processing-status">{status ? formatProcessing(status) : "Loading"}</span>
+        <span id="history-sync">
+          {settings && status ? formatHistorySync(settings, status) : "Loading"}
+        </span>
+        <span id="processing-status">
+          {status ? formatProcessing(status) : "Loading"}
+        </span>
       </div>
 
       <header className="flex items-center justify-between px-5 pb-2 pt-4">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--color-action)] text-[var(--color-action-ink)]">
-            <span className="display-serif text-[15px] font-semibold leading-none">C</span>
+            <span className="display-serif text-[15px] font-semibold leading-none">
+              C
+            </span>
           </div>
           <div className="flex flex-col leading-none">
             <span className="display-serif text-[15px] font-semibold tracking-tight text-[var(--color-ink)]">
               SaveMyContext
             </span>
             <span className="mt-0.5 text-[10.5px] text-[var(--color-ink-subtle)]">
-              {loading ? "Loading…" : `${formatNumber(totalNotes)} notes · synced ${lastSyncLabel}`}
+              {loading
+                ? "Loading…"
+                : `${formatNumber(totalNotes)} notes · synced ${lastSyncLabel}`}
             </span>
           </div>
         </div>
@@ -296,7 +376,10 @@ function PopupApp() {
           {summaryQuery.isFetching || sessionsQuery.isFetching ? (
             <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--color-ink-subtle)]" />
           ) : null}
-          <span className={`h-2 w-2 rounded-full ${connectionDotClass}`} title={connection.label} />
+          <span
+            className={`h-2 w-2 rounded-full ${connectionDotClass}`}
+            title={connection.label}
+          />
         </div>
       </header>
 
@@ -304,7 +387,10 @@ function PopupApp() {
         <div className="relative overflow-hidden rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-3">
           <div
             className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-60"
-            style={{ background: "radial-gradient(circle, rgba(15,138,132,0.18), transparent 65%)" }}
+            style={{
+              background:
+                "radial-gradient(circle, rgba(15,138,132,0.18), transparent 65%)",
+            }}
           />
           <button
             type="button"
@@ -323,9 +409,12 @@ function PopupApp() {
                 )}
               </div>
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold leading-tight">{primaryLabel}</div>
+                <div className="text-[13px] font-semibold leading-tight">
+                  {primaryLabel}
+                </div>
                 <div className="mt-0.5 truncate text-[11px] text-[var(--color-action-ink-subtle)]">
-                  {activeTabInfo?.title ?? "Capture the current tab to your vault"}
+                  {activeTabInfo?.title ??
+                    "Capture the current tab to your vault"}
                 </div>
               </div>
             </div>
@@ -359,7 +448,9 @@ function PopupApp() {
             className="mt-2 flex w-full items-center gap-3 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper)] px-4 py-2.5 text-left transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-paper-sunken)]"
           >
             <Search className="h-4 w-4 shrink-0 text-[var(--color-ink-soft)]" />
-            <span className="text-[13px] text-[var(--color-ink-soft)]">Search your vault on this page…</span>
+            <span className="text-[13px] text-[var(--color-ink-soft)]">
+              Search your vault on this page…
+            </span>
             <kbd className="ml-auto rounded-md border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-ink-subtle)]">
               ⏎
             </kbd>
@@ -370,9 +461,13 @@ function PopupApp() {
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-[var(--color-accent-strong)]">
                   <LoaderCircle className="h-3 w-3 shrink-0 animate-spin" />
-                  <span className="truncate">Syncing {historySyncProviderLabel} chats</span>
+                  <span className="truncate">
+                    Syncing {historySyncProviderLabel} chats
+                  </span>
                 </span>
-                <span className="shrink-0 text-[10.5px] font-medium text-[var(--color-accent-strong)]/80">{historySyncProgressLabel}</span>
+                <span className="shrink-0 text-[10.5px] font-medium text-[var(--color-accent-strong)]/80">
+                  {historySyncProgressLabel}
+                </span>
               </div>
               <div className="relative h-1 overflow-hidden rounded-full bg-[rgba(94,106,210,0.16)]">
                 {historySyncProgress === null ? (
@@ -390,34 +485,53 @@ function PopupApp() {
       </div>
 
       <div className="mx-5 mb-3 grid grid-cols-2 gap-2">
-          {pileData.map((item) => (
-            <button
-              key={item.pile}
-              type="button"
-              data-testid={`popup-pile-${item.pile}`}
-              onClick={() => openPile(item.pile)}
-            className="group relative flex items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2.5 text-left transition hover:-translate-y-px hover:border-[var(--color-line-strong)] hover:shadow-[0_8px_22px_-12px_rgba(15,27,44,0.18)]"
-          >
-            <div className="flex min-w-0 items-center gap-2.5">
-              <div
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[14px]"
-                style={{
-                  backgroundColor: `${item.accent}1a`,
-                  color: item.accent,
-                  fontFamily: "var(--font-display)"
+        {status?.processingMode === "workspace"
+          ? ["inbox", "tasks", "memory", "projects"].map((view) => (
+              <button
+                key={view}
+                className="rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-3 text-left capitalize"
+                onClick={() => {
+                  void chrome.tabs.create({
+                    url: chrome.runtime.getURL(`workspace.html?view=${view}`),
+                  });
+                  window.close();
                 }}
               >
-                {pileGlyphs[item.pile]}
-              </div>
-              <div className="flex min-w-0 flex-col leading-none">
-                <span className="text-[13px] font-semibold text-[var(--color-ink)]">{item.label}</span>
-                <span className="mt-1 text-[10.5px] uppercase tracking-[0.12em] text-[var(--color-ink-subtle)]">
-                  {item.count === 1 ? "1 note" : `${formatNumber(item.count)} notes`}
-                </span>
-              </div>
-            </div>
-          </button>
-        ))}
+                {view} ↗
+              </button>
+            ))
+          : pileData.map((item) => (
+              <button
+                key={item.pile}
+                type="button"
+                data-testid={`popup-pile-${item.pile}`}
+                onClick={() => openPile(item.pile)}
+                className="group relative flex items-center justify-between gap-2 rounded-[8px] border border-[var(--color-line)] bg-[var(--color-paper-raised)] px-3 py-2.5 text-left transition hover:-translate-y-px hover:border-[var(--color-line-strong)] hover:shadow-[0_8px_22px_-12px_rgba(15,27,44,0.18)]"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <div
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] text-[14px]"
+                    style={{
+                      backgroundColor: `${item.accent}1a`,
+                      color: item.accent,
+                      fontFamily: "var(--font-display)",
+                    }}
+                  >
+                    {pileGlyphs[item.pile]}
+                  </div>
+                  <div className="flex min-w-0 flex-col leading-none">
+                    <span className="text-[13px] font-semibold text-[var(--color-ink)]">
+                      {item.label}
+                    </span>
+                    <span className="mt-1 text-[10.5px] uppercase tracking-[0.12em] text-[var(--color-ink-subtle)]">
+                      {item.count === 1
+                        ? "1 note"
+                        : `${formatNumber(item.count)} notes`}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
       </div>
 
       <div className="mx-5 flex min-h-0 flex-1 flex-col">
@@ -435,7 +549,9 @@ function PopupApp() {
           {recentSessions.length ? (
             recentSessions.map((session) => {
               const pile = session.pile_slug ?? "factual";
-              const accent = isBuiltInPileSlug(pile) ? pilePalette[pile].accent : "var(--color-factual)";
+              const accent = isBuiltInPileSlug(pile)
+                ? pilePalette[pile].accent
+                : "var(--color-factual)";
               return (
                 <button
                   key={session.id}
@@ -443,13 +559,18 @@ function PopupApp() {
                   onClick={() => openNote(session)}
                   className="flex w-full items-center gap-3 rounded-[8px] border border-transparent bg-transparent px-2 py-2 text-left transition hover:border-[var(--color-line)] hover:bg-[var(--color-paper-raised)]"
                 >
-                  <span className="h-8 w-1 rounded-full shrink-0" style={{ backgroundColor: accent }} />
+                  <span
+                    className="h-8 w-1 rounded-full shrink-0"
+                    style={{ backgroundColor: accent }}
+                  />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-semibold leading-tight text-[var(--color-ink)]">
                       {titleFromSession(session)}
                     </span>
                     <span className="mt-0.5 block truncate text-[10.5px] text-[var(--color-ink-subtle)]">
-                      {displayPileLabel(pile)} · {providerLabels[session.provider]} · {formatCompactDate(session.updated_at)}
+                      {displayPileLabel(pile)} ·{" "}
+                      {providerLabels[session.provider]} ·{" "}
+                      {formatCompactDate(session.updated_at)}
                     </span>
                   </span>
                 </button>
@@ -472,7 +593,8 @@ function PopupApp() {
               className="truncate rounded-[8px] border border-[var(--color-warning-line)] bg-[var(--color-warning-soft)] px-3 py-2 text-[11.5px] font-medium text-[var(--color-warning)]"
             >
               <span id="provider-drift" className="sr-only">
-                {status?.providerDriftAlert?.provider}: {status?.providerDriftAlert?.message}
+                {status?.providerDriftAlert?.provider}:{" "}
+                {status?.providerDriftAlert?.message}
               </span>
               {formatProviderDriftAlert(status?.providerDriftAlert)}
             </div>
@@ -522,7 +644,11 @@ function PopupApp() {
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span>
-                Queue (<span id="processing-pending">{formatNumber(status?.processingPendingCount)}</span>)
+                Queue (
+                <span id="processing-pending">
+                  {formatNumber(status?.processingPendingCount)}
+                </span>
+                )
               </span>
             </Button>
           </>

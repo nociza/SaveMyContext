@@ -1,108 +1,128 @@
 # SaveMyContext
 
-SaveMyContext turns your conversations with ChatGPT, Gemini, Grok, Codex, and Claude Code into a private knowledge base you actually keep.
+A private memory and action workspace for the thinking scattered across your AI
+conversations. Capture once, keep the evidence, and pick up the work anywhere.
 
-It runs a backend you control, syncs through a Chrome extension, and writes everything into searchable notes, dashboards, a shared to-do list, and an Obsidian-friendly Markdown vault.
+**One service. One SQLite database. One shared workspace.** The browser extension,
+web interface, and agent skill use the same API. Tasks are part of your context,
+not another disconnected to-do list.
 
-## Scenarios
+## The workspace
 
-- **Tesla + Grok:** you talk through an idea, trip plan, or problem while driving. Later, that Grok conversation is already in your knowledge base instead of trapped in the car.
-- **ChatGPT research:** you run long research threads, compare options, and refine questions. SaveMyContext archives the thread, classifies it, and keeps it searchable with the rest of your notes.
-- **Gemini journal and planning:** you use Gemini for journaling, reflection, or task planning. SaveMyContext files it into your journal, ideas, or shared to-do list instead of leaving it buried in chat history.
+- **Inbox:** review ideas, decisions, and task suggestions from captured sources.
+- **Tasks:** commitments, notes, projects, due dates, history, and opt-in reminders.
+- **Memory:** local search over original sources and accepted memories. Suggestions
+  link to the exact source revision that supports them.
+- **Projects:** sources, decisions, and next steps together, without rewriting originals.
 
-## What You Get
+The same responsive web component runs at the backend's `/workspace`, inside the
+extension, or behind a private dashboard proxy. Workspace mode has no second task
+database, browser inference worker, or writable Markdown task ledger.
 
-- automatic history sync from ChatGPT, Gemini, and Grok
-- one-click Markdown dumps from ChatGPT, Gemini, Grok, and Claude pages
-- agent-authored Markdown context dumps from Codex and Claude Code
-- saved pages and saved text selections alongside chat history
-- a searchable dashboard, graph, and quick search inside the extension
-- a local Markdown vault that works well with Obsidian
-- one-host remote setup with a single pasteable connection string
+## Run from source
 
-## Quick Start
+Python 3.12+, uv, Node.js, and pnpm are required for development.
 
-Install the backend:
-
-```bash
-uv tool install savemycontext
-smc install --remote
+```sh
+git clone https://github.com/nociza/SaveMyContext.git
+cd SaveMyContext/backend
+uv sync --frozen
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
-The package name is `savemycontext`. The command is `smc`.
+Open `http://127.0.0.1:8787/workspace`. SQLite and generated Markdown stay under
+`backend/data/`, excluded from Git. Loopback bootstrap is available only before
+any application token exists. **Do not expose this service publicly.** For remote
+use, use a private network and protected per-client credentials, or issue scoped
+application tokens with `smc token create --help`.
 
-Build and load the extension:
-
-```bash
-cd extension
-pnpm install
-pnpm run dev
+```sh
+cd ../extension
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-Then open `chrome://extensions`, enable Developer Mode, and load `extension/dist`.
+Load `extension/dist` as an unpacked Chrome extension. Configure its backend URL
+and a token with `ingest`, `read`, and `workspace:write` permissions. Existing
+capture-only tokens still capture but cannot edit the workspace. Reload an
+already-installed unpacked extension after upgrading.
 
-Paste the emitted `smc_conn_1_...` string into the extension's `Connection string` field.
+Existing ChatGPT/Gemini/Grok adapters, page/selection capture, and context bundle
+transport are retained. Provider websites can change independently; capture
+errors remain visible. Browser inference is not needed for the new pipeline.
 
-Then just use ChatGPT, Gemini, or Grok normally. SaveMyContext syncs in the background.
+## Agents and OpenClaw
 
-If you only want local sync on one machine, use:
+Load [the skill](skills/savemycontext/SKILL.md) in your agent's skill directory.
+The backend package installs `smc-workspace`; its stdlib-only
+`backend/app/workspace/client.py` can also be installed on an agent host.
 
-```bash
-smc install
+```sh
+export SMC_API_URL=http://your-private-host:8787
+export SMC_TOKEN_FILE=/protected/path/application-token
+smc-workspace remember "Garden idea" --text "My idea is a shaded tea garden."
+smc-workspace search "tea garden"
+smc-workspace add-task "Order seeds" --due 2026-10-01
+smc-workspace tasks
 ```
 
-## What Happens After Sync
+The skill does not read SQLite directly, execute captured instructions, or keep
+a shadow ledger. Task edits use versions; capture retries use stable request keys.
+The service exposes notification candidates; an external adapter such as
+Teleclaw handles opt-in delivery and deduplication.
 
-- research-heavy chats are archived as factual notes and graph data
-- reflective chats are filed into your journal
-- brainstorming threads become idea notes
-- explicit task-editing chats update the shared to-do list
-- raw source material stays stored alongside the cleaned note
+## Processing and privacy
 
-If you configure an AI provider, SaveMyContext produces richer summaries and structure. Without one, it still captures and organizes your data with simpler heuristics.
+Capture and its durable job commit together. A leased background worker derives
+suggestions afterward. Failures do not lose sources; stale jobs cannot overwrite
+newer captures. Reprocessing cannot undo completed tasks or owner edits.
 
-## Share It Across Devices
+No model is required. Local extraction is deliberately narrow: explicit
+commitments, ideas, and decisions, not broad semantic summarization. External
+processing is **off by default**. Optional Jev integration uses OpenRouter's
+typed `/api/alpha/decisions` endpoint, not chat completions:
 
-The common path is:
-
-```bash
-smc install --remote
+```dotenv
+SAVEMYCONTEXT_WORKSPACE_EXTERNAL_PROCESSING=true
+SAVEMYCONTEXT_JEV_API_KEY=configure-in-a-protected-runtime-file
+SAVEMYCONTEXT_JEV_MODEL=typesafe/jev-1.13
 ```
 
-Later, you can issue more connection strings with:
+Jev scores bounded excerpts. It does not write your ledger, calculate deadlines,
+or act as a summarizer. The adapter's 0.9 suggestion threshold is an implementation
+policy, not a measured accuracy claim. Generation requires the separate
+`SAVEMYCONTEXT_WORKSPACE_GENERATE` setting and a configured text-generation
+provider. Decide what private material may leave the host before enabling either.
+Never commit keys, sources, or databases.
 
-```bash
-smc share
-smc invite --device laptop
-smc invite --security per_device_code --device work-laptop
-```
+## Upgrade and recovery
 
-## Docs
+Workspace tables are additive. Existing conversations are backfilled idempotently
+at startup. Take a consistent SQLite online-backup snapshot before upgrading and
+test the copy first. `python -m app.workspace.migrate --help` includes explicit
+Nexus task import preserving IDs, timestamps, notes, and reminder preferences;
+it refuses an ambiguous merge into a populated task store.
 
-- [Getting Started](docs/getting-started.md)
-- [Using SaveMyContext](docs/using-save-my-context.md)
-- [Remote Access](docs/remote-access.md)
-- [Security and Access](docs/security-and-access.md)
-- [Dashboard and Search](docs/dashboard-and-search.md)
-- [Vault and Storage](docs/vault-and-storage.md)
-- [Codex and Context Migration](docs/codex-and-context-migration.md)
-- [Troubleshooting](docs/troubleshooting.md)
+SQLite is authoritative; Markdown is an export. Historical graph/pile routes are
+retained for compatibility, but their old processing/task mutations are disabled
+in workspace mode. Legacy mode is not a rollback after new writes: preserve the
+new database and reconcile those writes before reverting.
+
+Encrypt backups before transfer and restore-test them. Generated source exports
+are rebuildable; separately retain any historical user-authored vault files.
+A growing archive needs capacity and retention limits, not unlimited encrypted
+blobs in Git history.
 
 ## Development
 
-Backend:
-
-```bash
-cd backend
-uv sync --group dev
-uv run --group dev python -m pytest -q
+```sh
+cd backend && uv run pytest -q
+cd ../extension && pnpm test && pnpm typecheck && pnpm build
 ```
 
-Extension:
+Browser test against a **disposable** running backend:
+`SMC_WORKSPACE_TEST_URL=http://127.0.0.1:8787 pnpm exec playwright test e2e/workspace.spec.ts`.
 
-```bash
-cd extension
-pnpm test
-pnpm typecheck
-pnpm build
-```
+See [workspace design](docs/workspace-design.md) for ownership, failure handling,
+migration, and privacy boundaries. Earlier architecture documents describe the
+retained pre-workspace implementation, not default 0.3 behavior.
