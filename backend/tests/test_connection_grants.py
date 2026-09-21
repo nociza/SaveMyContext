@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -186,7 +187,8 @@ async def test_per_device_code_requires_a_second_factor_and_allows_only_one_rede
 
 
 @pytest.mark.asyncio
-async def test_single_use_connection_grant_is_claimed_atomically(tmp_path) -> None:
+@pytest.mark.parametrize("expiring", [False, True])
+async def test_single_use_connection_grant_is_claimed_atomically(tmp_path, expiring) -> None:
     engine = create_configured_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'savemycontext-connection-grants-race.db'}"
     )
@@ -204,6 +206,7 @@ async def test_single_use_connection_grant_is_claimed_atomically(tmp_path) -> No
             base_url="https://notes.example.com",
             scopes=["ingest", "read"],
             security_level="per_device",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1) if expiring else None,
         )
 
     decoded = decode_connection_bundle(created.connection_string)
@@ -224,6 +227,32 @@ async def test_single_use_connection_grant_is_claimed_atomically(tmp_path) -> No
     assert sorted(response.status_code for response in responses) == [200, 401]
     assert sum(response.json().get("token", "").startswith("savemycontext_pat_") for response in responses) == 1
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_expired_connection_grant_cannot_issue_a_token(tmp_path) -> None:
+    engine = create_configured_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'expired.db'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    await _create_admin(session_factory)
+    async with session_factory() as session:
+        created = await create_connection_grant(
+            session, username="admin", name="Expired invitation",
+            base_url="https://notes.example.com", scopes=["read", "ingest"],
+            security_level="per_device",
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    decoded = decode_connection_bundle(created.connection_string)
+    app = _build_test_app(session_factory)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://notes.example.com") as client:
+        response = await client.post("/api/v1/auth/connections/redeem", json={
+            "grant_id": decoded.grant_id, "secret": decoded.secret,
+            "installation_id": "too-late",
+        })
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Connection string has expired."
     await engine.dispose()
 
 

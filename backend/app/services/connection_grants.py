@@ -271,6 +271,10 @@ async def redeem_connection_grant(
             redemption_count=ConnectionGrant.redemption_count + 1,
             last_used_at=now,
         )
+        # SQLite returns naive timestamps. Evaluate the atomic expiry predicate
+        # in SQL, not again against Python's aware UTC clock in the identity map.
+        # The grant is explicitly refreshed after the transaction below.
+        .execution_options(synchronize_session=False)
     )
     if claim.rowcount != 1:
         await db.rollback()
