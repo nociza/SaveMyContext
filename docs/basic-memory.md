@@ -70,6 +70,12 @@ The agent CLI exposes `search --mode ... --scope ...` with the same behavior.
   The response body comes from the workspace, never from returned model/index text.
 - Suggested/rejected/superseded memories are not projected as curated knowledge.
   Explicitly completed tasks stay completed; curated search excludes them.
+  Inactive records have no Markdown/vector placeholder: reconciliation removes
+  only their deterministic service-owned note, using the upstream single-note
+  API. The canonical row and audit history remain available for recovery. An
+  acknowledgement in SQLite prevents repeatedly deleting an already-absent note;
+  restoring/accepting the record projects it again. Older withdrawal placeholders
+  are removed without rebuilding unchanged conversation embeddings.
 - Sources over 48,000 characters use first/last 24,000-character excerpts in the
   semantic index. Full originals remain available through source detail and exact
   search. The UI discloses this limit. Middle-only paraphrases can be missed.
@@ -92,8 +98,9 @@ python -m app.workspace.knowledge_admin rebuild
 ```
 
 `rebuild` invalidates only projection acknowledgements. The background worker
-replays current records in bounded batches; it does not change source/task rows
-or delete files. Use it after restoring/replacing the Basic Memory project or
+replays current records in bounded batches; it does not change source/task rows.
+It removes derived notes for inactive records, never original source files or
+canonical history. Use it after restoring/replacing the Basic Memory project or
 changing projection format. `sync` runs one batch for an operator-controlled
 rehearsal; do not run competing sync writers against the production project.
 

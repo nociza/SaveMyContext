@@ -18,7 +18,7 @@ from app.workspace.knowledge import (
 )
 from app.workspace.models import KnowledgeProjection, Memory, Project, Source
 from app.workspace.schemas import TaskInput
-from app.workspace.store import create_task, enqueue_source, record, update_task
+from app.workspace.store import create_task, digest, enqueue_source, record, update_task
 
 
 @pytest.fixture
@@ -62,6 +62,14 @@ class Engine:
             ]
         }
 
+    async def remove(self, key):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("private text must not reach the caller")
+        self.notes.pop("smc/" + note_name(key), None)
+        if self.hook:
+            await self.hook()
+
 
 async def capture(sessions, body="A quiet hotel beside the railway", title="Travel"):
     async with sessions() as db:
@@ -90,7 +98,9 @@ async def test_sync_idempotent_and_canonical_source_hydration(workspace):
         assert result["items"][0]["match"] == "semantic"
 
 
-async def test_archive_immediately_excludes_stale_index_and_tombstones(workspace):
+async def test_archive_immediately_excludes_stale_index_and_removes_projection(
+    workspace,
+):
     await capture(workspace)
     engine = Engine()
     await sync_once(workspace, engine)
@@ -101,9 +111,12 @@ async def test_archive_immediately_excludes_stale_index_and_tombstones(workspace
     async with workspace() as db:
         assert (await search(db, "lodging", client=engine))["items"] == []
     await sync_once(workspace, engine)
-    note = next(iter(engine.notes.values()))
-    assert note["metadata"]["projection_state"] == "withdrawn"
-    assert "hotel" not in note["content"]
+    assert engine.notes == {}
+    assert await sync_once(workspace, engine) == 0
+    async with workspace() as db:
+        assert (
+            await db.get(Source, "example")
+        ).body == "A quiet hotel beside the railway"
 
 
 async def test_capture_during_sync_cannot_validate_stale_index(workspace):
@@ -135,6 +148,142 @@ async def test_failed_write_is_retryable_without_false_ack(workspace):
         assert not (await db.scalars(select(KnowledgeProjection))).all()
     engine.fail = False
     assert await sync_once(workspace, engine) == 1
+
+
+async def test_legacy_placeholder_cleanup_does_not_reindex_sources(workspace):
+    source = await capture(workspace)
+    engine = Engine()
+    await sync_once(workspace, engine)
+    async with workspace() as db:
+        item = Memory(
+            id="retired",
+            source_id="example",
+            kind="note",
+            title="Junk",
+            body="Historical suggestion",
+            status="superseded",
+            provenance={},
+        )
+        db.add(item)
+        await db.flush()
+        old_stamp = digest(["bm-projection-v1", "memory", {"version": item.version}])
+        path = "smc/" + note_name("memory:retired")
+        db.add(
+            KnowledgeProjection(
+                key="memory:retired", fingerprint=old_stamp, permalink=path
+            )
+        )
+        await db.commit()
+    engine.notes[path] = {"content": "Withdrawn from workspace search."}
+    calls = engine.calls
+    assert await sync_once(workspace, engine) == 1
+    assert engine.calls == calls + 1
+    assert path not in engine.notes
+    assert await sync_once(workspace, engine) == 0
+    assert stamp("source", source) == digest(
+        [
+            "bm-projection-v1",
+            "source",
+            {
+                key: source[key]
+                for key in ("revision", "title", "project_id", "archived")
+            },
+        ]
+    )
+    async with workspace() as db:
+        assert (await db.get(Memory, "retired")).body == "Historical suggestion"
+
+
+async def test_failed_removal_retries_and_unarchive_recreates(workspace):
+    await capture(workspace)
+    engine = Engine()
+    await sync_once(workspace, engine)
+    async with workspace() as db:
+        item = await db.get(Source, "example")
+        item.archived = True
+        await db.commit()
+        old_ack = (await db.get(KnowledgeProjection, "source:example")).fingerprint
+    engine.fail = True
+    with pytest.raises(RuntimeError):
+        await sync_once(workspace, engine)
+    async with workspace() as db:
+        assert (
+            await db.get(KnowledgeProjection, "source:example")
+        ).fingerprint == old_ack
+    engine.fail = False
+
+    async def unarchive():
+        async with workspace() as db:
+            (await db.get(Source, "example")).archived = False
+            await db.commit()
+
+    engine.hook = unarchive
+    assert await sync_once(workspace, engine) == 1
+    assert not engine.notes
+    engine.hook = None
+    assert await sync_once(workspace, engine) == 1
+    assert len(engine.notes) == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"deleted": True},
+        {"deleted": False, "title": None, "permalink": None, "file_path": None},
+    ],
+)
+async def test_removal_acknowledgements_and_hashed_target(
+    workspace, monkeypatch, response
+):
+    client = BasicMemory()
+
+    async def call(name, arguments):
+        assert name == "delete_note"
+        assert arguments == {
+            "identifier": "smc/" + note_name("memory:../unsafe"),
+            "is_directory": False,
+            "output_format": "json",
+        }
+        return response
+
+    monkeypatch.setattr(client, "call", call)
+    await client.remove("memory:../unsafe")
+    with pytest.raises(ValueError):
+        await client.remove("directory:smc")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"deleted": False},
+        {"deleted": "true"},
+        {
+            "deleted": False,
+            "title": "still exists",
+            "permalink": "smc/x",
+            "file_path": "smc/x.md",
+        },
+        {
+            "deleted": False,
+            "title": None,
+            "permalink": None,
+            "file_path": None,
+            "error": "denied",
+        },
+    ],
+)
+async def test_removal_rejects_failed_or_ambiguous_result(
+    workspace, monkeypatch, response
+):
+    client = BasicMemory()
+
+    async def call(*args):
+        return response
+
+    monkeypatch.setattr(client, "call", call)
+    with pytest.raises(RuntimeError, match="did not acknowledge"):
+        await client.remove("memory:example")
 
 
 async def test_outage_and_invalid_hits_do_not_break_local_search(workspace):
@@ -174,9 +323,11 @@ async def test_only_accepted_memories_are_projected_as_knowledge(workspace):
     async with workspace() as db:
         result = await search(db, "nonliteral", scope="curated", client=engine)
         assert [r["id"] for r in result["items"]] == ["accepted"]
-    for note in engine.notes.values():
-        if note["metadata"]["status"] in ["suggested", "rejected", "superseded"]:
-            assert note["content"] == "Withdrawn from workspace search."
+    assert len(engine.notes) == 2  # Original source plus accepted memory only.
+    assert all(
+        note["metadata"]["projection_state"] == "active"
+        for note in engine.notes.values()
+    )
 
 
 async def test_task_completion_is_not_reopened_or_treated_as_active(workspace):

@@ -15,7 +15,8 @@ from app.core.config import get_settings
 from app.db.engine import create_configured_async_engine
 from app.db.migrations import apply_schema_migrations
 from app.models.base import Base
-from app.workspace.knowledge import BasicMemory, search, sync_once
+from app.workspace.knowledge import BasicMemory, note_name, search, sync_once
+from app.workspace.models import Source
 from app.workspace.schemas import TaskInput
 from app.workspace.store import create_task, enqueue_source, update_task
 
@@ -78,6 +79,37 @@ async def main():
         # Confirm the real endpoint gives structured output, not a silent text error.
         response = await BasicMemory().search("railway lodging")
         assert isinstance(response["results"], list)
+        async with sessions() as db:
+            (await db.get(Source, "smoke-travel")).archived = True
+            await update_task(
+                db,
+                task["id"],
+                {"status": "archived", "expected_version": 2},
+                actor="smoke",
+            )
+            await db.commit()
+        assert await sync_once(sessions) == 2
+        assert await sync_once(sessions) == 0
+        # Real endpoint contract: deleting a missing deterministic note is safe.
+        await BasicMemory().remove("source:smoke-travel")
+        absent = await BasicMemory().call(
+            "delete_note",
+            {
+                "identifier": "smc/" + note_name("source:smoke-travel"),
+                "is_directory": False,
+                "output_format": "json",
+            },
+        )
+        assert absent == {
+            "deleted": False,
+            "title": None,
+            "permalink": None,
+            "file_path": None,
+        }
+        assert not any(
+            hit["permalink"].endswith("smc/" + note_name("source:smoke-travel"))
+            for hit in (await BasicMemory().search("railway lodging"))["results"]
+        )
         await engine.dispose()
         print(
             json.dumps(
@@ -85,6 +117,7 @@ async def main():
                     "sync": "passed",
                     "semantic": "passed",
                     "completed_task_filter": "passed",
+                    "archive_removal_and_retry": "passed",
                 }
             )
         )

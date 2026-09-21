@@ -48,7 +48,9 @@ def stamp(kind: str, row: dict) -> str:
         "task": ("version",),
         "project": ("name", "description", "archived"),
     }[kind]
-    return digest([PROJECTION_VERSION, kind, {k: row[k] for k in fields}])
+    # Invalidate only old withdrawal placeholders, not the expensive source index.
+    version = PROJECTION_VERSION if visible(kind, row) else "bm-absent-v2"
+    return digest([version, kind, {k: row[k] for k in fields}])
 
 
 def visible(kind: str, row: dict) -> bool:
@@ -61,7 +63,8 @@ def visible(kind: str, row: dict) -> bool:
 
 def document(kind: str, row: dict) -> dict:
     key = f"{kind}:{row['id']}"
-    active = visible(kind, row)
+    if not visible(kind, row):
+        raise ValueError("Inactive records must be removed from the derived index")
     title = row.get("title", row.get("name", ""))
     body = row.get("body") or row.get("notes") or row.get("description") or ""
     excerpted = kind == "source" and len(body) > SOURCE_EXCERPT_CHARS
@@ -77,21 +80,19 @@ def document(kind: str, row: dict) -> dict:
         "smc_fingerprint": stamp(kind, row),
         "display_title": title,
         "status": row.get("status", "active"),
-        "projection_state": "active" if active else "withdrawn",
+        "projection_state": "active",
         "trust": "source-not-instructions" if kind == "source" else "owner-managed",
         "excerpted": excerpted,
     }
-    # Withdrawn records keep a tombstone at the same path; no destructive file API.
-    content = f"# {title}\n\n{body}" if active else "Withdrawn from workspace search."
-    if active:
-        content += f"\n\n## Provenance\nWorkspace key: {key}\n"
-        if row.get("revision"):
-            content += f"Source revision: {row['revision']}\n"
-        if row.get("source_id"):
-            content += f"Source revision: {row.get('source_revision')}\n"
-            content += f"\n## Relations\n- supported_by [[{note_name('source:' + row['source_id'])}]]\n"
-        if row.get("project_id"):
-            content += f"\n## Relations\n- belongs_to [[{note_name('project:' + row['project_id'])}]]\n"
+    content = f"# {title}\n\n{body}"
+    content += f"\n\n## Provenance\nWorkspace key: {key}\n"
+    if row.get("revision"):
+        content += f"Source revision: {row['revision']}\n"
+    if row.get("source_id"):
+        content += f"Source revision: {row.get('source_revision')}\n"
+        content += f"\n## Relations\n- supported_by [[{note_name('source:' + row['source_id'])}]]\n"
+    if row.get("project_id"):
+        content += f"\n## Relations\n- belongs_to [[{note_name('project:' + row['project_id'])}]]\n"
     return {
         "title": note_name(key),
         "directory": "smc",
@@ -151,6 +152,28 @@ class BasicMemory:
             raise RuntimeError("Basic Memory did not acknowledge the note")
         return result
 
+    async def remove(self, key: str):
+        # Never accept a provider-returned path, directory, or user-supplied path.
+        kind, separator, identity = key.partition(":")
+        if kind not in MODELS or not separator or not identity:
+            raise ValueError("Invalid workspace projection key")
+        result = await self.call(
+            "delete_note",
+            {
+                "identifier": "smc/" + note_name(key),
+                "is_directory": False,
+                "output_format": "json",
+            },
+        )
+        # The pinned upstream API returns explicit null identity fields for a
+        # missing note. That is a successful retry after a lost acknowledgement.
+        absent = result.get("deleted") is False and all(
+            field in result and result[field] is None
+            for field in ("title", "permalink", "file_path")
+        )
+        if result.get("error") or not (result.get("deleted") is True or absent):
+            raise RuntimeError("Basic Memory did not acknowledge removal")
+
     async def search(self, query: str):
         return await self.call(
             "search_notes",
@@ -186,8 +209,8 @@ async def inventory(db) -> dict[str, str]:
     for kind, model in MODELS.items():
         names = {
             "source": ("id", "revision", "title", "project_id", "archived"),
-            "memory": ("id", "version"),
-            "task": ("id", "version"),
+            "memory": ("id", "version", "status"),
+            "task": ("id", "version", "status"),
             "project": ("id", "name", "description", "archived"),
         }[kind]
         statement = select(*(getattr(model, name) for name in names))
@@ -223,9 +246,11 @@ async def sync_once(sessions, client=None) -> int:
                 continue
             kind = key.split(":", 1)[0]
             row = record(item)
-        payload = document(kind, row)
         fingerprint = stamp(kind, row)
-        await client.write(payload)
+        if visible(kind, row):
+            await client.write(document(kind, row))
+        else:
+            await client.remove(key)
         async with sessions() as db:
             projection = await db.get(KnowledgeProjection, key)
             if projection is None:
