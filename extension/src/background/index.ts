@@ -16,6 +16,7 @@ import {
 import { buildIngestPayload, mergeSeenMessageIds, mergeMessageFingerprints } from "./diff";
 import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
 import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
+import { bestEffortTabCleanup } from "./tab-cleanup";
 import {
   buildProviderRefreshAlarmPlan,
   providerFromRefreshAlarmName,
@@ -1359,15 +1360,14 @@ async function cleanupDisallowedPageSurfaceTabs(settings: ExtensionSettings): Pr
       if (!tabSupportsInteractivePage(tab) || pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, tab.url)) {
         return;
       }
-      try {
-        await chrome.scripting.executeScript({
+      await bestEffortTabCleanup(tab, () =>
+        chrome.scripting.executeScript({
           target: { tabId: tab.id },
+          injectImmediately: true,
           func: installPageSurfaceCleanupGuard,
           args: [PAGE_SURFACE_HOST_IDS, PAGE_SURFACE_CLEANUP_FLAG]
-        });
-      } catch {
-        // Some pages cannot be scripted; they also cannot host extension UI.
-      }
+        })
+      );
     })
   );
 }
