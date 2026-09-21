@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { drainCaptures, enqueueCapture, type CaptureStore, type PendingCapture } from "../src/background/outbox";
+import { drainCaptures, enqueueCapture, indexingAllowsCapture, type CaptureStore, type PendingCapture } from "../src/background/outbox";
+import { defaultSettings } from "../src/shared/storage";
 import { observeResponse, readBoundedResponse } from "../src/injected/response-observer";
 import { flattenText, sortMessages } from "../src/providers/helpers";
 import { ChatGPTScraper } from "../src/providers/chatgpt";
@@ -24,6 +25,17 @@ const payload: BackendIngestPayload = {
 };
 
 describe("durable capture delivery", () => {
+  it("checks trigger words against original context, not an answer-only delta", () => {
+    const capture = { ...payload, messages: [{ external_message_id: "a", role: "assistant" as const, content: "An edited answer" }],
+      raw_capture: { ...event, response: { ...event.response, json: { messages: [
+        { id: "u", author: { role: "user" }, content: { parts: ["remember this project"] } },
+        { id: "a", author: { role: "assistant" }, content: { parts: ["An edited answer"] } }
+      ] } } }
+    };
+    const settings = { ...defaultSettings, indexingMode: "trigger_word" as const, triggerWords: ["remember"] };
+    expect(indexingAllowsCapture(settings, capture)).toBe(true);
+    expect(indexingAllowsCapture({ ...settings, triggerWords: ["unmatched"] }, capture)).toBe(false);
+  });
   it("retains failed requests across a restarted drain and deduplicates retry", async () => {
     const store = new MemoryStore();
     await enqueueCapture(store, "https://original", payload);

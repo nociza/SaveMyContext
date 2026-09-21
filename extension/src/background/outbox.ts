@@ -1,8 +1,17 @@
-import type { BackendIngestPayload } from "../shared/types";
+import type { BackendIngestPayload, ExtensionSettings } from "../shared/types";
+import { providerRegistry } from "../providers/registry";
+import { evaluateIndexingRules } from "../shared/indexing-rules";
 
 export const OUTBOX_ALARM = "smc-capture-outbox-v1";
 const MAX_BYTES = 128 * 1024 * 1024;
 const MAX_ITEMS = 1000;
+
+export function indexingAllowsCapture(settings: ExtensionSettings, payload: BackendIngestPayload): boolean {
+  // Delivery may contain only an edited answer. Apply opening-request rules to
+  // the original captured context, not that delta, or valid replies get stuck.
+  const snapshot = providerRegistry.find((parser) => parser.matches(payload.raw_capture))?.parse(payload.raw_capture);
+  return Boolean(snapshot && evaluateIndexingRules(settings, snapshot).shouldIndex);
+}
 
 export interface PendingCapture {
   id: string;

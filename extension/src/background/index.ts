@@ -14,7 +14,7 @@ import {
   validateBackendConfiguration
 } from "./backend";
 import { buildIngestPayload, mergeSeenMessageIds, mergeMessageFingerprints } from "./diff";
-import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures } from "./outbox";
+import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures, indexingAllowsCapture } from "./outbox";
 import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
 import {
   buildProviderRefreshAlarmPlan,
@@ -2336,12 +2336,12 @@ async function deliverCaptureOutbox(): Promise<void> {
         }))
       };
       if (!settings.enabledProviders[payload.provider] || !accountAllowedBySettings(settings, snapshot).allowed ||
-          !evaluateIndexingRules(settings, snapshot).shouldIndex) {
+          !indexingAllowsCapture(settings, payload)) {
         throw new Error("Capture delivery paused by current provider/account settings; evidence retained locally.");
       }
       const response = await fetch(`${backendUrl}/api/v1/ingest/diff`, {
-      method: "POST",
-      headers: buildBackendHeaders(settings),
+        method: "POST",
+        headers: buildBackendHeaders(settings),
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(20_000)
       });
@@ -2358,7 +2358,9 @@ async function deliverCaptureOutbox(): Promise<void> {
           seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
           messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
           lastSyncedAt: new Date().toISOString(),
-          indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed"
+          indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed",
+          indexingRuleFingerprint: indexingRulesFingerprint(settings),
+          discardWordMatch: payload.discard_word_match
         });
       } else if (payload.raw_capture.historySyncRunId) {
         historySyncRunErrors.set(payload.raw_capture.historySyncRunId, "Capture needs repair; evidence preserved.");
