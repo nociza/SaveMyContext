@@ -6,6 +6,7 @@ import { defineConfig } from "@playwright/test";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  outputDir: process.env.SMC_TEST_OUTPUT_DIR ?? "test-results",
   testDir: "./e2e",
   fullyParallel: false,
   workers: 1,

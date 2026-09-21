@@ -25,6 +25,19 @@ const HISTORY_SYNC_KEY = "savemycontext.history-sync";
 const PROCESSING_WORKER_KEY = "savemycontext.processing-worker";
 const INSTALLATION_ID_KEY = "savemycontext.installation-id";
 
+const storageWrites = new Map<string, Promise<void>>();
+async function lockedStorage<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  // Web Locks cover the worker and options UI; the queue covers test/older runtimes.
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return await navigator.locks.request(`smc-storage:${key}`, operation);
+  }
+  const result = (storageWrites.get(key) ?? Promise.resolve()).then(operation);
+  const tail = result.then(() => undefined, () => undefined);
+  storageWrites.set(key, tail);
+  void tail.then(() => { if (storageWrites.get(key) === tail) storageWrites.delete(key); });
+  return result;
+}
+
 export const defaultSettings: ExtensionSettings = {
   backendUrl: "http://127.0.0.1:18888",
   backendToken: "",
@@ -243,9 +256,11 @@ export async function getAllSessionSyncStates(): Promise<Record<string, SessionS
 }
 
 export async function saveSessionSyncState(sessionKey: string, state: SessionSyncState): Promise<void> {
-  const allStates = await getAllSessionSyncStates();
-  allStates[sessionKey] = state;
-  await chrome.storage.local.set({ [SYNC_STATE_KEY]: allStates });
+  await lockedStorage(SYNC_STATE_KEY, async () => {
+    const allStates = await getAllSessionSyncStates();
+    allStates[sessionKey] = state;
+    await chrome.storage.local.set({ [SYNC_STATE_KEY]: allStates });
+  });
 }
 
 export async function getProviderSessionSyncStates(
@@ -263,19 +278,17 @@ export async function getStatus(): Promise<SyncStatus> {
     const settings = await getSettings();
     current.backendUrl = settings.backendUrl;
     current.autoSyncHistory = settings.autoSyncHistory;
-    await chrome.storage.local.set({ [STATUS_KEY]: current });
   }
   return current;
 }
 
 export async function setStatus(update: Partial<SyncStatus>): Promise<SyncStatus> {
-  const current = await getStatus();
-  const next = {
-    ...current,
-    ...update
-  } satisfies SyncStatus;
-  await chrome.storage.local.set({ [STATUS_KEY]: next });
-  return next;
+  return lockedStorage(STATUS_KEY, async () => {
+    const current = await getStatus();
+    const next = { ...current, ...update } satisfies SyncStatus;
+    await chrome.storage.local.set({ [STATUS_KEY]: next });
+    return next;
+  });
 }
 
 export async function saveBackendValidation(
@@ -303,14 +316,16 @@ export async function saveProviderHistorySyncState(
   provider: ProviderName,
   state: ProviderHistorySyncState
 ): Promise<void> {
-  const stored = await chrome.storage.local.get(HISTORY_SYNC_KEY);
-  const states = (stored[HISTORY_SYNC_KEY] ?? {}) as Record<ProviderName, ProviderHistorySyncState>;
-  states[provider] = state;
-  await chrome.storage.local.set({ [HISTORY_SYNC_KEY]: states });
+  await lockedStorage(HISTORY_SYNC_KEY, async () => {
+    const stored = await chrome.storage.local.get(HISTORY_SYNC_KEY);
+    const states = (stored[HISTORY_SYNC_KEY] ?? {}) as Record<ProviderName, ProviderHistorySyncState>;
+    states[provider] = state;
+    await chrome.storage.local.set({ [HISTORY_SYNC_KEY]: states });
+  });
 }
 
 export async function clearProviderHistorySyncStates(): Promise<void> {
-  await chrome.storage.local.set({ [HISTORY_SYNC_KEY]: {} });
+  await lockedStorage(HISTORY_SYNC_KEY, () => chrome.storage.local.set({ [HISTORY_SYNC_KEY]: {} }));
 }
 
 export async function getProcessingWorkerSessionUrl(provider: ProviderName): Promise<string | undefined> {
