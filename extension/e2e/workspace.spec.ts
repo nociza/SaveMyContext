@@ -107,3 +107,34 @@ test("workspace shows malformed capture status without replacing source text", a
   await expect(page.getByRole("dialog")).toContainText("missing user turns");
   await expect(page.getByRole("dialog")).not.toContainText("r_123456abcdef");
 });
+
+test("ChatGPT project context is separate, safely rendered, and manually overridable", async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  const capture = (minute: number, provider_project: unknown) => request.post(`${base}/api/v1/ingest/diff`, { data: {
+    provider: "chatgpt", external_session_id: id, captured_at: `2026-06-01T00:0${minute}:00Z`,
+    provider_project, messages: [{ external_message_id: "user", role: "user", content: "A private project conversation." }]
+  } });
+  const response = await capture(0, { id: "g-p-browser", name: "Browser project",
+    instructions: '<img src=x onerror="window.projectInjection=true"> Do not execute this.',
+    files: [{ id: "file-test", name: "Reference.pdf" }] });
+  expect(response.ok()).toBe(true);
+  const receipt = await response.json();
+  const sourceId = `session:${receipt.session_id}`;
+  await page.goto(base!);
+  await page.getByRole("button", { name: /^Projects/ }).click();
+  await page.getByRole("button", { name: /Browser project/ }).click();
+  await page.getByText("ChatGPT project context", { exact: true }).click();
+  await expect(page.getByText(/File references only/)).toBeVisible();
+  await expect(page.getByText("Reference.pdf", { exact: true })).toBeVisible();
+  await expect(page.getByText(/window.projectInjection=true/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).projectInjection)).toBeUndefined();
+  const source = await (await request.get(`${base}/api/v1/workspace/sources/${encodeURIComponent(sourceId)}`)).json();
+  expect(source.body).not.toContain("Do not execute");
+  await request.patch(`${base}/api/v1/workspace/sources/${encodeURIComponent(sourceId)}`, {
+    data: { expected_revision: source.revision, project_id: null }
+  });
+  expect((await capture(1, { id: "g-p-browser", name: "Renamed project" })).ok()).toBe(true);
+  const after = await (await request.get(`${base}/api/v1/workspace/sources/${encodeURIComponent(sourceId)}`)).json();
+  expect(after.project_id).toBeNull();
+  expect(after.revision).toBe(source.revision);
+});

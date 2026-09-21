@@ -31,6 +31,7 @@ function sessionIdFromUrl(provider: ProviderName, url: string): string {
     const parsed = new URL(url);
     const path = parsed.pathname;
     const patterns = [
+      /^\/g\/g-p-[^/]+\/c\/([^/]+)/,
       /^\/c\/([^/]+)/,
       /^\/app\/([^/]+)/,
       /^\/chat\/([^/]+)/,

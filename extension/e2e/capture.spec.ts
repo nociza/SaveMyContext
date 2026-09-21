@@ -20,10 +20,11 @@ test("DOM fallback preserves turn order/formatting and IndexedDB survives reopen
   }));
   try {
     let page = await context.newPage();
-    await page.goto("https://chatgpt.com/c/local-fixture");
+    await page.goto("https://chatgpt.com/g/g-p-abc-my-project/c/local-fixture");
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
     const snapshot = await page.evaluate(() => (window as any).CaptureTest.extractPageChatContext().snapshot);
     expect(snapshot.completeness).toBe("partial");
+    expect(snapshot.externalSessionId).toBe("local-fixture");
     expect(snapshot.messages.map((m: any) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(snapshot.messages[1].content).toContain("\n    code()");
     await page.evaluate(async () => {

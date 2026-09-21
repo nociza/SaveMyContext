@@ -226,7 +226,7 @@ async function stopBackend(process: ReturnType<typeof spawn> | undefined): Promi
   ]);
 }
 
-test("auto-syncs ChatGPT history on provider visit", async ({ request }, testInfo) => {
+test("auto-syncs project-only ChatGPT history on provider visit", async ({ request }, testInfo) => {
   const userDataDir = await mkdtemp(join(tmpdir(), "savemycontext-extension-e2e-"));
   const backendDataDir = await mkdtemp(join(tmpdir(), "savemycontext-backend-e2e-"));
   const sessionId = `e2e-chatgpt-${Date.now()}`;
@@ -248,7 +248,9 @@ test("auto-syncs ChatGPT history on provider visit", async ({ request }, testInf
             PYTHONUNBUFFERED: "1",
             SAVEMYCONTEXT_DATABASE_URL: `sqlite+aiosqlite:///${join(backendDataDir, "savemycontext.db")}`,
             SAVEMYCONTEXT_MARKDOWN_DIR: join(backendDataDir, "markdown"),
-            SAVEMYCONTEXT_LLM_BACKEND: "heuristic"
+            SAVEMYCONTEXT_LLM_BACKEND: "heuristic",
+            SAVEMYCONTEXT_WORKSPACE_ENABLED: "true",
+            SAVEMYCONTEXT_WORKSPACE_EXTERNAL_PROCESSING: "false"
           },
           stdio: ["ignore", "pipe", "pipe"]
         }
@@ -293,6 +295,14 @@ test("auto-syncs ChatGPT history on provider visit", async ({ request }, testInf
       const listApiUrl = "https://chatgpt.com/backend-api/conversations?offset=0&limit=100&order=updated";
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
 
+      await context.route("**/backend-api/gizmos/**", async (route) => {
+        const sidebar = route.request().url().includes("/sidebar");
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+          items: sidebar ? [{ gizmo: { gizmo: { id: "g-p-e2e", display: { name: "E2E Project" } } } }]
+            : [{ id: sessionId, update_time: 1 }], cursor: null
+        }) });
+      });
+
       await context.route(sessionApiUrl, async (route) => {
         await route.fulfill({
           status: 200,
@@ -308,13 +318,8 @@ test("auto-syncs ChatGPT history on provider visit", async ({ request }, testInf
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            items: [
-              {
-                id: sessionId,
-                title: "E2E ChatGPT Sync"
-              }
-            ],
-            total: 1
+            items: [],
+            total: 0
           })
         });
       });
@@ -414,7 +419,18 @@ test("auto-syncs ChatGPT history on provider visit", async ({ request }, testInf
         "Explain how FastAPI uses uvloop in an async backend.",
         "FastAPI uses uvloop to run the event loop with high-performance async I/O."
       ]);
-      expect(persisted.triplets.length).toBeGreaterThan(0);
+      expect(persisted.triplets.length).toBe(0);
+      const projectsResponse = await request.get(`${backendBaseUrl}/api/v1/workspace/projects`);
+      expect(projectsResponse.ok()).toBe(true);
+      expect((await projectsResponse.json()).items[0].provider_context.id).toBe("g-p-e2e");
+
+      const ack = await serviceWorker.evaluate(async () => {
+        const all = await chrome.storage.local.get("savemycontext.sync-state");
+        return JSON.stringify(all);
+      });
+      // The live extension bridge/outbox must carry project context, not just unit parsers.
+      expect(ack).toContain("g-p-e2e");
+      expect(ack).toContain("historyFingerprint");
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -489,6 +505,9 @@ test("skips indexing when trigger-word mode is enabled and the opening request d
       await optionsPage.locator("#auto-sync-history").setChecked(true);
       await optionsPage.locator("#indexing-mode-trigger").setChecked(true);
       await optionsPage.locator("#trigger-words").fill("lorem");
+      await context.route("**/backend-api/gizmos/**", async (route) => {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [], cursor: null }) });
+      });
       await optionsPage.locator("#settings-form").evaluate((form) => {
         (form as HTMLFormElement).requestSubmit();
       });

@@ -34,8 +34,10 @@ export async function buildIngestPayload(
 ): Promise<BackendIngestPayload | null> {
   const syncMode = rawCapture.captureMode === "full_snapshot" ? "full_snapshot" : "incremental";
   const fingerprints = await mergeMessageFingerprints({}, snapshot.messages);
+  const projectChanged = snapshot.project !== undefined &&
+    JSON.stringify(snapshot.project) !== syncState.projectFingerprint;
   const messages =
-    syncMode === "full_snapshot"
+    syncMode === "full_snapshot" || projectChanged
       ? snapshot.messages
       : snapshot.messages.filter((message) =>
           syncState.messageFingerprints?.[message.id] !== fingerprints[message.id]);
@@ -44,6 +46,7 @@ export async function buildIngestPayload(
   }
 
   return {
+    provider_project: snapshot.project,
     capture_completeness: snapshot.completeness ?? "partial",
     extraction_method: snapshot.extractionMethod ?? "structured",
     parser_version: "capture-v2",

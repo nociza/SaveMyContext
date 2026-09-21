@@ -278,6 +278,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     const payload: HistorySyncTriggerPayload = message.payload;
     void postControlMessage({
       type: "START_HISTORY_SYNC",
+      historyFingerprints: payload.historyFingerprints,
       syncedSessionIds: payload.syncedSessionIds,
       previousTopSessionId: payload.previousTopSessionId,
       previousTopSessionIds: payload.previousTopSessionIds,

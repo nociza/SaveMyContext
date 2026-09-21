@@ -6,6 +6,17 @@ export const OUTBOX_ALARM = "smc-capture-outbox-v1";
 const MAX_BYTES = 128 * 1024 * 1024;
 const MAX_ITEMS = 1000;
 
+export function requireCaptureReceipt(payload: BackendIngestPayload, value: unknown): void {
+  const receipt = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const quarantined = receipt.disposition === "quarantined" && typeof receipt.receipt_id === "string" && receipt.receipt_id.length > 0;
+  if (!quarantined && !(typeof receipt.session_id === "string" && receipt.session_id.length > 0)) {
+    throw new Error("Backend did not acknowledge durable capture storage.");
+  }
+  if (payload.provider_project !== undefined && !quarantined && receipt.provider_project_ack !== true) {
+    throw new Error("Backend update required for ChatGPT Projects; capture retained for retry.");
+  }
+}
+
 export function indexingAllowsCapture(settings: ExtensionSettings, payload: BackendIngestPayload): boolean {
   // Delivery may contain only an edited answer. Apply opening-request rules to
   // the original captured context, not that delta, or valid replies get stuck.

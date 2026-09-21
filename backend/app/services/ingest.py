@@ -204,7 +204,9 @@ class IngestService:
                 session.is_discarded = True
                 session.discarded_reason = reason
             session = await self._load_session(session_id)
-            await enqueue_session(self.db, session)
+            source = await enqueue_session(self.db, session)
+            from app.workspace.provider_projects import apply_provider_project
+            await apply_provider_project(self.db, source, payload, session.account_key or "chatgpt:default")
             await self.db.commit()
             return session, new_message_count
 

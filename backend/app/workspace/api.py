@@ -223,6 +223,8 @@ async def edit_source(
     if result.rowcount != 1:
         raise Conflict("Source changed. Refresh before editing.")
     if "project_id" in changes:
+        from app.workspace.provider_projects import lock_manual_project
+        await lock_manual_project(db, source_id)
         await db.execute(
             update(Memory)
             .where(Memory.source_id == source_id, Memory.status == "suggested")
@@ -335,18 +337,9 @@ async def edit_memory(
 async def projects(
     _: AuthContext = Depends(read), db: AsyncSession = Depends(get_db_session)
 ):
-    return {
-        "items": [
-            record(p)
-            for p in (
-                await db.scalars(
-                    select(Project)
-                    .where(Project.archived.is_(False))
-                    .order_by(Project.name)
-                )
-            ).all()
-        ]
-    }
+    from app.workspace.provider_projects import project_records
+    rows = (await db.scalars(select(Project).where(Project.archived.is_(False)).order_by(Project.name))).all()
+    return {"items": await project_records(db, rows)}
 
 
 @router.post("/projects", status_code=201)

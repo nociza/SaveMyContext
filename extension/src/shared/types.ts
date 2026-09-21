@@ -13,11 +13,23 @@ export interface CapturedBody {
   json?: unknown;
 }
 
+/** Provider evidence, never executable instructions or conversation turns. */
+export interface ProviderProject {
+  id: string;
+  name?: string;
+  workspace_id?: string;
+  instructions?: string;
+  files?: { id: string; name: string }[];
+}
+
 export interface CapturedNetworkEvent {
   source: "savemycontext-network-observer";
   providerHint?: ProviderName;
   captureMode?: CaptureMode;
   historySyncRunId?: string;
+  project?: ProviderProject | null;
+  historyItemKey?: string;
+  historyFingerprint?: string;
   pageUrl: string;
   requestId: string;
   method: string;
@@ -43,6 +55,7 @@ export interface NormalizedMessage {
 }
 
 export interface NormalizedSessionSnapshot {
+  project?: ProviderProject | null;
   extractionMethod?: "structured" | "heuristic";
   completeness?: "complete" | "partial";
   provider: ProviderName;
@@ -56,6 +69,9 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  projectFingerprint?: string;
+  historyItemKey?: string;
+  historyFingerprint?: string;
   messageFingerprints?: Record<string, string>;
   seenMessageIds: string[];
   lastSyncedAt?: string;
@@ -847,6 +863,7 @@ export interface ActiveChatMarkdownDumpResponse {
 }
 
 export interface HistorySyncTriggerPayload {
+  historyFingerprints?: Record<string, string>;
   provider: ProviderName;
   syncedSessionIds?: string[];
   previousTopSessionId?: string;
@@ -855,6 +872,7 @@ export interface HistorySyncTriggerPayload {
 }
 
 export interface HistorySyncControlPayload {
+  historyFingerprints?: Record<string, string>;
   type: "START_HISTORY_SYNC";
   syncedSessionIds?: string[];
   previousTopSessionId?: string;
@@ -919,6 +937,7 @@ export interface BackendIngestMessage {
 }
 
 export interface BackendIngestPayload {
+  provider_project?: ProviderProject | null;
   extraction_method?: "structured" | "heuristic";
   capture_completeness: "complete" | "partial";
   parser_version: "capture-v2";

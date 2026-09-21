@@ -1,6 +1,7 @@
 import type { CapturedNetworkEvent, NormalizedMessage, NormalizedSessionSnapshot } from "../shared/types";
 import { normalizeProviderAccount, scopeExternalSessionIdByAccount } from "../shared/accounts";
 import type { IProviderScraper } from "./provider";
+import { chatGPTProject } from "./chatgpt-project";
 import {
   coerceOccurredAt,
   dedupeMessages,
@@ -313,6 +314,7 @@ export class ChatGPTScraper implements IProviderScraper {
     );
 
     return {
+      project: chatGPTProject(event, responseCandidates),
       completeness: event.response.ok && event.method === "GET" && responseCandidates.some(hasCompletePath)
         ? "complete" : "partial",
       provider: this.provider,

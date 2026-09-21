@@ -27,7 +27,21 @@ class IngestMessage(BaseModel):
         return value
 
 
+class ProviderProjectFile(BaseModel):
+    id: str = Field(min_length=1, max_length=255)
+    name: str = Field(max_length=500)
+
+
+class ProviderProjectInput(BaseModel):
+    id: str = Field(pattern=r"^g-p-[a-zA-Z0-9]{1,100}$")
+    name: str | None = Field(default=None, max_length=120)
+    workspace_id: str | None = Field(default=None, max_length=255)
+    instructions: str | None = Field(default=None, max_length=100_000)
+    files: list[ProviderProjectFile] | None = Field(default=None, max_length=500)
+
+
 class IngestDiffRequest(BaseModel):
+    provider_project: ProviderProjectInput | None = None
     extraction_method: Literal["structured", "heuristic", "unknown"] = "unknown"
     capture_completeness: Literal["complete", "partial", "unknown"] = "unknown"
     parser_version: str | None = Field(default=None, max_length=80)
@@ -63,6 +77,8 @@ class IngestDiffRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_unique_message_ids(self) -> "IngestDiffRequest":
+        if self.provider_project is not None and self.provider != ProviderName.CHATGPT:
+            raise ValueError("Provider project capture currently supports ChatGPT only.")
         seen: set[str] = set()
         duplicates: set[str] = set()
         for message in self.messages:
@@ -86,6 +102,7 @@ def _validate_json_value(value: object, *, field_name: str) -> None:
 
 
 class IngestResponse(BaseModel):
+    provider_project_ack: bool = False
     session_id: str | None = None
     disposition: Literal["accepted", "quarantined"] = "accepted"
     receipt_id: str | None = None

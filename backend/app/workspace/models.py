@@ -54,6 +54,27 @@ class Project(TimestampMixin, Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class ProviderProject(TimestampMixin, Base):
+    """Private upstream context, not an executable instruction or inferred memory."""
+
+    __tablename__ = "workspace_provider_projects"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("workspace_projects.id"), unique=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    account_key: Mapped[str] = mapped_column(String(255))
+    external_id: Mapped[str] = mapped_column(String(120))
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    observed_at: Mapped[float] = mapped_column(default=0.0)
+
+
+class SourceProjectBinding(Base):
+    __tablename__ = "workspace_source_project_bindings"
+    source_id: Mapped[str] = mapped_column(ForeignKey("workspace_sources.id"), primary_key=True)
+    provider_project_id: Mapped[str | None] = mapped_column(ForeignKey("workspace_provider_projects.id"))
+    observed_at: Mapped[float] = mapped_column(default=0.0)
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Memory(TimestampMixin, Base):
     __tablename__ = "workspace_memories"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

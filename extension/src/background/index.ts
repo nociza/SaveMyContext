@@ -14,7 +14,7 @@ import {
   validateBackendConfiguration
 } from "./backend";
 import { buildIngestPayload, mergeSeenMessageIds, mergeMessageFingerprints } from "./diff";
-import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures, indexingAllowsCapture } from "./outbox";
+import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
 import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
 import {
   buildProviderRefreshAlarmPlan,
@@ -2022,6 +2022,10 @@ async function handlePageVisit(
       payload: {
         provider: payload.provider,
         syncedSessionIds,
+        historyFingerprints: Object.fromEntries(Object.values(await getProviderSessionSyncStates(payload.provider))
+          .filter((s) => s.historyItemKey && s.historyFingerprint && s.lastSyncedAt &&
+            Date.now() - Date.parse(s.lastSyncedAt) < 24 * 60 * 60 * 1000)
+          .map((s) => [s.historyItemKey!, s.historyFingerprint!])),
         previousTopSessionId: previousTopSessionIds?.[0],
         previousTopSessionIds
       }
@@ -2347,15 +2351,16 @@ async function deliverCaptureOutbox(): Promise<void> {
       });
       if (!response.ok) throw new Error(`Backend responded ${response.status}; capture retained for retry.`);
       const receipt = await response.json();
-      if (!receipt.session_id && !(receipt.disposition === "quarantined" && receipt.receipt_id)) {
-        throw new Error("Backend did not acknowledge durable capture storage.");
-      }
+      requireCaptureReceipt(payload, receipt);
       const sessionKey = `${payload.provider}:${payload.external_session_id}`;
       const syncState = await getSessionSyncState(sessionKey);
       if (receipt.disposition !== "quarantined") {
         await saveSessionSyncState(sessionKey, {
           ...syncState,
           seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
+          projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
+          historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
+          historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
           messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
           lastSyncedAt: new Date().toISOString(),
           indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed",

@@ -11,7 +11,8 @@ import type {
   ProxyPromptResult
 } from "../shared/types";
 import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
-import { MAX_CAPTURE_BYTES, observeResponse } from "./response-observer";
+import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
+import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
 
 import { maybeUpdateGeminiRuntimeContext, runGeminiHistorySync } from "./gemini-history";
 import { runGrokHistorySync } from "./grok-history";
@@ -394,8 +395,8 @@ async function fetchJsonWithText(
   text: string;
   json: unknown;
 }> {
-  const response = await nativeFetch(url, init);
-  const text = await response.text();
+  const response = await nativeFetch(url, { ...init, signal: AbortSignal.timeout(30_000), redirect: "error" });
+  const text = await readBoundedResponse(response, undefined, 30_000);
   return {
     response,
     text,
@@ -421,6 +422,9 @@ function normalizeChatGPTConversationIds(payload: unknown, evidence?: string): s
       "ChatGPT history list no longer exposes the expected items array.",
       evidence
     );
+  }
+  if (record.items.some((item) => typeof asRecord(item)?.id !== "string")) {
+    throw createProviderDriftError("chatgpt", "ChatGPT history contains an invalid conversation identity.", evidence);
   }
 
   return [
@@ -452,6 +456,7 @@ async function collectChatGPTHistoryCandidates(
 ): Promise<HistoryCandidates> {
   const discoveredIds: string[] = [];
   let topSessionId: string | undefined;
+  let complete = false;
 
   for (let offset = 0; offset < CHATGPT_HISTORY_MAX_OFFSET; offset += CHATGPT_HISTORY_PAGE_LIMIT) {
     const listUrl = buildChatGPTUrl("/backend-api/conversations");
@@ -459,17 +464,14 @@ async function collectChatGPTHistoryCandidates(
     listUrl.searchParams.set("limit", String(CHATGPT_HISTORY_PAGE_LIMIT));
     listUrl.searchParams.set("order", "updated");
 
-    const listResult = await fetchJsonWithText(listUrl.toString(), {
-      method: "GET",
-      credentials: "include",
-      headers
-    });
+    const listResult = await chatGPTReader(nativeFetch, headers)(listUrl.toString());
     if (!listResult.response.ok) {
       throw new Error(`ChatGPT list request failed with ${listResult.response.status}.`);
     }
 
     const pageConversationIds = normalizeChatGPTConversationIds(listResult.json, `offset=${offset}`);
     if (!pageConversationIds.length) {
+      complete = true;
       break;
     }
 
@@ -478,6 +480,7 @@ async function collectChatGPTHistoryCandidates(
     if (previousTopSessionId) {
       const stopIndex = pageConversationIds.indexOf(previousTopSessionId);
       if (stopIndex >= 0) {
+        complete = true;
         discoveredIds.push(...pageConversationIds.slice(0, stopIndex));
         break;
       }
@@ -487,9 +490,12 @@ async function collectChatGPTHistoryCandidates(
     }
 
     if (pageConversationIds.length < CHATGPT_HISTORY_PAGE_LIMIT) {
+      complete = true;
       break;
     }
   }
+
+  if (!complete) throw new Error("ChatGPT ordinary history reached the page limit; sync remains incomplete.");
 
   const allConversationIds = dedupeIds(discoveredIds);
   if (previousTopSessionId) {
@@ -567,12 +573,25 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
           : undefined;
       const syncedSessionIds = normalizeHistorySessionIds("chatgpt", control?.syncedSessionIds);
       const refreshSessionIds = normalizeHistorySessionIds("chatgpt", control?.refreshSessionIds);
-      const { topSessionId, pendingSessionIds, totalCount, skippedCount } = await collectChatGPTHistoryCandidates(
+      const { topSessionId, pendingSessionIds: normalPending, totalCount: normalTotal, skippedCount: normalSkipped } = await collectChatGPTHistoryCandidates(
         headers,
         previousTopSessionId,
         syncedSessionIds,
         refreshSessionIds
       );
+
+      const read = chatGPTReader(nativeFetch, headers);
+      const accountScope = asRecord(sessionJson.user)?.id;
+      let projectFailure: unknown;
+      const projectChats = await discoverChatGPTProjects(read, typeof accountScope === "string" ? accountScope : undefined).catch((error) => {
+        projectFailure = error;
+        return new Map<string, import("./chatgpt-projects").ProjectConversation>();
+      });
+      const projectPending = [...projectChats].filter(([id, item]) => refreshSessionIds.has(id) ||
+        typeof accountScope !== "string" || !item.fingerprint || control?.historyFingerprints?.[item.key] !== item.fingerprint).map(([id]) => id);
+      const pendingSessionIds = dedupeIds([...normalPending, ...projectPending]);
+      const skippedCount = normalSkipped + projectChats.size - projectPending.length;
+      const totalCount = Math.max(normalTotal, pendingSessionIds.length + skippedCount);
 
       let processedCount = skippedCount;
       let syncedConversationCount = 0;
@@ -583,11 +602,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
       await runWithConcurrency(pendingSessionIds, CHATGPT_HISTORY_DETAIL_CONCURRENCY, async (conversationId) => {
         try {
           const detailUrl = buildChatGPTUrl(`/backend-api/conversation/${conversationId}`);
-          const detailResult = await fetchJsonWithText(detailUrl.toString(), {
-            method: "GET",
-            credentials: "include",
-            headers
-          });
+          const detailResult = await read(detailUrl.toString());
           if (!detailResult.response.ok) {
             return;
           }
@@ -600,6 +615,9 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
           }
 
           postCapture({
+            project: projectChats.get(conversationId)?.project,
+            historyItemKey: projectChats.get(conversationId)?.key,
+            historyFingerprint: projectChats.get(conversationId)?.fingerprint,
             providerHint: "chatgpt",
             captureMode: "full_snapshot",
             historySyncRunId: runId,
@@ -630,6 +648,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
       });
 
       const attemptedConversationCount = pendingSessionIds.length;
+      if (projectFailure) throw projectFailure;
       const retryableFailureCount = countRetryableHistoryFailures(attemptedConversationCount, syncedConversationCount);
       let providerDriftAlert: ProviderDriftAlert | null = null;
       if (

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
+from app.core.config import get_settings
 from app.schemas.ingest import IngestDiffRequest, IngestResponse
 from app.services.ingest import CaptureQuarantined, IngestPhaseTwoError, IngestService
 
@@ -35,6 +36,7 @@ async def ingest_diff(
             headers={"Retry-After": "5"},
         ) from exc
     return IngestResponse(
+        provider_project_ack=get_settings().workspace_enabled and "provider_project" in payload.model_fields_set,
         session_id=session.id,
         pile_slug=session.pile.slug if session.pile else session.built_in_pile.value if session.built_in_pile else None,
         is_discarded=session.is_discarded,
