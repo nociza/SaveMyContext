@@ -7,19 +7,9 @@ from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 
-PROCESSOR_VERSION = "workspace-v1"
-PATTERNS = {
-    "task": re.compile(
-        r"\b(?:I (?:need to|must|will)|we need to|remind me to|remember to|todo:)\s+(.+)",
-        re.I,
-    ),
-    "decision": re.compile(
-        r"\b(?:we decided|I decided|the decision is|we agreed|let's use)\b", re.I
-    ),
-    "idea": re.compile(
-        r"\b(?:my idea|what if we|I propose|we could build|an idea is)\b", re.I
-    ),
-}
+PROCESSOR_VERSION = "workspace-v2"
+LOCAL_MODEL = "local-source-index-v2"
+KINDS = ("task", "decision", "idea")
 
 
 class Extracted(BaseModel):
@@ -82,13 +72,13 @@ async def jev_decisions(
                         }[kind],
                     }
                     for i in range(len(excerpts))
-                    for kind in PATTERNS
+                    for kind in KINDS
                 },
             },
         )
         response.raise_for_status()
         answers = response.json().get("answers")
-        expected = {f"{i}_{kind}" for i in range(len(excerpts)) for kind in PATTERNS}
+        expected = {f"{i}_{kind}" for i in range(len(excerpts)) for kind in KINDS}
         if not isinstance(answers, dict) or not expected.issubset(answers):
             raise ValueError("Incomplete decision response")
         for key in expected:
@@ -105,11 +95,37 @@ async def jev_decisions(
             await client.aclose()
 
 
-async def extract(body: str, messages: list) -> tuple[list[dict], dict]:
+async def extract(
+    body: str,
+    messages: list,
+    *,
+    source_kind: str = "conversation",
+    source_title: str = "Saved note",
+) -> tuple[list[dict], dict]:
     settings = get_settings()
+    # Captured prose is not an instruction or a present-day commitment. A regex
+    # cannot distinguish drafts, questions, code, quoted speakers, or old plans.
+    # Preserve explicit notes verbatim; index other sources without inventing
+    # semantics when no external processor has been configured.
+    provenance = {
+        "processor": PROCESSOR_VERSION,
+        "model": LOCAL_MODEL,
+        "external": False,
+    }
+    if source_kind == "note" and not messages:
+        return [
+            {
+                "kind": "note",
+                "title": source_title[:240],
+                "body": body,
+                "evidence": body,
+            }
+        ], {**provenance, "method": "verbatim-note"}
+    if not settings.workspace_external_processing:
+        return [], {**provenance, "method": "source-index-only"}
     sentences = candidates(messages, body)
     items = []
-    model = "local-excerpts-v1"
+    model = LOCAL_MODEL
     # Process all input in bounded batches. Never silently truncate an archive.
     for offset in range(0, len(sentences), 8):
         batch = sentences[offset : offset + 8]
@@ -117,29 +133,16 @@ async def extract(body: str, messages: list) -> tuple[list[dict], dict]:
         if answers:
             model = settings.jev_model
         for i, sentence in enumerate(batch):
-            for kind, pattern in PATTERNS.items():
+            for kind in KINDS:
                 answer = answers.get(f"{i}_{kind}")
                 probability = answer.get("noul") if isinstance(answer, dict) else None
-                if answers:
-                    selected = (
-                        isinstance(probability, (float, int))
-                        and not isinstance(probability, bool)
-                        and 0.9 <= probability <= 1
-                    )
-                else:
-                    selected = bool(pattern.search(sentence))
-                    if re.search(
-                        r"\b(?:don't|do not|not going to|no longer|for example|suppose)\b",
-                        sentence,
-                        re.I,
-                    ):
-                        selected = False
+                selected = (
+                    isinstance(probability, (float, int))
+                    and not isinstance(probability, bool)
+                    and 0.9 <= probability <= 1
+                )
                 if selected:
                     title = sentence[:240]
-                    if kind == "task":
-                        match = PATTERNS["task"].search(sentence)
-                        if match:
-                            title = match.group(1).strip()[:240]
                     items.append(
                         {
                             "kind": kind,
@@ -176,5 +179,5 @@ async def extract(body: str, messages: list) -> tuple[list[dict], dict]:
     return items, {
         "processor": PROCESSOR_VERSION,
         "model": model,
-        "external": model != "local-excerpts-v1",
+        "external": model != LOCAL_MODEL,
     }

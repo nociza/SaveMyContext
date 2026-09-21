@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
+from app.workspace.processor import PROCESSOR_VERSION
 
 
 def uid() -> str:
@@ -120,7 +121,7 @@ class Job(TimestampMixin, Base):
         ForeignKey("workspace_sources.id"), index=True
     )
     revision: Mapped[str] = mapped_column(String(64))
-    processor: Mapped[str] = mapped_column(String(48), default="workspace-v1")
+    processor: Mapped[str] = mapped_column(String(48), default=PROCESSOR_VERSION)
     state: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     lease: Mapped[str | None] = mapped_column(String(36))

@@ -77,9 +77,12 @@ Capture and its durable job commit together. A leased background worker derives
 suggestions afterward. Failures do not lose sources; stale jobs cannot overwrite
 newer captures. Reprocessing cannot undo completed tasks or owner edits.
 
-No model is required. Local extraction is deliberately narrow: explicit
-commitments, ideas, and decisions, not broad semantic summarization. External
-processing is **off by default**. Optional Jev integration uses OpenRouter's
+No model is required for capture, search, notes, and explicit task management.
+Locally, conversations and page captures are indexed **without inferred tasks or
+memories**. “Save a thought” preserves a verbatim note for review; use “New task”
+or `add-task` for a commitment. Keyword matching cannot distinguish questions,
+quoted drafts, code, or historical plans from the owner's current intent.
+External processing is **off by default**. Optional Jev integration uses OpenRouter's
 typed `/api/alpha/decisions` endpoint, not chat completions:
 
 ```dotenv
@@ -94,6 +97,19 @@ policy, not a measured accuracy claim. Generation requires the separate
 `SAVEMYCONTEXT_WORKSPACE_GENERATE` setting and a configured text-generation
 provider. Decide what private material may leave the host before enabling either.
 Never commit keys, sources, or databases.
+
+### Retiring old keyword suggestions
+
+After taking a consistent backup, preview with
+`python -m app.workspace.cleanup` and apply with
+`python -m app.workspace.cleanup --apply <preview-fingerprint>` using the service's
+protected runtime configuration. This retires only unreviewed `local-excerpts-v1`
+suggestions. Accepted, dismissed, edited, or task-linked records are excluded.
+Original sources remain searchable; each retired record and its before-image
+remain in private history. No private text is printed. A stale preview aborts.
+For recovery, use the memory ID from the retirement history and PATCH its status
+to `suggested` with the current `expected_version`; review it before accepting.
+The retirement marker prevents automatic reprocessing from reviving it.
 
 ## Upgrade and recovery
 

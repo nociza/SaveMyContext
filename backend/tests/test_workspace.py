@@ -14,6 +14,7 @@ from app.db.engine import create_configured_async_engine
 from app.db.migrations import apply_schema_migrations
 from app.models.base import Base
 from app.workspace import api
+from app.workspace.cleanup import retire_legacy
 from app.workspace.migrate import import_nexus
 from app.workspace.models import Event, Job, Memory, Source, Task
 from app.workspace.processor import extract, jev_decisions
@@ -54,7 +55,7 @@ async def capture(sessions, body="I need to call the dentist."):
             source_id="test:one",
             title="A thought",
             body=body,
-            kind="conversation",
+            kind="note",
             provider="test",
         )
         await db.commit()
@@ -74,7 +75,18 @@ async def test_worker_creates_suggestions_not_tasks_and_keeps_completed_state(
     workspace,
 ):
     await capture(workspace)
-    assert await run_one(workspace)
+
+    async def proposed_task(body, messages, **context):
+        return [
+            {
+                "kind": "task",
+                "title": "call the dentist.",
+                "body": body,
+                "evidence": body,
+            }
+        ], {"model": "test"}
+
+    assert await run_one(workspace, extractor=proposed_task)
     async with workspace() as db:
         memory = await db.scalar(select(Memory))
         assert memory.kind == "task" and memory.status == "suggested"
@@ -119,7 +131,7 @@ async def test_capture_rollback_rolls_back_job_and_fts(workspace):
 async def test_old_worker_cannot_apply_after_new_capture(workspace):
     await capture(workspace)
 
-    async def intervening(body, messages):
+    async def intervening(body, messages, **context):
         await capture(workspace, "A newer thought.")
         return [{"kind": "task", "title": "old", "body": body, "evidence": body}], {
             "model": "test"
@@ -134,7 +146,7 @@ async def test_old_worker_cannot_apply_after_new_capture(workspace):
 async def test_worker_failures_are_retryable_and_do_not_lose_source(workspace):
     await capture(workspace)
 
-    async def failure(*args):
+    async def failure(*args, **kwargs):
         raise RuntimeError("secret source must not become error text")
 
     await run_one(workspace, extractor=failure)
@@ -194,7 +206,7 @@ async def test_reminders_require_both_consent_and_task_request(workspace):
         )
 
 
-async def test_assistant_text_quotes_and_negations_do_not_create_local_tasks(workspace):
+async def test_conversation_text_never_creates_keyword_tasks(workspace):
     items, _ = await extract(
         "full transcript",
         [
@@ -205,7 +217,147 @@ async def test_assistant_text_quotes_and_negations_do_not_create_local_tasks(wor
             },
         ],
     )
-    assert len(items) == 1 and items[0]["title"] == "buy tea."
+    assert items == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "What do I need to do?",
+        'Correct this: "I will host the conference."',
+        "I will implement a model in which\nthe signal changes with time.",
+        "// TODO: replace the sample key; const value = 3;",
+        "Here is a transcript: we need to send you some files.",
+        "TODO: wash the car tomorrow",
+        "Let's use the second approach.",
+        "What if we missed a deadline?",
+        "I need to order supplies.\nActually, I already ordered them.",
+    ],
+)
+async def test_local_archive_is_indexed_not_interpreted(workspace, body):
+    items, provenance = await extract(body, [{"role": "user", "content": body}])
+    assert items == []
+    assert provenance["method"] == "source-index-only"
+    assert not provenance["external"]
+    items, _ = await extract(body, [], source_kind="selection")
+    assert items == []
+
+
+async def test_explicit_note_preserves_full_text_and_does_not_infer_tasks(workspace):
+    body = "TODO: a quoted draft, not an action.\n" + "context " * 1000
+    items, provenance = await extract(
+        body, [], source_kind="note", source_title="My draft"
+    )
+    assert items == [
+        {"kind": "note", "title": "My draft", "body": body, "evidence": body}
+    ]
+    assert provenance["method"] == "verbatim-note"
+
+
+async def test_missing_external_configuration_does_not_fall_back_to_keywords(
+    workspace, monkeypatch
+):
+    monkeypatch.setenv("SAVEMYCONTEXT_WORKSPACE_EXTERNAL_PROCESSING", "true")
+    monkeypatch.setenv("SAVEMYCONTEXT_JEV_API_KEY", "")
+    monkeypatch.setenv("SAVEMYCONTEXT_WORKSPACE_GENERATE", "false")
+    get_settings.cache_clear()
+    items, provenance = await extract("I need to buy tea.", [])
+    assert items == [] and not provenance["external"]
+
+
+async def test_retirement_is_previewed_versioned_audited_and_preserves_owner_state(
+    workspace,
+):
+    from app.workspace.store import index_document
+
+    revision = await capture(workspace)
+    provenance = {
+        "processor": "workspace-v1",
+        "model": "local-excerpts-v1",
+        "external": False,
+    }
+    async with workspace() as db:
+        for name, status, extra in [
+            ("junk", "suggested", {}),
+            ("kept", "accepted", {}),
+            ("dismissed", "rejected", {}),
+            ("edited", "suggested", {"user_edited": True}),
+            ("linked", "suggested", {}),
+            ("other", "suggested", {"model": "other-model"}),
+        ]:
+            db.add(
+                Memory(
+                    id=name,
+                    source_id="test:one",
+                    source_revision=revision,
+                    kind="task",
+                    title=name,
+                    body="original",
+                    evidence="original",
+                    status=status,
+                    provenance={**provenance, **extra},
+                )
+            )
+        await db.flush()
+        db.add(Task(title="Protected task", memory_id="linked"))
+        await index_document(db, "memory:junk", "junk", "original")
+        await db.commit()
+    preview = await retire_legacy(workspace)
+    assert preview["eligible"] == 1 and not preview["applied"]
+    with pytest.raises(Conflict):
+        await retire_legacy(workspace, expected_fingerprint="stale")
+    async with workspace() as db:
+        assert (await db.get(Memory, "junk")).status == "suggested"
+    applied = await retire_legacy(
+        workspace, expected_fingerprint=preview["fingerprint"]
+    )
+    assert applied["applied"]
+    async with workspace() as db:
+        retired = await db.get(Memory, "junk")
+        assert retired.status == "superseded" and retired.version == 2
+        assert retired.provenance["retired"] == "local-excerpts-v1"
+        event = await db.scalar(select(Event).where(Event.action == "retired"))
+        assert event.payload["before"]["body"] == "original"
+        assert event.payload["before"]["status"] == "suggested"
+        assert await search(db, "junk") == []
+        assert (await db.get(Source, "test:one")).body == "I need to call the dentist."
+        for name in ("kept", "dismissed", "edited", "linked", "other"):
+            assert (await db.get(Memory, name)).version == 1
+    assert (await retire_legacy(workspace))["eligible"] == 0
+
+
+async def test_retirement_cannot_revive_on_reprocessing(workspace):
+    from app.workspace.store import digest
+
+    body = "I need to call the dentist."
+    revision = await capture(workspace, body)
+    identity = digest(["test:one", "task", body])
+    async with workspace() as db:
+        db.add(
+            Memory(
+                id=identity,
+                source_id="test:one",
+                source_revision=revision,
+                kind="task",
+                title="retired",
+                body=body,
+                evidence=body,
+                status="superseded",
+                provenance={"retired": "local-excerpts-v1"},
+                version=2,
+            )
+        )
+        await db.commit()
+
+    async def retry(body, messages, **context):
+        return [{"kind": "task", "title": "revived", "body": body, "evidence": body}], {
+            "model": "test"
+        }
+
+    await run_one(workspace, extractor=retry)
+    async with workspace() as db:
+        memory = await db.get(Memory, identity)
+        assert memory.status == "superseded" and memory.version == 2
 
 
 async def test_jev_typed_endpoint_and_explicit_opt_in(workspace, monkeypatch):

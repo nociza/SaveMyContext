@@ -121,7 +121,12 @@ export class SMCWorkspace extends HTMLElement {
   }
   async load() {
     const generation = ++this.generation;
-    const viewKey = JSON.stringify([this.state.view, this.state.project, this.state.query, this.state.taskStatus]);
+    const viewKey = JSON.stringify([
+      this.state.view,
+      this.state.project,
+      this.state.query,
+      this.state.taskStatus,
+    ]);
     this.loading = !this.state.overview || viewKey !== this.viewKey;
     this.render();
     try {
@@ -230,7 +235,7 @@ export class SMCWorkspace extends HTMLElement {
     const headings = {
       inbox: [
         "A little clarity.",
-        "Useful thoughts from your conversations, ready for a second look.",
+        "Saved notes and suggestions, ready for a second look.",
       ],
       tasks: [
         "What needs doing?",
@@ -263,7 +268,7 @@ export class SMCWorkspace extends HTMLElement {
         )}</nav><form class="search" data-form="search"><label class="sr-only" for="smc-search">Search your memory</label><input id="smc-search" name="q" type="search" placeholder="Search your memory…" value="${esc(s.query)}"><button type="submit" aria-label="Search">↗</button></form></div>
       <div role="status" aria-live="polite">${this.notice ? `<p class="notice">${esc(this.notice)}</p>` : ""}</div>${this.error ? `<p role="alert" class="notice error">${esc(this.error)}</p>` : ""}
       ${this.needsAuth ? this.login() : this.loading ? '<p class="busy" role="status">Opening your workspace…</p>' : s.overview ? this.content() : '<button data-action="refresh">Try again</button>'}
-      ${s.overview ? `<footer class="bottom"><span><i class="status-dot"></i>${s.overview.processing.external_enabled ? "External processing enabled" : "Local processing · Nothing sent to an AI provider"}${counts.pending_jobs ? ` · ${counts.pending_jobs} queued` : ""}${counts.failed_jobs ? ` · ${counts.failed_jobs} need attention` : ""}</span><div><button data-action="jobs">Processing</button> <button data-action="settings">Reminders</button> <button data-action="export">Export</button></div></footer>` : ""}
+      ${s.overview ? `<footer class="bottom"><span><i class="status-dot"></i>${s.overview.processing.external_enabled ? "External processing enabled" : "Local capture & search · No AI inference"}${counts.pending_jobs ? ` · ${counts.pending_jobs} queued` : ""}${counts.failed_jobs ? ` · ${counts.failed_jobs} need attention` : ""}</span><div><button data-action="jobs">Processing</button> <button data-action="settings">Reminders</button> <button data-action="export">Export</button></div></footer>` : ""}
       <dialog><div class="dialog-head"><h2 id="dialog-title"></h2><button type="button" data-action="close" aria-label="Close dialog">×</button></div><p class="notice error dialog-error" role="alert" hidden></p><div class="dialog-content"></div></dialog>
     </section>`;
     const dialog = this.shadowRoot.querySelector("dialog");
@@ -289,13 +294,17 @@ export class SMCWorkspace extends HTMLElement {
     if (s.view === "tasks") return this.tasksView();
     if (s.view === "projects" && !s.project)
       return `<div class="section-title"><h2>Your projects</h2><button data-action="add-project">＋ New project</button></div>${s.projects.length ? `<div class="grid">${s.projects.map((p) => `<button class="card project" data-action="project" data-id="${esc(p.id)}" style="text-align:left"><span class="kind">Project</span><h3>${esc(p.name)}</h3><p>${esc(p.description || "Gather the conversations and work that belong here.")}</p><div class="project-num">Open project ↗</div></button>`).join("")}</div>` : this.empty("Give your work a home", "Create a project to connect its sources, decisions, and tasks.")}`;
-    return `<div class="filters"><span class="muted">${s.view === "inbox" ? "Suggestions are not commitments. You decide what to keep." : "Your saved thinking, with links back to the source."}</span>${this.projectFilter()}</div>${s.items.length ? `<div class="grid">${s.items.map((item) => this.memoryCard(item)).join("")}</div>` : s.view === "inbox" ? this.empty("All caught up", "Save a thought or capture a conversation. Useful ideas and commitments will appear here for review.", "✓") : this.empty("Room for your best thinking", "Keep useful suggestions from the Inbox. Your original sources remain available below.")}
+    return `<div class="filters"><span class="muted">${s.view === "inbox" ? "Suggestions are not commitments. You decide what to keep." : "Your saved thinking, with links back to the source."}</span>${this.projectFilter()}</div>${s.items.length ? `<div class="grid">${s.items.map((item) => this.memoryCard(item)).join("")}</div>` : s.view === "inbox" ? this.empty("Nothing to review", s.overview?.processing.external_enabled ? "Save a thought or review suggestions from your configured processor." : "Saved thoughts appear here as notes. Conversations stay searchable in Memory; automatic interpretation is off. Use Add task for something you want to do.", "✓") : this.empty("Room for your best thinking", "Keep useful suggestions from the Inbox. Your original sources remain available below.")}
       ${this.moreMemories ? '<p><button data-action="more-memories">Load more memories</button></p>' : ""}
       ${s.view === "projects" && s.tasks.length ? `<div class="section-title"><h2>Project tasks</h2></div><div class="task-list">${s.tasks.map((t) => `<button class="source-row" data-action="edit-task" data-id="${t.id}">${esc(t.title)}</button>`).join("")}</div>` : ""}
       ${s.view !== "inbox" ? `<div class="section-title"><h2>Original sources</h2><span>Showing latest ${s.sources.length}</span></div>${s.sources.length ? `<div class="task-list">${s.sources.map((item) => this.sourceRow(item)).join("")}</div>${this.moreSources ? '<p><button data-action="more-sources">Load more sources</button></p>' : ""}` : this.empty("Nothing captured yet", "Use the extension, ask Teleclaw to remember something, or save a thought here.")}` : ""}`;
   }
   memoryCard(item) {
-    return `<article class="card"><span class="kind ${esc(item.kind)}">${esc(item.kind === "task" ? "Suggested task" : item.kind)}</span><h3>${esc(item.title)}</h3><p>${esc(item.body.slice(0, 350))}</p><div class="evidence">${esc(item.evidence.slice(0, 180))}</div><div class="card-actions"><button class="text-link" data-action="source" data-id="${esc(item.source_id)}" data-revision="${esc(item.source_revision)}">View source ↗</button><div class="buttons"><button class="quiet" data-action="edit-memory" data-id="${item.id}">Edit</button>${item.status === "suggested" ? `<button class="quiet" data-action="reject" data-id="${item.id}">Dismiss</button><button class="primary" data-action="accept" data-id="${item.id}">${item.kind === "task" ? "Add task" : "Keep"}</button>` : ""}</div></div></article>`;
+    const body = item.body.trim();
+    const evidence = item.evidence.trim();
+    const distinctEvidence =
+      evidence && evidence !== body && evidence !== item.title.trim();
+    return `<article class="card"><span class="kind ${esc(item.kind)}">${esc(item.kind === "task" && item.status === "suggested" ? "Suggested task" : item.kind)}</span><h3>${esc(item.title)}</h3>${body !== item.title.trim() ? `<p>${esc(body.slice(0, 350))}</p>` : ""}${distinctEvidence ? `<div class="evidence">${esc(evidence.slice(0, 180))}</div>` : ""}<div class="card-actions"><button class="text-link" data-action="source" data-id="${esc(item.source_id)}" data-revision="${esc(item.source_revision)}">View source ↗</button><div class="buttons"><button class="quiet" data-action="edit-memory" data-id="${item.id}">Edit</button>${item.status === "suggested" ? `<button class="quiet" data-action="reject" data-id="${item.id}">Dismiss</button><button class="primary" data-action="accept" data-id="${item.id}">${item.kind === "task" ? "Add task" : "Keep"}</button>` : ""}</div></div></article>`;
   }
   sourceRow(item) {
     return `<button class="source-row" data-action="source" data-id="${esc(item.id)}"><span class="source-mark" aria-hidden="true">≡</span><span class="text"><span class="source-title">${esc(item.title)}</span><span class="source-excerpt">${esc(item.excerpt || item.body?.slice(0, 180))}</span></span><span class="source-meta">${esc(item.provider)} · ${shortDate(item.updated_at)}</span></button>`;

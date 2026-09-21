@@ -77,13 +77,19 @@ async def run_one(sessions, *, extractor=extract) -> bool:
             job.lease = None
             await db.commit()
             return True
-        body, messages, title = snapshot.body, snapshot.messages, source.title
+        body, messages, title, kind = (
+            snapshot.body,
+            snapshot.messages,
+            source.title,
+            source.kind,
+        )
         await db.commit()
 
     try:
         # Bound inference to the lease lifetime. No DB transaction held across network I/O.
         items, provenance = await asyncio.wait_for(
-            extractor(body, messages), timeout=LEASE_SECONDS - 30
+            extractor(body, messages, source_kind=kind, source_title=title),
+            timeout=LEASE_SECONDS - 30,
         )
         async with sessions() as db:
             current = await db.get(Source, source_id)
@@ -118,6 +124,7 @@ async def run_one(sessions, *, extractor=extract) -> bool:
                 if memory is not None and (
                     memory.status in {"accepted", "rejected"}
                     or memory.provenance.get("user_edited")
+                    or memory.provenance.get("retired")
                 ):
                     continue
                 values = dict(

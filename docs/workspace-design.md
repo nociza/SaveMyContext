@@ -29,8 +29,10 @@ if the source revision is still current. Failed jobs back off and become visibly
 failed after bounded attempts. Replays are idempotent. There is no browser-driven
 inference in the workspace pipeline and no whole-vault regeneration per capture.
 
-Local extraction works without a model. External processing is disabled by
-default and requires explicit configuration. Jev is an optional typed decision
+Local capture and search work without a model: conversations and page captures
+are indexed, not classified into commitments by keyword. Explicit notes are
+preserved verbatim for review. External processing is disabled by default and
+requires explicit configuration. Jev is an optional typed decision
 adapter, not a summarizer, calculator, authorization system, or mandatory service.
 Only bounded excerpts are submitted. Model and processor versions accompany
 derived records. Ambiguous inferred tasks remain suggestions. Direct owner task

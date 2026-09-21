@@ -30,15 +30,19 @@ test("shared workspace captures, reviews, remembers, and completes tasks on desk
     })
     .toBe(0);
   await page.reload();
-  const suggestion = page
-    .locator("article")
-    .filter({
-      has: page.getByRole("heading", { name: "schedule a restore test." }),
-    });
+  const suggestion = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "A more thoughtful home lab" }),
+  });
   await expect(suggestion).toBeVisible();
-  await suggestion
-    .getByRole("button", { name: "Add task", exact: true })
-    .click();
+  await expect(suggestion.locator(".evidence")).toHaveCount(0);
+  await suggestion.getByRole("button", { name: "Keep", exact: true }).click();
+  // A note containing action-like prose must not manufacture commitments.
+  expect(
+    (await (await request.get(`${base}/api/v1/workspace/tasks`)).json()).tasks,
+  ).toHaveLength(0);
+  await request.post(`${base}/api/v1/workspace/tasks`, {
+    data: { title: "schedule a restore test." },
+  });
   await page.getByRole("button", { name: /^Tasks/ }).click();
   await expect(
     page.getByText("schedule a restore test.", { exact: true }),
@@ -61,7 +65,10 @@ test("shared workspace captures, reviews, remembers, and completes tasks on desk
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await page.getByRole("button", { name: /^Inbox/ }).click();
-  await expect(page.getByRole("heading", { name: "My idea is a simple garden journal." })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Nothing to review" }),
+  ).toBeVisible();
+  await expect(page.getByText(/automatic interpretation is off/)).toBeVisible();
   await page.screenshot({
     path: "test-results/workspace-desktop.png",
     fullPage: true,

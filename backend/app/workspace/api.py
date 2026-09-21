@@ -81,7 +81,7 @@ async def overview(
             "external_enabled": settings.workspace_external_processing,
             "decision_model": settings.jev_model
             if settings.workspace_external_processing and settings.jev_api_key
-            else "local-excerpts-v1",
+            else "local-source-index-v2",
             "generation_enabled": settings.workspace_external_processing
             and settings.workspace_generate,
         },
