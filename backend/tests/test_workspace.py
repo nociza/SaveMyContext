@@ -288,6 +288,32 @@ async def test_expired_crash_leases_eventually_fail(workspace):
         assert job.state == "failed" and job.error == "LeaseExpired"
 
 
+async def test_workspace_startup_does_not_write_legacy_browser_directories(
+    workspace, monkeypatch
+):
+    from pathlib import Path
+    from unittest.mock import AsyncMock
+    from app import main
+    from app.workspace import migrate
+
+    monkeypatch.setenv("SAVEMYCONTEXT_WORKSPACE_WORKER", "false")
+    monkeypatch.setenv("SAVEMYCONTEXT_EXPERIMENTAL_BROWSER_AUTOMATION", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(main, "init_db", AsyncMock())
+    monkeypatch.setattr(migrate, "backfill", AsyncMock())
+    created = []
+    original = Path.mkdir
+
+    def track(path, *args, **kwargs):
+        created.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", track)
+    async with main.lifespan(main.app):
+        assert get_settings().resolved_browser_profile_dir not in created
+        assert get_settings().resolved_browser_llm_state_path.parent not in created
+
+
 async def test_real_api_service_auth_capture_queue_and_legacy_protection(
     workspace, tmp_path, monkeypatch
 ):

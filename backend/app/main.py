@@ -38,8 +38,11 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.resolved_markdown_dir.mkdir(parents=True, exist_ok=True)
-    settings.resolved_browser_profile_dir.mkdir(parents=True, exist_ok=True)
-    settings.resolved_browser_llm_state_path.parent.mkdir(parents=True, exist_ok=True)
+    if settings.experimental_browser_automation:
+        settings.resolved_browser_profile_dir.mkdir(parents=True, exist_ok=True)
+        settings.resolved_browser_llm_state_path.parent.mkdir(
+            parents=True, exist_ok=True
+        )
     await init_db()
     settings.resolved_vault_root.mkdir(parents=True, exist_ok=True)
     if settings.workspace_enabled:
