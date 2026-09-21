@@ -13,7 +13,7 @@ type Candidate = {
 };
 
 function normalizeWhitespace(value: string): string {
-  return value.replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  return value.replace(/\r\n?/g, "\n").trim();
 }
 
 function stableId(provider: ProviderName, role: MessageRole, index: number, content: string): string {
@@ -65,7 +65,7 @@ function collectBySelector(selector: string, role?: MessageRole): Candidate[] {
   return Array.from(document.querySelectorAll<HTMLElement>(selector)).map((element) => ({ element, role }));
 }
 
-function inferRole(element: HTMLElement, index: number): MessageRole {
+function inferRole(element: HTMLElement): MessageRole {
   const markers = [
     element.getAttribute("data-message-author-role"),
     element.getAttribute("data-testid"),
@@ -82,7 +82,7 @@ function inferRole(element: HTMLElement, index: number): MessageRole {
   if (/assistant|model|response|answer|claude|chatgpt|gemini|grok/.test(markers)) {
     return "assistant";
   }
-  return index % 2 === 0 ? "user" : "assistant";
+  return "unknown";
 }
 
 function candidatesForProvider(provider: ProviderName): Candidate[] {
@@ -131,7 +131,17 @@ export function extractPageChatContext(): ActiveChatContextResponse {
 
   const selectedElements: HTMLElement[] = [];
   const messages: ActiveChatContextMessage[] = [];
+  const unique = new Map<HTMLElement, Candidate>();
   for (const candidate of candidatesForProvider(provider)) {
+    if (!unique.has(candidate.element)) unique.set(candidate.element, candidate);
+  }
+  const candidates = [...unique.values()].filter((candidate) =>
+    candidate.role || ![...unique.values()].some((child) =>
+      child.role && child.element !== candidate.element && candidate.element.contains(child.element))
+  ).sort((a, b) =>
+    a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  );
+  for (const candidate of candidates) {
     if (isNestedCandidate(candidate.element, selectedElements)) {
       continue;
     }
@@ -139,7 +149,7 @@ export function extractPageChatContext(): ActiveChatContextResponse {
     if (content.length < 2) {
       continue;
     }
-    const role = candidate.role ?? inferRole(candidate.element, messages.length);
+    const role = candidate.role ?? inferRole(candidate.element);
     selectedElements.push(candidate.element);
     messages.push({
       id: candidate.element.id || stableId(provider, role, messages.length, content),
@@ -177,7 +187,8 @@ export function extractPageChatContext(): ActiveChatContextResponse {
     sourceUrl: window.location.href,
     pageUrl: window.location.href,
     capturedAt: now,
-    messages
+    messages,
+    completeness: "partial"
   };
   return {
     ok: true,

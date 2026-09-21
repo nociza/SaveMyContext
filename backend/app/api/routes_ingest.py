@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import AuthContext, require_scope
 from app.db.session import get_db_session
 from app.schemas.ingest import IngestDiffRequest, IngestResponse
-from app.services.ingest import IngestPhaseTwoError, IngestService
+from app.services.ingest import CaptureQuarantined, IngestPhaseTwoError, IngestService
 
 
 router = APIRouter()
@@ -23,6 +23,11 @@ async def ingest_diff(
 
     try:
         session, new_message_count = await IngestService(db).ingest(payload)
+    except CaptureQuarantined as exc:
+        return IngestResponse(
+            disposition="quarantined", receipt_id=exc.receipt_id,
+            quality=exc.quality, new_message_count=0,
+        )
     except IngestPhaseTwoError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

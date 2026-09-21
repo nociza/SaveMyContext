@@ -11,6 +11,7 @@ import type {
   ProxyPromptResult
 } from "../shared/types";
 import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
+import { MAX_CAPTURE_BYTES, observeResponse } from "./response-observer";
 
 import { maybeUpdateGeminiRuntimeContext, runGeminiHistorySync } from "./gemini-history";
 import { runGrokHistorySync } from "./grok-history";
@@ -100,6 +101,10 @@ function currentProvider(): ProviderName | null {
 function shouldCapture(url: string): boolean {
   try {
     const resolved = new URL(url, location.href);
+    if (!providerHintFromUrl(resolved.href)) return false;
+    if (isChatGPTHostname(resolved.hostname)) {
+      return /^\/backend-api\/conversation(?:\/[^/]+)?\/?$/.test(resolved.pathname);
+    }
     return INTERESTING_PATH.test(resolved.pathname + resolved.search);
   } catch {
     return false;
@@ -293,33 +298,28 @@ function patchFetch(): void {
       return nativeFetch(input, init);
     }
 
-    const requestBody = await readFetchRequestBody(input, init);
-    maybeUpdateGeminiRuntimeContext(url, requestBody);
-
+    const pageUrl = location.href;
+    const requestBodyPromise = readFetchRequestBody(input, init);
     const response = await nativeFetch(input, init);
-
-    try {
-      const clone = response.clone();
-      const text = await clone.text();
+    observeResponse(response, (text) => { void requestBodyPromise.then((requestBody) => {
+      maybeUpdateGeminiRuntimeContext(url, requestBody);
       postCapture({
         providerHint: providerHintFromUrl(url),
-        pageUrl: location.href,
+        pageUrl,
         requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        method: request.method,
+        method: init?.method ?? request.method,
         url,
         capturedAt: new Date().toISOString(),
         requestBody,
         response: {
           status: response.status,
           ok: response.ok,
-          contentType: clone.headers.get("content-type") ?? undefined,
+          contentType: response.headers.get("content-type") ?? undefined,
           text,
           json: safeJsonParse(text)
         }
       });
-    } catch {
-      // Streaming and opaque responses can fail to clone or decode.
-    }
+    }).catch(() => undefined); });
 
     return response;
   };
@@ -349,6 +349,7 @@ function patchXHR(): void {
     const url = this.__savemycontextUrl;
     const method = this.__savemycontextMethod ?? "GET";
     const requestBodyPromise = serializeBody(body);
+    const pageUrl = location.href;
 
     if (url && shouldCapture(url)) {
       this.addEventListener(
@@ -358,9 +359,10 @@ function patchXHR(): void {
             maybeUpdateGeminiRuntimeContext(url, requestBody);
 
             const text = this.responseType === "" || this.responseType === "text" ? this.responseText : "";
+            if (new TextEncoder().encode(text).byteLength > MAX_CAPTURE_BYTES) return;
             postCapture({
               providerHint: providerHintFromUrl(url),
-              pageUrl: location.href,
+              pageUrl,
               requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
               method,
               url,

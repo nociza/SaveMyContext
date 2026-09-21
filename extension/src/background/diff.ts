@@ -8,22 +8,45 @@ import type {
 
 const MAX_SEEN_MESSAGE_IDS = 4000;
 
-export function buildIngestPayload(
+export async function messageFingerprint(message: NormalizedMessage): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify([
+    message.role, message.content, message.parentId ?? null, message.occurredAt ?? null
+  ]));
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+    (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function mergeMessageFingerprints(
+  existing: Record<string, string> = {}, messages: NormalizedMessage[]
+): Promise<Record<string, string>> {
+  const merged = new Map(Object.entries(existing));
+  for (const message of messages) {
+    merged.delete(message.id);
+    merged.set(message.id, await messageFingerprint(message));
+  }
+  return Object.fromEntries([...merged].slice(-MAX_SEEN_MESSAGE_IDS));
+}
+
+export async function buildIngestPayload(
   snapshot: NormalizedSessionSnapshot,
   rawCapture: CapturedNetworkEvent,
   syncState: SessionSyncState
-): BackendIngestPayload | null {
+): Promise<BackendIngestPayload | null> {
   const syncMode = rawCapture.captureMode === "full_snapshot" ? "full_snapshot" : "incremental";
-  const seen = new Set(syncState.seenMessageIds);
+  const fingerprints = await mergeMessageFingerprints({}, snapshot.messages);
   const messages =
     syncMode === "full_snapshot"
       ? snapshot.messages
-      : snapshot.messages.filter((message) => !seen.has(message.id));
+      : snapshot.messages.filter((message) =>
+          syncState.messageFingerprints?.[message.id] !== fingerprints[message.id]);
   if (!messages.length) {
     return null;
   }
 
   return {
+    capture_completeness: snapshot.completeness ?? "partial",
+    extraction_method: snapshot.extractionMethod ?? "structured",
+    parser_version: "capture-v2",
     provider: snapshot.provider,
     external_session_id: snapshot.externalSessionId,
     account_key: snapshot.accountKey,

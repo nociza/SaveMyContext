@@ -971,7 +971,10 @@ async function fetchGeminiConversationCapture(
     externalSessionId: entry.scopedSessionId,
     accountKey: entry.accountKey,
     title: entry.title,
-    messages: buildGeminiSyntheticMessages(entry.scopedSessionId, blocks, capturedAt)
+    messages: buildGeminiSyntheticMessages(entry.scopedSessionId, blocks, capturedAt),
+    // Keep provider evidence for future parser repairs, not only our interpretation.
+    providerEvidence: payloads,
+    decoderStrategy: decodeResult.diagnostics.selectedStrategy
   };
   const requestJson = {
     rpcId: GEMINI_READ_RPC_ID,

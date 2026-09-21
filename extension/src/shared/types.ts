@@ -43,6 +43,8 @@ export interface NormalizedMessage {
 }
 
 export interface NormalizedSessionSnapshot {
+  extractionMethod?: "structured" | "heuristic";
+  completeness?: "complete" | "partial";
   provider: ProviderName;
   externalSessionId: string;
   accountKey: string;
@@ -54,6 +56,7 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  messageFingerprints?: Record<string, string>;
   seenMessageIds: string[];
   lastSyncedAt?: string;
   indexingRuleDecision?: "indexed" | "skipped" | "discarded";
@@ -157,6 +160,7 @@ export interface ConnectionRedeemResponse {
 }
 
 export interface SyncStatus {
+  pendingCaptureCount?: number;
   lastSuccessAt?: string;
   lastError?: string | null;
   lastProvider?: ProviderName;
@@ -750,6 +754,7 @@ export interface ActiveChatContextMessage {
 }
 
 export interface ActiveChatContextSnapshot {
+  completeness?: "complete" | "partial";
   provider: ProviderName;
   externalSessionId: string;
   accountKey?: string;
@@ -914,6 +919,9 @@ export interface BackendIngestMessage {
 }
 
 export interface BackendIngestPayload {
+  extraction_method?: "structured" | "heuristic";
+  capture_completeness: "complete" | "partial";
+  parser_version: "capture-v2";
   provider: ProviderName;
   external_session_id: string;
   account_key: string;

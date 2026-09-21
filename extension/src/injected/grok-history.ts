@@ -26,6 +26,7 @@ interface GrokResponseNode {
 }
 
 interface GrokResponseRecord {
+  raw: Record<string, unknown>;
   responseId: string;
   sender?: string;
   message?: string;
@@ -104,6 +105,7 @@ function parseGrokResponse(value: unknown): GrokResponseRecord | null {
   }
 
   return {
+    raw: record,
     responseId,
     sender: typeof record.sender === "string" ? record.sender : undefined,
     message: typeof record.message === "string" ? record.message : undefined,
@@ -146,7 +148,7 @@ function sortGrokMessages(messages: GrokSyntheticMessage[]): GrokSyntheticMessag
     if (leftTime !== rightTime) {
       return leftTime - rightTime;
     }
-    return left.id.localeCompare(right.id);
+    return 0;
   });
 }
 
@@ -415,7 +417,8 @@ async function fetchGrokConversationCapture(entry: GrokConversationEntry): Promi
   const responseJson = {
     conversationId,
     title: entry.title,
-    messages
+    messages,
+    providerEvidence: responses.map((response) => response.raw)
   };
   const requestJson = {
     conversationId,

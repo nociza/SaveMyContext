@@ -122,6 +122,17 @@ class KnowledgeProjection(TimestampMixin, Base):
     permalink: Mapped[str] = mapped_column(String(120), unique=True)
 
 
+class CaptureQuarantine(TimestampMixin, Base):
+    """Durable evidence rejected by capture validation; excluded from inference."""
+
+    __tablename__ = "workspace_capture_quarantine"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    external_session_id: Mapped[str] = mapped_column(String(255))
+    quality: Mapped[dict] = mapped_column(JSON)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
 class Job(TimestampMixin, Base):
     __tablename__ = "workspace_jobs"
     __table_args__ = (UniqueConstraint("source_id", "revision", "processor"),)

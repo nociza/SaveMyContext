@@ -42,6 +42,12 @@ class ProjectionSourceChangedError(RuntimeError):
     """A newer source revision superseded work produced by this request."""
 
 
+class CaptureQuarantined(RuntimeError):
+    def __init__(self, receipt_id: str, quality: dict) -> None:
+        self.receipt_id, self.quality = receipt_id, quality
+        super().__init__("Capture preserved for review; transcript unchanged.")
+
+
 class IngestService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -58,6 +64,28 @@ class IngestService:
             return await self._ingest_locked(payload)
 
     async def _ingest_locked(self, payload: IngestDiffRequest) -> tuple[ChatSession, int]:
+        if get_settings().workspace_enabled:
+            from app.workspace.models import CaptureQuarantine
+            from app.workspace.quality import payload_quality
+            from app.workspace.store import digest
+
+            quality = payload_quality(payload)
+            if quality["status"] == "needs_repair":
+                evidence = payload.model_dump(mode="json")
+                receipt_id = digest(evidence)
+                if await self.db.get(CaptureQuarantine, receipt_id) is None:
+                    self.db.add(CaptureQuarantine(
+                        id=receipt_id, provider=payload.provider.value,
+                        external_session_id=payload.external_session_id,
+                        payload=evidence, quality=quality,
+                    ))
+                    try:
+                        await self.db.commit()
+                    except IntegrityError:
+                        await self.db.rollback()
+                        if await self.db.get(CaptureQuarantine, receipt_id) is None:
+                            raise
+                raise CaptureQuarantined(receipt_id, quality)
         session, created = await self._get_or_create_session(payload)
         if not created and self._is_stale_full_snapshot(session, payload):
             session_id = session.id
@@ -98,7 +126,12 @@ class IngestService:
             payload,
             replace_existing=created or self._payload_is_newer(session, payload),
         )
-        if payload.sync_mode == "full_snapshot":
+        # Legacy clients never established completeness. Workspace mode must
+        # treat those captures as append/update-only, even during history sync.
+        complete = payload.capture_completeness == "complete" or (
+            not get_settings().workspace_enabled and payload.capture_completeness == "unknown"
+        )
+        if payload.sync_mode == "full_snapshot" and complete:
             delete_missing = created or self._full_snapshot_is_newer(session, payload)
             new_message_count, messages_changed = await self._ingest_full_snapshot(
                 session.id,
@@ -106,7 +139,9 @@ class IngestService:
                 delete_missing=delete_missing,
             )
         else:
-            new_message_count, messages_changed = await self._ingest_incremental(session.id, payload)
+            new_message_count, messages_changed = await self._ingest_incremental(
+                session.id, payload, allow_updates=not created and self._full_snapshot_is_newer(session, payload)
+            )
 
         if payload.captured_at is not None:
             # This column began as a full-snapshot watermark. Keep the stored
@@ -290,13 +325,23 @@ class IngestService:
     def processing_is_current(cls, session: ChatSession) -> bool:
         return not session.processing_pending
 
-    async def _ingest_incremental(self, session_id: str, payload: IngestDiffRequest) -> tuple[int, bool]:
-        existing_ids = await self._existing_message_ids(session_id)
+    async def _ingest_incremental(
+        self, session_id: str, payload: IngestDiffRequest, *, allow_updates: bool = False
+    ) -> tuple[int, bool]:
+        existing_messages = await self._existing_messages(session_id)
         next_index = await self._next_sequence_index(session_id)
         new_message_count = 0
+        changed = False
 
-        for message in sorted(payload.messages, key=self._message_sort_key):
-            if message.external_message_id in existing_ids:
+        for message in payload.messages:
+            existing = existing_messages.get(message.external_message_id)
+            if existing is not None:
+                if allow_updates:
+                    for name in ("parent_external_message_id", "role", "content", "occurred_at", "raw_payload"):
+                        value = getattr(message, name)
+                        if getattr(existing, name) != value:
+                            setattr(existing, name, value)
+                            changed = True
                 continue
             self.db.add(
                 ChatMessage(
@@ -310,11 +355,10 @@ class IngestService:
                     raw_payload=message.raw_payload,
                 )
             )
-            existing_ids.add(message.external_message_id)
             next_index += 1
             new_message_count += 1
 
-        return new_message_count, new_message_count > 0
+        return new_message_count, changed or new_message_count > 0
 
     async def _ingest_full_snapshot(
         self,

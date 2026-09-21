@@ -159,12 +159,30 @@ function buildMessage(record: JsonRecord, fallbackParent?: string): NormalizedMe
 
 function extractFromMapping(mapping: JsonRecord, currentNode?: string): NormalizedMessage[] {
   return extractFromMappingPath(mapping, currentNode).flatMap(({ message, parent }) => {
-    const built = buildMessage(message, parent);
+    const parentMessageId = parent ? asRecord(asRecord(mapping[parent])?.message)?.id : undefined;
+    const built = buildMessage(message, typeof parentMessageId === "string" ? parentMessageId : parent);
     return built ? [built] : [];
   });
 }
 
 function extractFromMappingPath(mapping: JsonRecord, currentNode?: string): Array<{ message: JsonRecord; parent?: string }> {
+  if (!currentNode) {
+    // A single connected branch can be recovered without guessing. Never join
+    // sibling answers/regenerations into one invented conversation.
+    const aliases = new Map<string, string>();
+    for (const [key, value] of Object.entries(mapping)) {
+      const id = asRecord(asRecord(value)?.message)?.id;
+      if (typeof id === "string") aliases.set(id, key);
+    }
+    const normalized = Object.fromEntries(Object.entries(mapping).map(([key, value]) => {
+      const node = asRecord(value);
+      const parent = typeof node?.parent === "string" ? aliases.get(node.parent) ?? node.parent : undefined;
+      return [key, { ...node, parent }];
+    }));
+    const parents = new Set(Object.values(normalized).map((node) => node.parent));
+    const leaves = Object.keys(normalized).filter((key) => !parents.has(key));
+    return leaves.length === 1 ? extractFromMappingPath(normalized, leaves[0]) : [];
+  }
   if (currentNode && asRecord(mapping[currentNode])) {
     const path: Array<{ node: JsonRecord; parent?: string }> = [];
     const seen = new Set<string>();
@@ -189,18 +207,25 @@ function extractFromMappingPath(mapping: JsonRecord, currentNode?: string): Arra
     });
   }
 
-  const fallbackPath: Array<{ message: JsonRecord; parent?: string }> = [];
-  for (const node of Object.values(mapping)) {
-    const record = asRecord(node);
-    const message = asRecord(record?.message);
-    if (message) {
-      fallbackPath.push({
-        message,
-        parent: typeof record?.parent === "string" ? record.parent : undefined
-      });
-    }
+  return [];
+}
+
+function hasCompletePath(value: unknown): boolean {
+  const record = asRecord(value);
+  const mapping = asRecord(record?.mapping);
+  let cursor = typeof record?.current_node === "string" ? record.current_node : undefined;
+  if (!mapping || !cursor) return false;
+  const seen = new Set<string>();
+  while (cursor) {
+    if (seen.has(cursor)) return false;
+    seen.add(cursor);
+    const node = asRecord(mapping[cursor]);
+    if (!node) return false;
+    if (node.parent === null) return true;
+    if (typeof node.parent !== "string") return false;
+    cursor = node.parent;
   }
-  return fallbackPath;
+  return true;
 }
 
 function extractMessagesFromCandidate(candidate: unknown): NormalizedMessage[] {
@@ -288,6 +313,8 @@ export class ChatGPTScraper implements IProviderScraper {
     );
 
     return {
+      completeness: event.response.ok && event.method === "GET" && responseCandidates.some(hasCompletePath)
+        ? "complete" : "partial",
       provider: this.provider,
       externalSessionId: resolvedSessionId,
       accountKey: account.accountKey,

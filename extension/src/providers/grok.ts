@@ -257,7 +257,8 @@ export class GrokScraper implements IProviderScraper {
       }
     }
 
-    if (!messages.length) {
+    const heuristic = !messages.length;
+    if (heuristic) {
       const prompt = pickLikelyText(requestCandidates.flatMap((value) => collectStrings(value)), false);
       const reply = pickLikelyText(responseCandidates.flatMap((value) => collectStrings(value)), true);
       if (prompt) {
@@ -293,7 +294,8 @@ export class GrokScraper implements IProviderScraper {
       title,
       sourceUrl: event.pageUrl,
       capturedAt: event.capturedAt,
-      messages: normalized
+      messages: normalized,
+      extractionMethod: heuristic ? "heuristic" : "structured"
     };
   }
 }

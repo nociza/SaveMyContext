@@ -1,7 +1,8 @@
 import type { MessageRole, NormalizedMessage } from "../shared/types";
 
 export function normalizeWhitespace(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  // Transcript whitespace is content (Markdown, code, tables), not UI chrome.
+  return value.replace(/\r\n?/g, "\n").trim();
 }
 
 export function resolveCapturedUrl(url: string, pageUrl: string): URL | null {
@@ -117,11 +118,8 @@ export function flattenText(value: unknown): string {
     return fragments.join("\n");
   }
 
-  return collectStrings(record)
-    .map(normalizeWhitespace)
-    .filter(Boolean)
-    .slice(0, 3)
-    .join("\n");
+  // Unknown shapes must not turn metadata/IDs into apparent conversation text.
+  return "";
 }
 
 export function normalizeRole(value: unknown): MessageRole {
@@ -255,6 +253,6 @@ export function sortMessages(messages: NormalizedMessage[]): NormalizedMessage[]
     if (leftTime !== rightTime) {
       return leftTime - rightTime;
     }
-    return left.id.localeCompare(right.id);
+    return 0; // Stable provider order, never lexicographic message-ID order.
   });
 }

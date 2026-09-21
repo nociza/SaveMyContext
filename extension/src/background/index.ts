@@ -13,7 +13,8 @@ import {
   updateKnowledgeStoragePath,
   validateBackendConfiguration
 } from "./backend";
-import { buildIngestPayload, mergeSeenMessageIds } from "./diff";
+import { buildIngestPayload, mergeSeenMessageIds, mergeMessageFingerprints } from "./diff";
+import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures } from "./outbox";
 import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
 import {
   buildProviderRefreshAlarmPlan,
@@ -86,6 +87,8 @@ import {
 } from "../shared/context-markdown";
 
 let queue = Promise.resolve();
+const captureOutbox = new IndexedCaptureStore();
+let captureDrain: Promise<void> | null = null;
 const HISTORY_SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
 const BACKEND_VALIDATION_TTL_MS = 30 * 1000;
 const historySyncRunErrors = new Map<string, string>();
@@ -1403,6 +1406,8 @@ async function handleScheduledProviderRefresh(provider: ProviderName): Promise<v
 
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage().then(async () => {
+    await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
+    void flushCaptureOutbox();
     await syncProviderRefreshAlarms();
     try {
       await syncPageSurfaceContentScript();
@@ -1415,6 +1420,8 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(() => {
   void initializeStorage().then(async () => {
+    await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
+    void flushCaptureOutbox();
     await syncProviderRefreshAlarms();
     try {
       await syncPageSurfaceContentScript();
@@ -1460,6 +1467,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === OUTBOX_ALARM) {
+    void flushCaptureOutbox();
+    return;
+  }
   const provider = providerFromRefreshAlarmName(alarm.name);
   if (!provider) {
     return;
@@ -2085,7 +2096,18 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   }
 
   const completedAt = new Date().toISOString();
-  const runError = update.runId ? historySyncRunErrors.get(update.runId) : undefined;
+  if (update.phase === "completed") {
+    await flushCaptureOutbox();
+    // An earlier drain may have listed its batch before later captures arrived.
+    if ((await captureOutbox.list()).some((item) => item.payload.raw_capture.historySyncRunId === update.runId)) {
+      await flushCaptureOutbox();
+    }
+  }
+  const pendingRun = update.runId && (await captureOutbox.list()).some(
+    (item) => item.payload.raw_capture.historySyncRunId === update.runId
+  );
+  const runError = (update.runId ? historySyncRunErrors.get(update.runId) : undefined) ||
+    (pendingRun ? "Delivery pending in durable outbox; history watermark was not advanced." : undefined);
   if (update.runId) {
     historySyncRunErrors.delete(update.runId);
   }
@@ -2222,6 +2244,11 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
 
   const snapshot = scraper.parse(event);
   if (!snapshot || !snapshot.messages.length) {
+    if (event.captureMode === "full_snapshot") {
+      const message = "History capture could not be decoded safely. Recapture or inspect provider drift; no transcript was replaced.";
+      if (event.historySyncRunId) historySyncRunErrors.set(event.historySyncRunId, message);
+      await setExtensionStatus({ lastError: message });
+    }
     return;
   }
   if (typeof tabId === "number") {
@@ -2269,7 +2296,7 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
     });
     return;
   }
-  const payload = buildIngestPayload(snapshot, event, syncState);
+  const payload = await buildIngestPayload(snapshot, event, syncState);
   if (!payload) {
     return;
   }
@@ -2281,60 +2308,77 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
   }
 
   const backendUrl = settings.backendUrl.replace(/\/$/, "");
-  const markHistorySyncFailure = (message: string): void => {
-    if (event.captureMode === "full_snapshot" && event.historySyncRunId) {
-      historySyncRunErrors.set(event.historySyncRunId, message);
-    }
-  };
+  await enqueueCapture(captureOutbox, backendUrl, payload);
+  await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
+  await setExtensionStatus({ pendingCaptureCount: (await captureOutbox.list()).length });
+  void flushCaptureOutbox();
+}
 
-  let response: Response;
+function flushCaptureOutbox(): Promise<void> {
+  captureDrain ??= deliverCaptureOutbox().catch(async () => {
+    await setExtensionStatus({ lastError: "Capture outbox unavailable; delivery will retry." });
+  }).finally(() => { captureDrain = null; });
+  return captureDrain;
+}
+
+async function deliverCaptureOutbox(): Promise<void> {
+  const settings = await getSettings();
+  const backendUrl = settings.backendUrl.replace(/\/$/, "");
   try {
-    response = await fetch(`${backendUrl}/api/v1/ingest/diff`, {
+    await drainCaptures(captureOutbox, backendUrl, async ({ payload }) => {
+      const snapshot: NormalizedSessionSnapshot = {
+        provider: payload.provider, externalSessionId: payload.external_session_id,
+        accountKey: payload.account_key, accountLabel: payload.account_label,
+        sourceUrl: payload.source_url, capturedAt: payload.captured_at, title: payload.title,
+        messages: payload.messages.map((message) => ({
+          id: message.external_message_id, role: message.role, content: message.content,
+          parentId: message.parent_external_message_id, occurredAt: message.occurred_at
+        }))
+      };
+      if (!settings.enabledProviders[payload.provider] || !accountAllowedBySettings(settings, snapshot).allowed ||
+          !evaluateIndexingRules(settings, snapshot).shouldIndex) {
+        throw new Error("Capture delivery paused by current provider/account settings; evidence retained locally.");
+      }
+      const response = await fetch(`${backendUrl}/api/v1/ingest/diff`, {
       method: "POST",
       headers: buildBackendHeaders(settings),
-      body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20_000)
+      });
+      if (!response.ok) throw new Error(`Backend responded ${response.status}; capture retained for retry.`);
+      const receipt = await response.json();
+      if (!receipt.session_id && !(receipt.disposition === "quarantined" && receipt.receipt_id)) {
+        throw new Error("Backend did not acknowledge durable capture storage.");
+      }
+      const sessionKey = `${payload.provider}:${payload.external_session_id}`;
+      const syncState = await getSessionSyncState(sessionKey);
+      if (receipt.disposition !== "quarantined") {
+        await saveSessionSyncState(sessionKey, {
+          ...syncState,
+          seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
+          messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
+          lastSyncedAt: new Date().toISOString(),
+          indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed"
+        });
+      } else if (payload.raw_capture.historySyncRunId) {
+        historySyncRunErrors.set(payload.raw_capture.historySyncRunId, "Capture needs repair; evidence preserved.");
+      }
+      await setExtensionStatus({
+        backendUrl, lastProvider: payload.provider, lastSessionKey: sessionKey,
+        lastSuccessAt: new Date().toISOString(), lastSyncedMessageCount: payload.messages.length,
+        lastError: receipt.disposition === "quarantined" ? "Capture needs repair; original evidence preserved on backend." : null
+      });
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await setExtensionStatus({
-      backendUrl,
-      lastError: `Backend request failed: ${message}`
-    });
-    markHistorySyncFailure(`Backend request failed: ${message}`);
-    throw error;
+    for (const item of await captureOutbox.list()) {
+      if (item.payload.raw_capture.historySyncRunId) {
+        historySyncRunErrors.set(item.payload.raw_capture.historySyncRunId, "Delivery pending in durable outbox.");
+      }
+    }
+    await setExtensionStatus({ backendUrl, lastError: message });
   }
-
-  if (!response.ok) {
-    const details = (await response.text()).slice(0, 400);
-    await setExtensionStatus({
-      backendUrl,
-      lastError: `Backend responded ${response.status}: ${details}`
-    });
-    markHistorySyncFailure(`Backend responded ${response.status}: ${details}`);
-    throw new Error(`SaveMyContext sync failed: ${response.status}`);
-  }
-
-  const finalDecision: "indexed" | "discarded" = discardDecision.matched ? "discarded" : "indexed";
-  const finalReason = discardDecision.matched ? discardDecision.reason : indexingDecision.reason;
-  await saveSessionSyncState(sessionKey, {
-    seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
-    lastSyncedAt: new Date().toISOString(),
-    indexingRuleDecision: finalDecision,
-    indexingRuleFingerprint: indexingFingerprint,
-    indexingRuleReason: finalReason,
-    discardWordMatch: discardDecision.matchedWord
-  });
-  await setExtensionStatus({
-    backendUrl,
-    lastError: null,
-    lastProvider: snapshot.provider,
-    lastSessionKey: sessionKey,
-    lastSuccessAt: new Date().toISOString(),
-    lastSyncedMessageCount: payload.messages.length,
-    autoSyncHistory: settings.autoSyncHistory,
-    lastIndexingDecision: finalDecision,
-    lastIndexingReason: finalReason
-  });
+  await setExtensionStatus({ pendingCaptureCount: (await captureOutbox.list()).length });
 }
 
 async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<SaveSettingsResponse> {

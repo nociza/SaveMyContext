@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import AuthContext, require_scope
 from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.workspace.models import Event, Job, Memory, Project, Revision, Source, Task
+from app.workspace.models import CaptureQuarantine, Event, Job, Memory, Project, Revision, Source, Task
+from app.workspace.quality import source_quality
 from app.workspace import knowledge
 from app.workspace.schemas import (
     CaptureInput,
@@ -70,6 +71,7 @@ async def overview(
         ("projects", Project, Project.archived.is_(False)),
         ("pending_jobs", Job, Job.state.in_(["pending", "running"])),
         ("failed_jobs", Job, Job.state == "failed"),
+        ("quarantined_captures", CaptureQuarantine, True),
     ]:
         counts[label] = await db.scalar(
             select(func.count()).select_from(model).where(condition)
@@ -111,6 +113,7 @@ async def sources(
             {
                 **{k: v for k, v in record(row).items() if k != "body"},
                 "excerpt": row.body[:260],
+                "quality": await source_quality(db, row),
             }
             for row in rows
         ]
@@ -128,6 +131,7 @@ async def source_detail(
     if not source:
         raise LookupError("Source not found")
     result = record(source)
+    snapshot = None
     if revision:
         snapshot = await db.scalar(
             select(Revision).where(
@@ -137,6 +141,7 @@ async def source_detail(
         if not snapshot:
             raise LookupError("Revision not found")
         result.update(body=snapshot.body, revision=snapshot.digest)
+    result["quality"] = await source_quality(db, source, snapshot)
     result["memories"] = [
         record(row)
         for row in (
@@ -149,6 +154,20 @@ async def source_detail(
         ).all()
     ]
     return result
+
+
+@router.get("/capture-quarantine")
+async def capture_quarantine(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _: AuthContext = Depends(read),
+    db: AsyncSession = Depends(get_db_session),
+):
+    rows = (await db.scalars(select(CaptureQuarantine).order_by(
+        CaptureQuarantine.created_at.desc()
+    ).offset(offset).limit(limit))).all()
+    # Raw requests remain private evidence, never rendered as HTML or logged.
+    return {"items": [{k: v for k, v in record(row).items() if k != "payload"} for row in rows]}
 
 
 @router.post("/captures", status_code=201)

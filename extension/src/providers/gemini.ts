@@ -235,7 +235,8 @@ export class GeminiScraper implements IProviderScraper {
       title,
       sourceUrl: event.pageUrl,
       capturedAt: event.capturedAt,
-      messages: sortMessages(messages)
+      messages: sortMessages(messages),
+      extractionMethod: "heuristic"
     };
   }
 }

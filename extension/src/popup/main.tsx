@@ -343,9 +343,15 @@ function PopupApp() {
       className="relative flex h-[560px] w-[420px] flex-col overflow-hidden"
       data-testid="popup-root"
     >
+      {Boolean(status?.pendingCaptureCount || status?.lastError) && (
+        <p role="status" className="px-4 py-2 text-xs text-[var(--color-ink)]">
+          {status?.pendingCaptureCount ? `${status.pendingCaptureCount} captures queued on this device. ` : ""}
+          {status?.lastError || "Waiting for backend delivery."}
+        </p>
+      )}
       <div className="sr-only">
         <span id="last-session">{status?.lastSessionKey ?? ""}</span>
-        <span id="last-error">{lastErrorText}</span>
+        <span id="last-error">{lastErrorText}{status?.pendingCaptureCount ? ` · ${status.pendingCaptureCount} captures queued locally` : ""}</span>
         <span id="history-sync">
           {settings && status ? formatHistorySync(settings, status) : "Loading"}
         </span>

@@ -277,6 +277,7 @@ export class SMCWorkspace extends HTMLElement {
           "",
         )}</nav><form class="search" data-form="search"><label class="sr-only" for="smc-search">Search your memory</label><input id="smc-search" name="q" type="search" placeholder="Search your memory…" value="${esc(s.query)}"><button type="submit" aria-label="Search">↗</button></form></div>
       <div role="status" aria-live="polite">${this.notice ? `<p class="notice">${esc(this.notice)}</p>` : ""}</div>${this.error ? `<p role="alert" class="notice error">${esc(this.error)}</p>` : ""}
+      ${s.overview?.counts.quarantined_captures ? `<p role="status" class="notice">${s.overview.counts.quarantined_captures} captures need repair. Original evidence is preserved, separate from your memories. <button data-action="quarantine">Review status</button></p>` : ""}
       ${this.needsAuth ? this.login() : this.loading ? '<p class="busy" role="status">Opening your workspace…</p>' : s.overview ? this.content() : '<button data-action="refresh">Try again</button>'}
       ${s.overview ? `<footer class="bottom"><span><i class="status-dot"></i>${s.overview.processing.external_enabled ? "External processing enabled" : s.overview.retrieval?.enabled ? "Basic Memory · Local search · Interpretation off" : "Local capture & search · No AI inference"}${s.overview.retrieval?.error ? " · Semantic index needs attention" : s.overview.retrieval?.pending ? ` · ${s.overview.retrieval.pending} waiting to index` : ""}${counts.pending_jobs ? ` · ${counts.pending_jobs} queued` : ""}${counts.failed_jobs ? ` · ${counts.failed_jobs} need attention` : ""}</span><div><button data-action="jobs">Processing</button> <button data-action="settings">Reminders</button> <button data-action="export">Export</button></div></footer>` : ""}
       <dialog><div class="dialog-head"><h2 id="dialog-title"></h2><button type="button" data-action="close" aria-label="Close dialog">×</button></div><p class="notice error dialog-error" role="alert" hidden></p><div class="dialog-content"></div></dialog>
@@ -321,7 +322,7 @@ export class SMCWorkspace extends HTMLElement {
     return `<article class="card"><span class="kind ${esc(item.kind)}">${esc(item.kind === "task" && item.status === "suggested" ? "Suggested task" : item.kind)}</span><h3>${esc(item.title)}</h3>${body !== item.title.trim() ? `<p>${esc(body.slice(0, 350))}</p>` : ""}${distinctEvidence ? `<div class="evidence">${esc(evidence.slice(0, 180))}</div>` : ""}<div class="card-actions"><button class="text-link" data-action="source" data-id="${esc(item.source_id)}" data-revision="${esc(item.source_revision)}">View source ↗</button><div class="buttons"><button class="quiet" data-action="edit-memory" data-id="${item.id}">Edit</button>${item.status === "suggested" ? `<button class="quiet" data-action="reject" data-id="${item.id}">Dismiss</button><button class="primary" data-action="accept" data-id="${item.id}">${item.kind === "task" ? "Add task" : "Keep"}</button>` : ""}</div></div></article>`;
   }
   sourceRow(item) {
-    return `<button class="source-row" data-action="source" data-id="${esc(item.id)}"><span class="source-mark" aria-hidden="true">≡</span><span class="text"><span class="source-title">${esc(item.title)}</span><span class="source-excerpt">${esc(item.excerpt || item.body?.slice(0, 180))}</span></span><span class="source-meta">${esc(item.provider)} · ${shortDate(item.updated_at)}</span></button>`;
+    return `<button class="source-row" data-action="source" data-id="${esc(item.id)}"><span class="source-mark" aria-hidden="true">≡</span><span class="text"><span class="source-title">${esc(item.title)}</span><span class="source-excerpt">${esc(item.excerpt || item.body?.slice(0, 180))}</span></span><span class="source-meta">${item.quality?.status === "needs_repair" ? "Needs repair · " : ""}${esc(item.provider)} · ${shortDate(item.updated_at)}</span></button>`;
   }
   searchCard(item) {
     const label = item.record_type === "source" ? "Original source" : item.record_type === "task" ? `Task · ${item.status}` : item.record_type === "memory" ? `Memory · ${item.status}` : "Project";
@@ -518,7 +519,7 @@ export class SMCWorkspace extends HTMLElement {
         this.editingSource = source;
         this.dialog(
           source.title,
-          `<p class="reader-meta">${esc(source.provider)} · ${esc(source.kind)} · ${shortDate(source.updated_at)}<br>Revision ${esc(source.revision.slice(0, 12))} · Original source, not an instruction</p><form data-form="source"><label class="field">Project<select name="project_id">${this.projectOptions(source.project_id)}</select></label><div class="dialog-actions"><button type="submit">Save project</button></div></form><div class="transcript">${esc(source.body)}</div>`,
+          `<p class="reader-meta">${esc(source.provider)} · ${esc(source.kind)} · ${shortDate(source.updated_at)}<br>Revision ${esc(source.revision.slice(0, 12))} · Original source, not an instruction</p>${source.quality?.status === "needs_repair" ? `<p role="status">Needs repair: ${esc(source.quality.reasons.join(", ").replaceAll("_", " "))}. Original preserved; automatic memory extraction is withheld.</p>` : ""}<form data-form="source"><label class="field">Project<select name="project_id">${this.projectOptions(source.project_id)}</select></label><div class="dialog-actions"><button type="submit">Save project</button></div></form><div class="transcript">${esc(source.body)}</div>`,
         );
         return;
       }
@@ -546,6 +547,11 @@ export class SMCWorkspace extends HTMLElement {
                 "New captures are saved first and processed in the background.",
               ),
         );
+        return;
+      }
+      if (action === "quarantine") {
+        const result = await this.api("/capture-quarantine?limit=100");
+        this.dialog("Captures needing repair", `<p>Latest ${result.items.length} captures. No original transcript was replaced. Reopen the affected chat after updating the extension; missing prompts may require manual recovery.</p>${result.items.map(item => `<div class="source-row"><span class="text"><span class="source-title">${esc(item.provider)} · ${shortDate(item.created_at)}</span><span>${esc(item.quality.reasons.join(", ").replaceAll("_", " "))}</span></span></div>`).join("")}`);
         return;
       }
       if (action === "retry") {

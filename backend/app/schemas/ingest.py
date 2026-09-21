@@ -28,6 +28,9 @@ class IngestMessage(BaseModel):
 
 
 class IngestDiffRequest(BaseModel):
+    extraction_method: Literal["structured", "heuristic", "unknown"] = "unknown"
+    capture_completeness: Literal["complete", "partial", "unknown"] = "unknown"
+    parser_version: str | None = Field(default=None, max_length=80)
     provider: ProviderName
     external_session_id: str = Field(min_length=1, max_length=255)
     account_key: str | None = Field(default=None, max_length=255)
@@ -83,7 +86,10 @@ def _validate_json_value(value: object, *, field_name: str) -> None:
 
 
 class IngestResponse(BaseModel):
-    session_id: str
+    session_id: str | None = None
+    disposition: Literal["accepted", "quarantined"] = "accepted"
+    receipt_id: str | None = None
+    quality: dict[str, Any] | None = None
     pile_slug: str | None = None
     is_discarded: bool = False
     new_message_count: int

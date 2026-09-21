@@ -45,10 +45,12 @@ function enqueueRuntimeMessage(message: RuntimeMessage): void {
   const dispatch = async (): Promise<void> => {
     for (let attempt = 0; attempt < RUNTIME_MESSAGE_RETRY_ATTEMPTS; attempt += 1) {
       try {
-        await chrome.runtime.sendMessage(message);
+        const response = await chrome.runtime.sendMessage(message);
+        if (response?.ok === false) throw new Error("Capture not acknowledged");
         return;
       } catch {
         if (attempt >= RUNTIME_MESSAGE_RETRY_ATTEMPTS - 1) {
+          console.warn("SaveMyContext could not persist a capture. Check extension status before leaving this page.");
           return;
         }
         await sleep(RUNTIME_MESSAGE_RETRY_INTERVAL_MS);

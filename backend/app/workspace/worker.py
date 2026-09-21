@@ -13,6 +13,7 @@ from app.models.base import utcnow
 from app.services.files import atomic_write_text
 from app.workspace.models import Job, Memory, Revision, Source
 from app.workspace.processor import extract
+from app.workspace.quality import assess
 from app.workspace.store import digest, index_document
 
 logger = logging.getLogger(__name__)
@@ -87,10 +88,14 @@ async def run_one(sessions, *, extractor=extract) -> bool:
 
     try:
         # Bound inference to the lease lifetime. No DB transaction held across network I/O.
-        items, provenance = await asyncio.wait_for(
-            extractor(body, messages, source_kind=kind, source_title=title),
-            timeout=LEASE_SECONDS - 30,
-        )
+        quality = assess(messages) if kind == "conversation" else None
+        if quality and quality["status"] == "needs_repair":
+            items, provenance = [], {"model": "quality-gate", "quality": quality}
+        else:
+            items, provenance = await asyncio.wait_for(
+                extractor(body, messages, source_kind=kind, source_title=title),
+                timeout=LEASE_SECONDS - 30,
+            )
         async with sessions() as db:
             current = await db.get(Source, source_id)
             job = await db.get(Job, identity)

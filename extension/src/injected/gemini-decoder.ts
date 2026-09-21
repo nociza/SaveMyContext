@@ -244,7 +244,7 @@ function scanPayloadsForBlocks(
     if (leftTime !== rightTime) {
       return leftTime - rightTime;
     }
-    return left.userText.localeCompare(right.userText);
+    return 0;
   });
 }
 

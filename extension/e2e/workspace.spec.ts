@@ -93,3 +93,17 @@ test("shared workspace captures, reviews, remembers, and completes tasks on desk
     page.getByText("Saved. Processing will continue in the background."),
   ).toBeVisible();
 });
+
+test("workspace shows malformed capture status without replacing source text", async ({ page, request }) => {
+  const id = crypto.randomUUID();
+  const receipt = await request.post(`${base}/api/v1/ingest/diff`, { data: {
+    provider: "grok", external_session_id: id, sync_mode: "full_snapshot",
+    messages: [{ external_message_id: "a", role: "assistant", content: "r_123456abcdef" }]
+  } });
+  expect((await receipt.json()).disposition).toBe("quarantined");
+  await page.goto(base!);
+  await expect(page.getByText(/captures need repair/)).toBeVisible();
+  await page.getByRole("button", { name: "Review status" }).click();
+  await expect(page.getByRole("dialog")).toContainText("missing user turns");
+  await expect(page.getByRole("dialog")).not.toContainText("r_123456abcdef");
+});
