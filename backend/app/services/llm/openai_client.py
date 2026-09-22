@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -16,8 +17,14 @@ class OpenAIClient(LLMClient):
         settings = get_settings()
         self.api_key = settings.openai_api_key
         self.base_url = settings.resolved_openai_base_url.rstrip("/")
-        self.models = unique_nonempty_models(model_candidates or settings.resolved_openai_model_candidates)
+        self.models = unique_nonempty_models(
+            model_candidates or settings.resolved_openai_model_candidates
+        )
+        if self.models[0].endswith(":free") and not settings.allow_paid_fallback:
+            self.models = [model for model in self.models if model.endswith(":free")]
         self.model = self.models[0]
+        self.last_metadata: dict = {}
+        self.max_output_tokens: int | None = None
         self.site_url = settings.openai_site_url or settings.public_url
         self.app_name = settings.openai_app_name
         self.timeout = settings.request_timeout_seconds
@@ -42,13 +49,20 @@ class OpenAIClient(LLMClient):
             headers["HTTP-Referer"] = self.site_url
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
+            self.last_metadata = {}
             data = await self._request_json_completion(
                 client,
                 headers=headers,
-                system_prompt=system_prompt,
+                system_prompt=system_prompt
+                + "\nOutput JSON matching this schema:\n"
+                + json.dumps(schema.model_json_schema()),
                 user_prompt=user_prompt,
             )
 
+        self.last_metadata = {
+            "model": data.get("model", "unreported"),
+            "usage": data.get("usage", {}),
+        }
         content = self._extract_content(data)
         parsed = extract_json_object(content)
         return schema.model_validate(parsed)
@@ -147,6 +161,8 @@ class OpenAIClient(LLMClient):
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if self.max_output_tokens is not None:
+            payload["max_tokens"] = self.max_output_tokens
         if prefer_json_mode:
             payload["response_format"] = {"type": "json_object"}
         return payload
@@ -155,7 +171,11 @@ class OpenAIClient(LLMClient):
         if exc.response.status_code not in {400, 404, 422}:
             return False
         message = exc.response.text.lower()
-        return "response_format" in message or "json_object" in message or "json schema" in message
+        return (
+            "response_format" in message
+            or "json_object" in message
+            or "json schema" in message
+        )
 
     def _should_retry_with_next_model(self, exc: httpx.HTTPStatusError) -> bool:
         status_code = exc.response.status_code
@@ -190,4 +210,6 @@ class OpenAIClient(LLMClient):
             joined = "".join(parts).strip()
             if joined:
                 return joined
-        raise ValueError("The OpenAI-compatible response did not include a text message content payload.")
+        raise ValueError(
+            "The OpenAI-compatible response did not include a text message content payload."
+        )

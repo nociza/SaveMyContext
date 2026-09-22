@@ -1,13 +1,29 @@
 /** Pure validation also works during host build/SSR; it performs no network I/O. */
-export function resolveApiBase(value = "/api/v1/workspace", pageUrl = globalThis.location?.href) {
-  if (typeof value !== "string" || !value.trim() || !pageUrl) throw new Error("Configure a workspace API base URL.");
+export function resolveApiBase(
+  value = "/api/v1/workspace",
+  pageUrl = globalThis.location?.href,
+) {
+  if (typeof value !== "string" || !value.trim() || !pageUrl)
+    throw new Error("Configure a workspace API base URL.");
   const raw = value.trim();
-  if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) throw new Error("API base must be an absolute HTTP(S) URL or a root-relative path.");
-  if (raw.startsWith("//")) throw new Error("Protocol-relative API addresses are not supported.");
+  if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw))
+    throw new Error(
+      "API base must be an absolute HTTP(S) URL or a root-relative path.",
+    );
+  if (raw.startsWith("//"))
+    throw new Error("Protocol-relative API addresses are not supported.");
   const url = new URL(raw, pageUrl);
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !(url.protocol === "http:" && local)) || url.username || url.password || url.search || url.hash) {
-    throw new Error("API base must use HTTPS (or loopback HTTP), without credentials, query, or fragment.");
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && local)) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      "API base must use HTTPS (or loopback HTTP), without credentials, query, or fragment.",
+    );
   }
   return url.href.replace(/\/$/, "");
 }
@@ -30,14 +46,34 @@ const shortDate = (value) =>
 const requestKey = () => crypto.randomUUID();
 
 export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
-  static get observedAttributes() { return ["api-base"]; }
+  static get observedAttributes() {
+    return ["api-base"];
+  }
 
   attributeChangedCallback(name, before, after) {
     if (name !== "api-base" || before === after || !this.isConnected) return;
     // A host changing destinations must explicitly supply the new credentials.
     // Do not reuse the previous API's token or display its data at the new endpoint.
     this._token = "";
-    this.state = { ...this.state, items: [], sources: [], tasks: [], projects: [], overview: null, retrieval: null };
+    this.state = {
+      ...this.state,
+      items: [],
+      sources: [],
+      tasks: [],
+      projects: [],
+      overview: null,
+      retrieval: null,
+      query: "",
+      topic: "",
+      category: "",
+      project: "",
+    };
+    this.editingDraft =
+      this.editingSource =
+      this.editingFacets =
+      this.previewDraft =
+        null;
+    this.draftSources = [];
     this.load();
   }
   constructor() {
@@ -64,6 +100,8 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
       overview: null,
       query: "",
       project: "",
+      category: "",
+      topic: "",
       taskStatus: "open",
       searchMode: "auto",
       searchScope: "all",
@@ -77,8 +115,17 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
     this.shadowRoot.addEventListener("click", (event) => this.click(event));
     this.shadowRoot.addEventListener("submit", (event) => this.submit(event));
     this.shadowRoot.addEventListener("change", (event) => {
-      if (event.target.name === "search-mode" || event.target.name === "search-scope") {
-        this.state[event.target.name === "search-mode" ? "searchMode" : "searchScope"] = event.target.value;
+      if (["category-filter", "topic-filter"].includes(event.target.name)) {
+        this.state[event.target.name.split("-")[0]] = event.target.value.trim();
+        this.load();
+      }
+      if (
+        event.target.name === "search-mode" ||
+        event.target.name === "search-scope"
+      ) {
+        this.state[
+          event.target.name === "search-mode" ? "searchMode" : "searchScope"
+        ] = event.target.value;
         this.load();
       }
       if (event.target.name === "project-filter") {
@@ -155,25 +202,34 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
       this.state.taskStatus,
       this.state.searchMode,
       this.state.searchScope,
+      this.state.category,
+      this.state.topic,
     ]);
     this.loading = !this.state.overview || viewKey !== this.viewKey;
     this.render();
     try {
       const { view, project, query, taskStatus } = this.state;
-      const filter = project
+      const projectFilter = project
         ? `&project_id=${encodeURIComponent(project)}`
         : "";
+      const filter =
+        projectFilter +
+        `&category=${encodeURIComponent(this.state.category || "")}&topic=${encodeURIComponent(this.state.topic || "")}`;
       const [overview, projects, result, sources, projectTasks] =
         await Promise.all([
           this.api("/overview"),
           this.api("/projects"),
           query
-            ? this.api(`/search?q=${encodeURIComponent(query)}&mode=${this.state.searchMode}&scope=${this.state.searchScope}`)
+            ? this.api(
+                `/search?q=${encodeURIComponent(query)}&mode=${this.state.searchMode}&scope=${this.state.searchScope}`,
+              )
             : view === "tasks"
               ? this.api(`/tasks?status=${taskStatus}`)
-              : this.api(
-                  `/memories?status=${view === "inbox" ? "suggested" : "accepted"}${filter}`,
-                ),
+              : view === "writing"
+                ? this.api(`/drafts?limit=100${projectFilter}`)
+                : this.api(
+                    `/memories?status=${view === "inbox" ? "suggested" : "accepted"}${filter}`,
+                  ),
           view === "memory" || view === "projects"
             ? this.api(`/sources?limit=50${filter}`)
             : Promise.resolve({ items: [] }),
@@ -242,12 +298,13 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
       const filter = s.project
         ? `&project_id=${encodeURIComponent(s.project)}`
         : "";
+      const facets = `&category=${encodeURIComponent(s.category || "")}&topic=${encodeURIComponent(s.topic || "")}`;
       const status =
         kind === "memories"
           ? `&status=${s.view === "inbox" ? "suggested" : "accepted"}`
           : "";
       const result = await this.api(
-        `/${kind}?limit=50&offset=${s[field].length}${filter}${status}`,
+        `/${kind}?limit=50&offset=${s[field].length}${filter}${status}${facets}`,
       );
       const ids = new Set(s[field].map((item) => item.id));
       s[field].push(...result.items.filter((item) => !ids.has(item.id)));
@@ -279,6 +336,10 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
         "Bring the threads together.",
         "One place for a project’s sources, decisions, and next steps.",
       ],
+      writing: [
+        "Make something worth sharing.",
+        "Private ideas and drafts. Nothing is published automatically.",
+      ],
     };
     const [heading, subtitle] = headings[s.view] || headings.inbox;
     this.container.innerHTML = `<section aria-label="SaveMyContext workspace">
@@ -288,6 +349,7 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
         ["tasks", "Tasks"],
         ["memory", "Memory"],
         ["projects", "Projects"],
+        ["writing", "Writing"],
       ]
         .map(
           ([v, label]) =>
@@ -320,25 +382,49 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
   }
   content() {
     const s = this.state;
+    if (s.view === "writing" && !s.query)
+      return `<div class="section-title"><h2>Private drafts</h2><button class="primary" data-action="new-draft">＋ New draft</button></div><p class="muted">Draft → review exact public copy → approve → export. Exports do not publish your website.</p>${s.items.length ? `<div class="grid">${s.items.map((d) => `<button class="card" data-action="draft" data-id="${esc(d.id)}" style="text-align:left"><span class="kind">${esc(d.status)} · v${d.version}</span><h3>${esc(d.title)}</h3><p>${esc(d.destination)}</p></button>`).join("")}</div>` : this.empty("Start with an idea", "Open a source and choose Start a draft, or write something new.")}`;
     if (s.query)
       return `<div class="section-title"><h2>Search results</h2><button data-action="clear-search">Clear search</button></div>
-      <div class="filters"><label>Match <select name="search-mode" aria-label="Search matching">${[["auto", "Exact + meaning"], ["exact", "Exact terms"], ["semantic", "Similar meaning"]].map(([value, label]) => `<option value="${value}" ${s.searchMode === value ? "selected" : ""}>${label}</option>`).join("")}</select></label><label>Look in <select name="search-scope" aria-label="Search scope">${[["all", "Everything"], ["curated", "Kept memories & open tasks"], ["sources", "Original sources"]].map(([value, label]) => `<option value="${value}" ${s.searchScope === value ? "selected" : ""}>${label}</option>`).join("")}</select></label></div>
+      <div class="filters"><label>Match <select name="search-mode" aria-label="Search matching">${[
+        ["auto", "Exact + meaning"],
+        ["exact", "Exact terms"],
+        ["semantic", "Similar meaning"],
+      ]
+        .map(
+          ([value, label]) =>
+            `<option value="${value}" ${s.searchMode === value ? "selected" : ""}>${label}</option>`,
+        )
+        .join(
+          "",
+        )}</select></label><label>Look in <select name="search-scope" aria-label="Search scope">${[
+        ["all", "Everything"],
+        ["curated", "Kept memories & open tasks"],
+        ["sources", "Original sources"],
+      ]
+        .map(
+          ([value, label]) =>
+            `<option value="${value}" ${s.searchScope === value ? "selected" : ""}>${label}</option>`,
+        )
+        .join("")}</select></label></div>
       ${s.retrieval?.degraded ? '<p class="notice" role="status">Semantic search is unavailable. Showing exact matches; your records are safe.</p>' : ""}
       ${s.overview.retrieval?.enabled ? '<p class="muted">Similar meaning is a search aid, not a verified fact. Long conversations use excerpts for semantic search; open the source for full context.</p>' : ""}
       ${s.items.length ? `<div class="grid">${s.items.map((item) => this.searchCard(item)).join("")}</div>` : this.empty("No matches yet", "Try a name, project, or phrase from a conversation.")}`;
     if (s.view === "tasks") return this.tasksView();
     if (s.view === "projects" && !s.project)
       return `<div class="section-title"><h2>Your projects</h2><button data-action="add-project">＋ New project</button></div>${s.projects.length ? `<div class="grid">${s.projects.map((p) => `<button class="card project" data-action="project" data-id="${esc(p.id)}" style="text-align:left"><span class="kind">Project</span><h3>${esc(p.name)}</h3><p>${esc(p.description || "Gather the conversations and work that belong here.")}</p><div class="project-num">Open project ↗</div></button>`).join("")}</div>` : this.empty("Give your work a home", "Create a project to connect its sources, decisions, and tasks.")}`;
-    return `<div class="filters"><span class="muted">${s.view === "inbox" ? "Suggestions are not commitments. You decide what to keep." : "Your saved thinking, with links back to the source."}</span>${this.projectFilter()}</div>${s.items.length ? `<div class="grid">${s.items.map((item) => this.memoryCard(item)).join("")}</div>` : s.view === "inbox" ? this.empty("Nothing to review", s.overview?.processing.external_enabled ? "Save a thought or review suggestions from your configured processor." : "Saved thoughts appear here as notes. Conversations stay searchable in Memory; automatic interpretation is off. Use Add task for something you want to do.", "✓") : this.empty("Room for your best thinking", "Keep useful suggestions from the Inbox. Your original sources remain available below.")}
+    return `<div class="filters"><span class="muted">${s.view === "inbox" ? "Suggestions are not commitments. You decide what to keep." : "Your saved thinking, with links back to the source."}</span>${this.projectFilter()}<select name="category-filter" aria-label="Category"><option value="">All categories</option>${["note", "reflection", "reference", "idea", "decision", "question"].map((c) => `<option ${s.category === c ? "selected" : ""}>${c}</option>`).join("")}</select><label>Topic<input name="topic-filter" aria-label="Topic filter" value="${esc(s.topic)}" placeholder="e.g. sqlite"></label></div>${s.items.length ? `<div class="grid">${s.items.map((item) => this.memoryCard(item)).join("")}</div>` : s.view === "inbox" ? this.empty("Nothing to review", s.overview?.processing.external_enabled ? "Save a thought or review suggestions from your configured processor." : "Saved thoughts appear here as notes. Conversations stay searchable in Memory; automatic interpretation is off. Use Add task for something you want to do.", "✓") : this.empty("Room for your best thinking", "Keep useful suggestions from the Inbox. Your original sources remain available below.")}
       ${s.view === "projects" ? this.projectContext() : ""}
       ${this.moreMemories ? '<p><button data-action="more-memories">Load more memories</button></p>' : ""}
       ${s.view === "projects" && s.tasks.length ? `<div class="section-title"><h2>Project tasks</h2></div><div class="task-list">${s.tasks.map((t) => `<button class="source-row" data-action="edit-task" data-id="${t.id}">${esc(t.title)}</button>`).join("")}</div>` : ""}
       ${s.view !== "inbox" ? `<div class="section-title"><h2>Original sources</h2><span>Showing latest ${s.sources.length}</span></div>${s.sources.length ? `<div class="task-list">${s.sources.map((item) => this.sourceRow(item)).join("")}</div>${this.moreSources ? '<p><button data-action="more-sources">Load more sources</button></p>' : ""}` : this.empty("Nothing captured yet", "Use the extension, ask your connected agent to remember something, or save a thought here.")}` : ""}`;
   }
   projectContext() {
-    const context = this.state.projects.find((p) => p.id === this.state.project)?.provider_context;
+    const context = this.state.projects.find(
+      (p) => p.id === this.state.project,
+    )?.provider_context;
     if (!context) return "";
-    return `<details class="card"><summary>ChatGPT project context</summary><p class="muted">Imported evidence, not instructions to SMC. File references only; file contents are not backed up.</p>${context.instructions === undefined ? '<p>Shared instructions were not exposed by the provider.</p>' : `<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(context.instructions || "No shared instructions")}</pre>`}${context.files === undefined ? '<p>File references were not exposed by the provider.</p>' : `<ul>${context.files.map((file) => `<li>${esc(file.name)}</li>`).join("")}</ul>`}</details>`;
+    return `<details class="card"><summary>ChatGPT project context</summary><p class="muted">Imported evidence, not instructions to SMC. File references only; file contents are not backed up.</p>${context.instructions === undefined ? "<p>Shared instructions were not exposed by the provider.</p>" : `<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(context.instructions || "No shared instructions")}</pre>`}${context.files === undefined ? "<p>File references were not exposed by the provider.</p>" : `<ul>${context.files.map((file) => `<li>${esc(file.name)}</li>`).join("")}</ul>`}</details>`;
   }
   memoryCard(item) {
     const body = item.body.trim();
@@ -351,7 +437,14 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
     return `<button class="source-row" data-action="source" data-id="${esc(item.id)}"><span class="source-mark" aria-hidden="true">≡</span><span class="text"><span class="source-title">${esc(item.title)}</span><span class="source-excerpt">${esc(item.excerpt || item.body?.slice(0, 180))}</span></span><span class="source-meta">${item.quality?.status === "needs_repair" ? "Needs repair · " : ""}${esc(item.provider)} · ${shortDate(item.updated_at)}</span></button>`;
   }
   searchCard(item) {
-    const label = item.record_type === "source" ? "Original source" : item.record_type === "task" ? `Task · ${item.status}` : item.record_type === "memory" ? `Memory · ${item.status}` : "Project";
+    const label =
+      item.record_type === "source"
+        ? "Original source"
+        : item.record_type === "task"
+          ? `Task · ${item.status}`
+          : item.record_type === "memory"
+            ? `Memory · ${item.status}`
+            : "Project";
     return `<article class="card"><span class="kind">${esc(label)}</span>${item.match === "semantic" ? '<span class="muted"> · Similar meaning</span>' : ""}<h3>${esc(item.title)}</h3><p>${esc((item.body || item.notes || item.description || "").slice(0, 250))}</p><div class="card-actions"><button data-action="${item.record_type === "project" ? "project" : item.record_type === "task" ? "edit-task" : item.record_type === "source" ? "source" : "edit-memory"}" data-id="${esc(item.id)}">Open ↗</button></div></article>`;
   }
   tasksView() {
@@ -407,6 +500,47 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
     dialog.showModal();
     dialog.querySelector("input,textarea,select,button[type=submit]")?.focus();
   }
+  draftForm(draft = null, source = null) {
+    this.editingDraft = draft;
+    const d = draft || {
+      title: source?.title || "",
+      body: "",
+      brief: "",
+      slug: "",
+      destination: "markdown-export",
+      project_id: source?.project_id,
+      sources: source ? [{ id: source.id }] : [],
+    };
+    this.draftSources = d.sources;
+    this.dialog(
+      draft ? "Edit private draft" : "Start a private draft",
+      `<form data-form="draft"><div class="fields"><label class="field wide">Article title<input name="title" required maxlength="240" value="${esc(d.title)}"></label><label class="field">Slug<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="160" value="${esc(d.slug)}"></label><label class="field">Destination<input name="destination" required value="${esc(d.destination)}"></label><label class="field wide">Private brief<textarea aria-label="Private brief" name="brief" rows="3">${esc(d.brief)}</textarea></label><label class="field wide">Article Markdown<textarea aria-label="Article Markdown" name="body" rows="12">${esc(d.body)}</textarea></label><label class="field wide">Project<select name="project_id">${this.projectOptions(d.project_id)}</select></label></div><p class="muted">${d.sources.length} private source references. ${d.stale_sources?.length ? "Evidence changed—review source revisions before approval." : "The brief and source references never enter an export."}</p><div class="dialog-actions">${draft ? `<button type="button" data-action="draft-history" data-id="${esc(draft.id)}">History</button><button type="button" data-action="preview-draft" data-id="${esc(draft.id)}">Review saved copy</button>` : ""}<button class="primary" type="submit">Save private draft</button></div></form>`,
+    );
+  }
+  summaryReader(source) {
+    const summary = source.summary?.payload;
+    if (!summary)
+      return '<p class="muted">No digest yet. Reprocess this source after configuring a summary model.</p>';
+    return `<details class="card" open><summary>Source-backed digest · ${esc(summary.status)}</summary><p class="muted">Selected quotes, not independently verified facts. Review attribution and full context. ${esc(summary.reason || "")}</p>${summary.coverage ? `<p class="muted">${summary.coverage.processed_chunks ?? 0}/${summary.coverage.chunks ?? "?"} chunks · ${esc(summary.coverage.attachments)}</p>` : ""}${[
+      "overview",
+      "findings",
+      "decisions",
+      "ideas",
+      "questions",
+      "history",
+    ]
+      .map((section) => {
+        const passages = (summary.passages || []).filter(
+          (p) => p.section === section,
+        );
+        return passages.length
+          ? `<h3>${section}</h3>${passages.map((p) => `<blockquote><p>${esc(p.quote)}</p><small>${esc(p.role)} · ${esc(p.occurred_at || "time unknown")}</small></blockquote>`).join("")}`
+          : "";
+      })
+      .join(
+        "",
+      )}${summary.rejected_passages ? `<p>${summary.rejected_passages} invalid citations rejected.</p>` : ""}</details>`;
+  }
   closeDialog() {
     this.shadowRoot.querySelector("dialog")?.close();
   }
@@ -439,6 +573,85 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
     if (!button) return;
     const { action, id } = button.dataset;
     try {
+      if (action === "new-draft" || action === "draft-from-source") {
+        this.draftForm(
+          null,
+          action === "draft-from-source" ? this.editingSource : null,
+        );
+        return;
+      }
+      if (action === "draft") {
+        this.draftForm(await this.api(`/drafts/${id}`));
+        return;
+      }
+      if (action === "draft-history") {
+        const result = await this.api(`/drafts/${id}/history`);
+        this.dialog(
+          "Private draft history",
+          result.items
+            .map(
+              (r) =>
+                `<details><summary>Version ${r.version} · ${esc(r.payload.status)}</summary><div class="transcript">${esc(r.payload.body)}</div></details>`,
+            )
+            .join(""),
+        );
+        return;
+      }
+      if (action === "preview-draft") {
+        const p = await this.api(`/drafts/${id}/preview`);
+        this.previewDraft = { ...p, id };
+        this.dialog(
+          "Review exact public copy",
+          `<p>${esc(p.notice)}</p><p>Destination: <strong>${esc(p.destination)}</strong> · version ${p.version}</p><h3>${esc(p.payload.title)}</h3><div class="transcript">${esc(p.payload.body)}</div>${p.findings.length || p.stale_sources.length ? `<p class="notice error">${esc([...p.findings, ...p.stale_sources.map(() => "Supporting source changed")].join("; "))}</p>` : `<form data-form="approve-draft"><label class="field checkbox"><input type="checkbox" name="confirm" required>I reviewed this exact copy and approve it for this destination.</label><div class="dialog-actions"><button class="primary" type="submit">Approve public copy</button></div></form>`}<p><button data-action="export-draft" data-id="${esc(id)}">Download approved export</button></p>`,
+        );
+        return;
+      }
+      if (action === "export-draft") {
+        const d = await this.api(`/drafts/${id}`);
+        const receipt = await this.api(`/drafts/${id}/export`, {
+          method: "POST",
+          body: JSON.stringify({
+            expected_version: d.version,
+            content_hash: d.content_hash,
+          }),
+        });
+        const url = URL.createObjectURL(
+          new Blob([JSON.stringify(receipt.payload, null, 2)], {
+            type: "application/json",
+          }),
+        );
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${receipt.payload.slug}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        this.closeDialog();
+        this.notice =
+          "Approved article exported. Nothing was published remotely.";
+        await this.load();
+        return;
+      }
+      if (action === "reprocess") {
+        await this.mutate(
+          `/sources/${encodeURIComponent(this.editingSource.id)}/reprocess`,
+          "POST",
+          { expected_revision: this.editingSource.revision, dry_run: false },
+          "Reprocessing queued. Reviewed memories and tasks are preserved.",
+        );
+        return;
+      }
+      if (action === "organize") {
+        const key = id || `source:${this.editingSource.id}`;
+        this.editingFacets = await this.api(
+          `/organization/${encodeURIComponent(key)}`,
+        );
+        const f = this.editingFacets;
+        this.dialog(
+          "Organize this note",
+          `<form data-form="facets"><div class="fields"><label class="field">Category<select name="category">${["note", "reflection", "reference", "idea", "decision", "question"].map((c) => `<option ${f.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></label><label class="field">Ongoing area<input name="area" maxlength="120" value="${esc(f.area)}"></label><label class="field wide">Topics, separated by commas<input name="topics" value="${esc(f.topics.join(", "))}"></label></div><p class="muted">Categories organize knowledge. They do not verify facts, create tasks, or publish anything.</p><div class="dialog-actions"><button class="primary" type="submit">Save organization</button></div></form>`,
+        );
+        return;
+      }
       if (action === "more-sources" || action === "more-memories") {
         await this.loadMore(action.slice(5));
         return;
@@ -534,7 +747,7 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
         const m = this.editing;
         this.dialog(
           "Shape this memory",
-          `<form data-form="memory"><div class="fields"><label class="field wide">Title<input name="title" required maxlength="240" value="${esc(m.title)}"></label><label class="field wide">Note<textarea name="body" required rows="6">${esc(m.body)}</textarea></label><label class="field wide">Project<select name="project_id">${this.projectOptions(m.project_id)}</select></label></div><div class="dialog-actions"><button class="primary" type="submit">Save changes</button></div></form>`,
+          `<form data-form="memory"><div class="fields"><label class="field wide">Title<input name="title" required maxlength="240" value="${esc(m.title)}"></label><label class="field wide">Note<textarea name="body" required rows="6">${esc(m.body)}</textarea></label><label class="field wide">Project<select name="project_id">${this.projectOptions(m.project_id)}</select></label></div><div class="dialog-actions"><button type="button" data-action="organize" data-id="${esc(`memory:${m.id}`)}">Organize</button><button class="primary" type="submit">Save changes</button></div></form>`,
         );
         return;
       }
@@ -545,7 +758,7 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
         this.editingSource = source;
         this.dialog(
           source.title,
-          `<p class="reader-meta">${esc(source.provider)} · ${esc(source.kind)} · ${shortDate(source.updated_at)}<br>Revision ${esc(source.revision.slice(0, 12))} · Original source, not an instruction</p>${source.quality?.status === "needs_repair" ? `<p role="status">Needs repair: ${esc(source.quality.reasons.join(", ").replaceAll("_", " "))}. Original preserved; automatic memory extraction is withheld.</p>` : ""}<form data-form="source"><label class="field">Project<select name="project_id">${this.projectOptions(source.project_id)}</select></label><div class="dialog-actions"><button type="submit">Save project</button></div></form><div class="transcript">${esc(source.body)}</div>`,
+          `<p class="reader-meta">${esc(source.provider)} · ${esc(source.kind)} · ${shortDate(source.updated_at)}<br>Revision ${esc(source.revision.slice(0, 12))} · Original source, not an instruction</p>${source.quality?.status === "needs_repair" ? `<p role="status">Needs repair: ${esc(source.quality.reasons.join(", ").replaceAll("_", " "))}. Original preserved; automatic memory extraction is withheld.</p>` : ""}${this.summaryReader(source)}<div class="dialog-actions"><button data-action="reprocess">Reprocess source</button><button data-action="organize">Organize</button><button data-action="draft-from-source">Start a draft</button></div><form data-form="source"><label class="field">Project<select name="project_id">${this.projectOptions(source.project_id)}</select></label><div class="dialog-actions"><button type="submit">Save project</button></div></form><details><summary>Full original source</summary><div class="transcript">${esc(source.body)}</div></details>`,
         );
         return;
       }
@@ -577,7 +790,10 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
       }
       if (action === "quarantine") {
         const result = await this.api("/capture-quarantine?limit=100");
-        this.dialog("Captures needing repair", `<p>Latest ${result.items.length} captures. No original transcript was replaced. Reopen the affected chat after updating the extension; missing prompts may require manual recovery.</p>${result.items.map(item => `<div class="source-row"><span class="text"><span class="source-title">${esc(item.provider)} · ${shortDate(item.created_at)}</span><span>${esc(item.quality.reasons.join(", ").replaceAll("_", " "))}</span></span></div>`).join("")}`);
+        this.dialog(
+          "Captures needing repair",
+          `<p>Latest ${result.items.length} captures. No original transcript was replaced. Reopen the affected chat after updating the extension; missing prompts may require manual recovery.</p>${result.items.map((item) => `<div class="source-row"><span class="text"><span class="source-title">${esc(item.provider)} · ${shortDate(item.created_at)}</span><span>${esc(item.quality.reasons.join(", ").replaceAll("_", " "))}</span></span></div>`).join("")}`,
+        );
         return;
       }
       if (action === "retry") {
@@ -614,6 +830,55 @@ export class SMCWorkspace extends (globalThis.HTMLElement ?? class {}) {
     const form = event.target;
     const data = new FormData(form);
     const values = Object.fromEntries(data);
+    if (form.dataset.form === "facets") {
+      await this.mutate(
+        `/organization/${encodeURIComponent(this.editingFacets.key)}`,
+        "PATCH",
+        {
+          ...values,
+          topics: values.topics
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+          expected_version: this.editingFacets.version,
+        },
+        "Organization saved.",
+      );
+      return;
+    }
+    if (form.dataset.form === "draft") {
+      const d = this.editingDraft;
+      await this.mutate(
+        d ? `/drafts/${d.id}` : "/drafts",
+        d ? "PATCH" : "POST",
+        {
+          ...values,
+          project_id: values.project_id || null,
+          source_ids: this.draftSources.map((s) => s.id),
+          ...(d ? { expected_version: d.version } : {}),
+        },
+        "Private draft saved. Any previous approval was cleared.",
+      );
+      this.state.view = "writing";
+      this.state.query = "";
+      await this.load();
+      return;
+    }
+    if (form.dataset.form === "approve-draft") {
+      const p = this.previewDraft;
+      await this.mutate(
+        `/drafts/${p.id}/approve`,
+        "POST",
+        {
+          expected_version: p.version,
+          content_hash: p.content_hash,
+          destination: p.destination,
+          confirm_public: data.has("confirm"),
+        },
+        "Exact public copy approved. Open the draft to download its export.",
+      );
+      return;
+    }
     if (form.dataset.form === "search") {
       this.state.query = String(values.q).trim();
       await this.load();

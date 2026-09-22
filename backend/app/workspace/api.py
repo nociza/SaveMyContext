@@ -5,20 +5,35 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import AuthContext, require_scope
 from app.core.config import get_settings
 from app.db.session import get_db_session
-from app.workspace.models import CaptureQuarantine, Event, Job, Memory, Project, Revision, Source, Task
+from app.workspace.models import (
+    CaptureQuarantine,
+    Event,
+    Job,
+    Memory,
+    Organization,
+    Project,
+    Revision,
+    Source,
+    SourceSummary,
+    Task,
+    TopicLink,
+)
+from app.workspace.editorial import router as editorial_router
+from app.workspace.processor import PROCESSOR_VERSION
 from app.workspace.quality import source_quality
 from app.workspace import knowledge
 from app.workspace.schemas import (
     CaptureInput,
     MemoryPatch,
     ProjectInput,
+    ReprocessInput,
     SourcePatch,
     TaskInput,
     TaskPatch,
@@ -39,6 +54,7 @@ from app.workspace.store import (
 )
 
 router = APIRouter(prefix="/workspace")
+router.include_router(editorial_router)
 compat_router = APIRouter(prefix="/v1")
 read = require_scope("read")
 write = require_scope("workspace:write")
@@ -86,6 +102,9 @@ async def overview(
             else "local-source-index-v2",
             "generation_enabled": settings.workspace_external_processing
             and settings.workspace_generate,
+            "summary_model": settings.workspace_summary_model,
+            "summary_mode": "source-backed digest; separate from action suggestions",
+            "paid_fallback_enabled": settings.allow_paid_fallback,
         },
         "settings": await preferences(db),
         "retrieval": await knowledge.status(db),
@@ -99,8 +118,11 @@ async def sources(
     offset: int = Query(0, ge=0),
     _: AuthContext = Depends(read),
     db: AsyncSession = Depends(get_db_session),
+    category: str | None = None,
+    topic: str | None = None,
 ):
     statement = select(Source).where(Source.archived.is_(False))
+    statement = filter_facets(statement, Source, "source", category, topic)
     if project_id:
         statement = statement.where(Source.project_id == project_id)
     rows = (
@@ -142,6 +164,17 @@ async def source_detail(
             raise LookupError("Revision not found")
         result.update(body=snapshot.body, revision=snapshot.digest)
     result["quality"] = await source_quality(db, source, snapshot)
+    summary = await db.scalar(
+        select(SourceSummary)
+        .where(
+            SourceSummary.source_id == source_id,
+            SourceSummary.revision == result["revision"],
+        )
+        .order_by(SourceSummary.updated_at.desc())
+        .limit(1)
+    )
+    result["summary"] = record(summary) if summary else None
+    result["is_current"] = result["revision"] == source.revision
     result["memories"] = [
         record(row)
         for row in (
@@ -163,11 +196,20 @@ async def capture_quarantine(
     _: AuthContext = Depends(read),
     db: AsyncSession = Depends(get_db_session),
 ):
-    rows = (await db.scalars(select(CaptureQuarantine).order_by(
-        CaptureQuarantine.created_at.desc()
-    ).offset(offset).limit(limit))).all()
+    rows = (
+        await db.scalars(
+            select(CaptureQuarantine)
+            .order_by(CaptureQuarantine.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
     # Raw requests remain private evidence, never rendered as HTML or logged.
-    return {"items": [{k: v for k, v in record(row).items() if k != "payload"} for row in rows]}
+    return {
+        "items": [
+            {k: v for k, v in record(row).items() if k != "payload"} for row in rows
+        ]
+    }
 
 
 @router.post("/captures", status_code=201)
@@ -224,6 +266,7 @@ async def edit_source(
         raise Conflict("Source changed. Refresh before editing.")
     if "project_id" in changes:
         from app.workspace.provider_projects import lock_manual_project
+
         await lock_manual_project(db, source_id)
         await db.execute(
             update(Memory)
@@ -263,8 +306,11 @@ async def memories(
     offset: int = Query(0, ge=0),
     _: AuthContext = Depends(read),
     db: AsyncSession = Depends(get_db_session),
+    category: str | None = None,
+    topic: str | None = None,
 ):
     statement = select(Memory).where(Memory.status == status)
+    statement = filter_facets(statement, Memory, "memory", category, topic)
     if kind:
         statement = statement.where(Memory.kind == kind)
     if project_id:
@@ -281,6 +327,33 @@ async def memories(
             ).all()
         ]
     }
+
+
+def filter_facets(statement, model, kind, category, topic):
+    key = literal(kind + ":") + model.id
+    if category:
+        assigned = select(Organization.key).where(Organization.key == key).exists()
+        fallback = (
+            (model.kind == category) if model is Memory else literal(category == "note")
+        )
+        statement = statement.where(
+            or_(
+                and_(~assigned, fallback),
+                select(Organization.key)
+                .where(Organization.key == key, Organization.category == category)
+                .exists(),
+            )
+        )
+    if topic:
+        statement = statement.where(
+            select(TopicLink.key)
+            .where(
+                TopicLink.key == key,
+                TopicLink.topic == " ".join(topic.casefold().split()),
+            )
+            .exists()
+        )
+    return statement
 
 
 @router.patch("/memories/{memory_id}")
@@ -338,7 +411,12 @@ async def projects(
     _: AuthContext = Depends(read), db: AsyncSession = Depends(get_db_session)
 ):
     from app.workspace.provider_projects import project_records
-    rows = (await db.scalars(select(Project).where(Project.archived.is_(False)).order_by(Project.name))).all()
+
+    rows = (
+        await db.scalars(
+            select(Project).where(Project.archived.is_(False)).order_by(Project.name)
+        )
+    ).all()
     return {"items": await project_records(db, rows)}
 
 
@@ -468,6 +546,71 @@ async def jobs(
         await db.scalars(select(Job).order_by(Job.updated_at.desc()).limit(50))
     ).all()
     return {"items": [record(j) for j in rows]}
+
+
+@router.post("/sources/{source_id}/reprocess")
+async def reprocess(
+    source_id: str,
+    payload: ReprocessInput,
+    context: AuthContext = Depends(write),
+    db: AsyncSession = Depends(get_db_session),
+):
+    source = await db.get(Source, source_id)
+    if not source or source.archived:
+        raise LookupError("Active source not found")
+    if source.revision != payload.expected_revision:
+        raise Conflict("Source changed; refresh first")
+    settings = get_settings()
+    if payload.dry_run:
+        return {
+            "source_id": source_id,
+            "revision": source.revision,
+            "processor": PROCESSOR_VERSION,
+            "characters": len(source.body),
+            "external_enabled": settings.workspace_external_processing,
+            "summary_model": settings.workspace_summary_model,
+            "writes": False,
+        }
+    from app.workspace.store import ensure_source_chunks
+
+    changed = await db.execute(
+        update(Source)
+        .where(
+            Source.id == source_id,
+            Source.revision == payload.expected_revision,
+            Source.archived.is_(False),
+        )
+        .values(updated_at=Source.updated_at)
+    )
+    if changed.rowcount != 1:
+        raise Conflict("Source changed; refresh first")
+    await ensure_source_chunks(db, source)
+    job = await db.scalar(
+        select(Job).where(
+            Job.source_id == source_id,
+            Job.revision == source.revision,
+            Job.processor == PROCESSOR_VERSION,
+        )
+    )
+    if job and job.state in {"running", "pending"}:
+        await commit(db)
+        return record(job)
+    if job:
+        job.state, job.attempts, job.available_at, job.error = "pending", 0, 0.0, None
+    else:
+        job = Job(
+            source_id=source_id, revision=source.revision, processor=PROCESSOR_VERSION
+        )
+        db.add(job)
+    await audit(
+        db,
+        source_id,
+        "reprocess_requested",
+        actor(context),
+        {"revision": source.revision, "processor": PROCESSOR_VERSION},
+    )
+    await commit(db)
+    return record(job)
 
 
 @router.post("/jobs/{job_id}/retry")

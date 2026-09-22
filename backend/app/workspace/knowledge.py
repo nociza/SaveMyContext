@@ -13,7 +13,7 @@ import hashlib
 import logging
 from urllib.parse import urlsplit
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.models.base import utcnow
@@ -23,6 +23,7 @@ from app.workspace.models import (
     Preference,
     Project,
     Source,
+    SourceIndexChunk,
     Task,
 )
 from app.workspace.store import digest, record, search as lexical_search
@@ -62,7 +63,7 @@ def visible(kind: str, row: dict) -> bool:
 
 
 def document(kind: str, row: dict) -> dict:
-    key = f"{kind}:{row['id']}"
+    key = row.get("_projection_key", f"{kind}:{row['id']}")
     if not visible(kind, row):
         raise ValueError("Inactive records must be removed from the derived index")
     title = row.get("title", row.get("name", ""))
@@ -155,7 +156,7 @@ class BasicMemory:
     async def remove(self, key: str):
         # Never accept a provider-returned path, directory, or user-supplied path.
         kind, separator, identity = key.partition(":")
-        if kind not in MODELS or not separator or not identity:
+        if kind not in {*MODELS, "chunk"} or not separator or not identity:
             raise ValueError("Invalid workspace projection key")
         result = await self.call(
             "delete_note",
@@ -216,11 +217,29 @@ async def inventory(db) -> dict[str, str]:
         statement = select(*(getattr(model, name) for name in names))
         for row in (await db.execute(statement)).mappings():
             result[f"{kind}:{row['id']}"] = stamp(kind, row)
+    for row in (
+        await db.execute(
+            select(
+                SourceIndexChunk.id.label("chunk_id"),
+                Source.revision,
+                Source.title,
+                Source.project_id,
+                Source.archived,
+            )
+            .join(Source, Source.id == SourceIndexChunk.source_id)
+            .where(Source.revision == SourceIndexChunk.revision)
+        )
+    ).mappings():
+        result[f"chunk:{row['chunk_id']}"] = stamp("source", row)
     return result
 
 
 async def load_record(db, key: str):
     kind, identity = key.split(":", 1)
+    if kind == "chunk":
+        chunk = await db.get(SourceIndexChunk, identity)
+        source = await db.get(Source, chunk.source_id) if chunk else None
+        return source if source and source.revision == chunk.revision else None
     model = MODELS.get(kind)
     if model is None or (kind == "task" and not identity.isdigit()):
         return None
@@ -239,6 +258,16 @@ async def sync_once(sessions, client=None) -> int:
         key for key, fingerprint in wanted.items() if indexed.get(key) != fingerprint
     ]
     processed = 0
+    obsolete = [k for k in indexed if k.startswith("chunk:") and k not in wanted]
+    # Obsolete chunks are derived search projections, never original evidence.
+    for key in obsolete[:BATCH_SIZE]:
+        await client.remove(key)
+        async with sessions() as db:
+            await db.execute(
+                delete(KnowledgeProjection).where(KnowledgeProjection.key == key)
+            )
+            await db.commit()
+        processed += 1
     for key in dirty[:BATCH_SIZE]:
         async with sessions() as db:
             item = await load_record(db, key)
@@ -246,6 +275,11 @@ async def sync_once(sessions, client=None) -> int:
                 continue
             kind = key.split(":", 1)[0]
             row = record(item)
+            if kind == "chunk":
+                chunk = await db.get(SourceIndexChunk, key.split(":", 1)[1])
+                row["body"] = row["body"][chunk.start : chunk.end]
+                row["_projection_key"] = key
+                kind = "source"
         fingerprint = stamp(kind, row)
         if visible(kind, row):
             await client.write(document(kind, row))
@@ -269,7 +303,7 @@ async def sync_once(sessions, client=None) -> int:
     async with sessions() as db:
         value = {
             "last_success": utcnow().isoformat(),
-            "pending": max(0, len(dirty) - processed),
+            "pending": max(0, len(dirty) + len(obsolete) - processed),
             "error": None,
         }
         previous = await db.get(Preference, STATUS_KEY)
@@ -373,6 +407,8 @@ async def search(db, query, *, mode="auto", scope="all", client=None):
             if item is None:
                 continue
             kind = projection.key.split(":", 1)[0]
+            if kind == "chunk":
+                kind = "source"
             row = record(item)
             if (
                 not visible(kind, row)

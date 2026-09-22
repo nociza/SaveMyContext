@@ -128,12 +128,35 @@ SAVEMYCONTEXT_JEV_API_KEY=configure-in-a-protected-runtime-file
 SAVEMYCONTEXT_JEV_MODEL=typesafe/jev-1.13
 ```
 
-Jev scores bounded excerpts. It does not write your ledger, calculate deadlines,
+Jev scores bounded excerpts with the full role-labelled conversation as context.
+Large conversations abstain from action classification rather than splitting
+cancellations away from earlier commitments. It does not write your ledger, calculate deadlines,
 or act as a summarizer. The adapter's 0.9 suggestion threshold is an implementation
 policy, not a measured accuracy claim. Generation requires the separate
-`SAVEMYCONTEXT_WORKSPACE_GENERATE` setting and a configured text-generation
-provider. Decide what private material may leave the host before enabling either.
+`SAVEMYCONTEXT_WORKSPACE_GENERATE` setting and an explicit
+`SAVEMYCONTEXT_WORKSPACE_SUMMARY_MODEL`. Decide what private material may leave the host before enabling either.
 Never commit keys, sources, or databases.
+
+### Source-backed digests and private writing
+
+The summary lane selects exact source passages, groups them by overview,
+findings, decisions, ideas, questions, and history, and preserves speaker/time
+attribution. It does not generate new factual claims or create action items.
+Both speakers, quotes, code, and long passages remain available. Chunk results
+are cached; a final pass reconciles selections and later context. Coverage,
+actual returned model metadata, invalid citations, and unavailable routes are
+visible in the source detail. Review is still necessary: selection and grouping
+are model judgments, not proof that an assertion is true.
+
+Writing provides versioned private briefs/drafts, exact-copy preview and approval,
+and idempotent approved exports. Category, ongoing area, and topic facets are
+independent of project, task state, and publication. The same authenticated API
+is available to the dashboard, standalone UI, and agents.
+
+See [summaries, organization, and publishing](docs/writing-and-summaries.md) for
+configuration, API contracts, safety limits, and the optional Git-backed article
+adapter. Paid fallback from a free model is disabled by default; no account
+privacy policy is automatically relaxed.
 
 ### Retiring old keyword suggestions
 

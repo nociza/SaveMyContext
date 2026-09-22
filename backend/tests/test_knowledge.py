@@ -392,6 +392,36 @@ async def test_project_links_and_source_excerpts(workspace):
     assert note["metadata"]["smc_fingerprint"] == stamp("source", row)
 
 
+async def test_middle_chunks_are_indexed_hydrated_and_withdrawn(workspace):
+    from app.workspace.models import SourceIndexChunk
+
+    text = "x" * 30000 + "UNIQUE_MIDDLE_FINDING" + "y" * 30000
+    row = await capture(workspace, body=text)
+    engine = Engine()
+    await sync_once(workspace, engine)
+    chunk_notes = {
+        key: value
+        for key, value in engine.notes.items()
+        if value["metadata"]["smc_key"].startswith("chunk:")
+    }
+    assert any(
+        "UNIQUE_MIDDLE_FINDING" in note["content"] for note in chunk_notes.values()
+    )
+    engine.notes = chunk_notes  # Search must resolve chunks to the canonical source.
+    async with workspace() as db:
+        result = await search(db, "needle", mode="semantic", client=engine)
+        assert len(result["items"]) == 1 and result["items"][0]["body"] == text
+        chunks = (await db.scalars(select(SourceIndexChunk))).all()
+        assert sum(c.end - c.start for c in chunks) == len(text)
+    await capture(workspace, body="New shorter source")
+    await sync_once(workspace, engine)
+    assert not any(
+        note["metadata"]["smc_key"].startswith("chunk:")
+        for note in engine.notes.values()
+    )
+    assert row["body"] == text
+
+
 async def test_archive_during_search_revalidates_lexical_hits(workspace):
     await capture(workspace)
 

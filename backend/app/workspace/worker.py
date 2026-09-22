@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.models import ChatSession
 from app.models.base import utcnow
 from app.services.files import atomic_write_text
-from app.workspace.models import Job, Memory, Revision, Source
+from app.workspace.models import Job, Memory, Revision, Source, SourceSummary
 from app.workspace.processor import extract
 from app.workspace.quality import assess
 from app.workspace.store import digest, index_document
@@ -92,8 +92,13 @@ async def run_one(sessions, *, extractor=extract) -> bool:
         if quality and quality["status"] == "needs_repair":
             items, provenance = [], {"model": "quality-gate", "quality": quality}
         else:
+            from app.workspace.summarizer import Cache
+
+            extra = {"cache": Cache(sessions)} if extractor is extract else {}
             items, provenance = await asyncio.wait_for(
-                extractor(body, messages, source_kind=kind, source_title=title),
+                extractor(
+                    body, messages, source_kind=kind, source_title=title, **extra
+                ),
                 timeout=LEASE_SECONDS - 30,
             )
         async with sessions() as db:
@@ -118,11 +123,31 @@ async def run_one(sessions, *, extractor=extract) -> bool:
                 job.state, job.lease = "superseded", None
                 await db.commit()
                 return True
+            provenance = dict(provenance)
+            summary = provenance.pop("summary", None)
+            if summary is not None:
+                summary_processor = provenance.get("processor", job.processor)
+                summary_id = digest([source_id, revision, summary_processor])
+                saved_summary = await db.get(SourceSummary, summary_id)
+                if saved_summary:
+                    saved_summary.payload = summary
+                else:
+                    db.add(
+                        SourceSummary(
+                            id=summary_id,
+                            source_id=source_id,
+                            revision=revision,
+                            processor=summary_processor,
+                            payload=summary,
+                        )
+                    )
+            rejected_items = 0
             for item in items:
                 if (
                     item["kind"] not in {"task", "note", "idea", "decision"}
                     or item["evidence"] not in body
                 ):
+                    rejected_items += 1
                     continue
                 memory_id = digest([source_id, item["kind"], item["evidence"]])
                 memory = await db.get(Memory, memory_id)
@@ -171,6 +196,8 @@ async def run_one(sessions, *, extractor=extract) -> bool:
                     session.markdown_path = str(target)
                     session.last_processed_at = utcnow()
             job.state, job.error, job.lease = "done", None, None
+            if rejected_items:
+                job.error = f"RejectedEvidence:{rejected_items}"
             await db.commit()
     except Exception as exc:
         # No provider response, source text, credential, or exception message in logs.

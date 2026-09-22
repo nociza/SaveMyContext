@@ -92,6 +92,11 @@ class SourcePatch(Input):
     archived: bool | None = None
 
 
+class ReprocessInput(Input):
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    dry_run: bool = True
+
+
 class SettingsInput(Input):
     notifications_enabled: bool = False
     due_reminders_enabled: bool = True

@@ -6,7 +6,11 @@ import httpx
 import pytest
 from pydantic import BaseModel
 
-from app.core.config import DEFAULT_OPENROUTER_MODEL, DEFAULT_OPENROUTER_MODEL_FALLBACKS, get_settings
+from app.core.config import (
+    DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_OPENROUTER_MODEL_FALLBACKS,
+    get_settings,
+)
 from app.services.llm.openai_client import OpenAIClient
 
 
@@ -15,7 +19,9 @@ class EchoSchema(BaseModel):
 
 
 @pytest.mark.asyncio
-async def test_openai_client_uses_openai_compatible_settings_and_headers(monkeypatch) -> None:
+async def test_openai_client_uses_openai_compatible_settings_and_headers(
+    monkeypatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     class FakeResponse:
@@ -43,16 +49,22 @@ async def test_openai_client_uses_openai_compatible_settings_and_headers(monkeyp
         async def __aexit__(self, exc_type, exc, tb) -> bool:
             return False
 
-        async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]) -> FakeResponse:
+        async def post(
+            self, url: str, *, headers: dict[str, str], json: dict[str, object]
+        ) -> FakeResponse:
             captured["url"] = url
             captured["headers"] = headers
             captured["json"] = json
             return FakeResponse()
 
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_API_KEY", "openrouter-secret")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1"
+    )
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL", "openai/gpt-4.1-mini")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_SITE_URL", "https://notes.example.com")
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_SITE_URL", "https://notes.example.com"
+    )
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_APP_NAME", "SaveMyContext Test")
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
     get_settings.cache_clear()
@@ -77,7 +89,9 @@ async def test_openai_client_uses_openai_compatible_settings_and_headers(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_openai_client_accepts_generic_openai_env_names_and_openrouter_defaults(monkeypatch) -> None:
+async def test_openai_client_accepts_generic_openai_env_names_and_openrouter_defaults(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-or-v1-test-secret")
     get_settings.cache_clear()
 
@@ -88,16 +102,25 @@ async def test_openai_client_accepts_generic_openai_env_names_and_openrouter_def
         assert settings.openai_api_key == "sk-or-v1-test-secret"
         assert settings.resolved_openai_base_url == "https://openrouter.ai/api/v1"
         assert settings.resolved_openai_model == DEFAULT_OPENROUTER_MODEL
-        assert settings.resolved_openai_model_candidates == [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
+        assert settings.resolved_openai_model_candidates == [
+            DEFAULT_OPENROUTER_MODEL,
+            *DEFAULT_OPENROUTER_MODEL_FALLBACKS,
+        ]
         assert client.base_url == "https://openrouter.ai/api/v1"
         assert client.model == DEFAULT_OPENROUTER_MODEL
-        assert client.models == [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
+        assert client.models == [
+            m
+            for m in [DEFAULT_OPENROUTER_MODEL, *DEFAULT_OPENROUTER_MODEL_FALLBACKS]
+            if m.endswith(":free")
+        ]
     finally:
         get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_openai_client_retries_without_response_format_when_provider_rejects_json_mode(monkeypatch) -> None:
+async def test_openai_client_retries_without_response_format_when_provider_rejects_json_mode(
+    monkeypatch,
+) -> None:
     attempts: list[dict[str, object]] = []
 
     request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
@@ -122,7 +145,9 @@ async def test_openai_client_retries_without_response_format_when_provider_rejec
         async def __aexit__(self, exc_type, exc, tb) -> bool:
             return False
 
-        async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+        async def post(
+            self, url: str, *, headers: dict[str, str], json: dict[str, object]
+        ):
             attempts.append(json)
             if len(attempts) == 1:
                 response = httpx.Response(
@@ -130,11 +155,17 @@ async def test_openai_client_retries_without_response_format_when_provider_rejec
                     request=request,
                     text='{"error":{"message":"response_format is not supported"}}',
                 )
-                raise httpx.HTTPStatusError("unsupported", request=request, response=response)
-            return FakeResponse({"choices": [{"message": {"content": '{"value":"ok"}'}}]})
+                raise httpx.HTTPStatusError(
+                    "unsupported", request=request, response=response
+                )
+            return FakeResponse(
+                {"choices": [{"message": {"content": '{"value":"ok"}'}}]}
+            )
 
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_API_KEY", "openrouter-secret")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1"
+    )
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL", "openai/gpt-4.1-mini")
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
     get_settings.cache_clear()
@@ -155,7 +186,10 @@ async def test_openai_client_retries_without_response_format_when_provider_rejec
 
 
 @pytest.mark.asyncio
-async def test_openai_client_falls_back_to_next_model_when_primary_is_rate_limited(monkeypatch) -> None:
+async def test_openai_client_falls_back_to_next_model_when_primary_is_rate_limited(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SAVEMYCONTEXT_ALLOW_PAID_FALLBACK", "true")
     attempts: list[str] = []
     request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
 
@@ -176,7 +210,9 @@ async def test_openai_client_falls_back_to_next_model_when_primary_is_rate_limit
         async def __aexit__(self, exc_type, exc, tb) -> bool:
             return False
 
-        async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
+        async def post(
+            self, url: str, *, headers: dict[str, str], json: dict[str, object]
+        ):
             attempts.append(str(json["model"]))
             if json["model"] == "google/gemma-4-31b-it:free":
                 response = httpx.Response(
@@ -184,13 +220,21 @@ async def test_openai_client_falls_back_to_next_model_when_primary_is_rate_limit
                     request=request,
                     text='{"error":{"message":"rate limit exceeded"}}',
                 )
-                raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+                raise httpx.HTTPStatusError(
+                    "rate limited", request=request, response=response
+                )
             return FakeResponse()
 
     monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_API_KEY", "openrouter-secret")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL", "google/gemma-4-31b-it:free")
-    monkeypatch.setenv("SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL_FALLBACKS", "openai/gpt-4.1-mini")
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_BASE_URL", "https://openrouter.ai/api/v1"
+    )
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL", "google/gemma-4-31b-it:free"
+    )
+    monkeypatch.setenv(
+        "SAVEMYCONTEXT_OPENAI_COMPATIBLE_MODEL_FALLBACKS", "openai/gpt-4.1-mini"
+    )
     monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
     get_settings.cache_clear()
 

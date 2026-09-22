@@ -34,18 +34,22 @@ are indexed, not classified into commitments by keyword. Explicit notes are
 preserved verbatim for review. External processing is disabled by default and
 requires explicit configuration. Jev is an optional typed decision
 adapter, not a summarizer, calculator, authorization system, or mandatory service.
-Only bounded excerpts are submitted. Model and processor versions accompany
+Bounded excerpts include full conversation context within the action budget;
+larger inputs abstain from action inference. Model and processor versions accompany
 derived records. Ambiguous inferred tasks remain suggestions. Direct owner task
 commands use the task API and do not pass through inference.
 
 ## Interfaces
 
-The web workspace has Inbox, Tasks, Memory, and Projects with shared search.
+The web workspace has Inbox, Tasks, Memory, Projects, and private Writing with shared search.
 The same browser module runs standalone and embedded in Nexus; it receives a
 base URL, not a secret. Nexus proxies requests using a protected server credential.
 Standalone users supply a revocable token held only in memory for that tab.
 The agent CLI uses a protected token file. Separate client credentials are
 revocable independently; capture-only credentials cannot edit tasks.
+
+Source-backed digests and editorial drafts are separate tables, not extra memory
+kinds. See [the summary and publishing contract](writing-and-summaries.md).
 
 ## Migration and release
 

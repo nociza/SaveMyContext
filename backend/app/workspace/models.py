@@ -59,7 +59,9 @@ class ProviderProject(TimestampMixin, Base):
 
     __tablename__ = "workspace_provider_projects"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    project_id: Mapped[str] = mapped_column(ForeignKey("workspace_projects.id"), unique=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace_projects.id"), unique=True
+    )
     provider: Mapped[str] = mapped_column(String(40))
     account_key: Mapped[str] = mapped_column(String(255))
     external_id: Mapped[str] = mapped_column(String(120))
@@ -69,8 +71,12 @@ class ProviderProject(TimestampMixin, Base):
 
 class SourceProjectBinding(Base):
     __tablename__ = "workspace_source_project_bindings"
-    source_id: Mapped[str] = mapped_column(ForeignKey("workspace_sources.id"), primary_key=True)
-    provider_project_id: Mapped[str | None] = mapped_column(ForeignKey("workspace_provider_projects.id"))
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace_sources.id"), primary_key=True
+    )
+    provider_project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspace_provider_projects.id")
+    )
     observed_at: Mapped[float] = mapped_column(default=0.0)
     manual: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -168,3 +174,89 @@ class Job(TimestampMixin, Base):
     lease: Mapped[str | None] = mapped_column(String(36))
     available_at: Mapped[float] = mapped_column(default=0.0, index=True)
     error: Mapped[str | None] = mapped_column(String(120))
+
+
+class SourceSummary(TimestampMixin, Base):
+    __tablename__ = "workspace_source_summaries"
+    __table_args__ = (UniqueConstraint("source_id", "revision", "processor"),)
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace_sources.id"), index=True
+    )
+    revision: Mapped[str] = mapped_column(String(64))
+    processor: Mapped[str] = mapped_column(String(48))
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class SummaryChunk(Base):
+    __tablename__ = "workspace_summary_chunks"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class SourceIndexChunk(Base):
+    """Small pointers into canonical source text; no duplicate transcript blobs."""
+
+    __tablename__ = "workspace_source_index_chunks"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("workspace_sources.id"), index=True
+    )
+    revision: Mapped[str] = mapped_column(String(64))
+    start: Mapped[int] = mapped_column(Integer)
+    end: Mapped[int] = mapped_column(Integer)
+
+
+class Organization(TimestampMixin, Base):
+    """Owner-managed facets, independent of source/knowledge lifecycle."""
+
+    __tablename__ = "workspace_organization"
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    category: Mapped[str] = mapped_column(String(24), default="note")
+    area: Mapped[str] = mapped_column(String(120), default="")
+    topics: Mapped[list] = mapped_column(JSON, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class TopicLink(Base):
+    __tablename__ = "workspace_topic_links"
+    key: Mapped[str] = mapped_column(
+        ForeignKey("workspace_organization.key"), primary_key=True
+    )
+    topic: Mapped[str] = mapped_column(String(60), primary_key=True, index=True)
+
+
+class Draft(TimestampMixin, Base):
+    __tablename__ = "workspace_drafts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    title: Mapped[str] = mapped_column(String(240))
+    body: Mapped[str] = mapped_column(Text, default="")
+    brief: Mapped[str] = mapped_column(Text, default="")
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("workspace_projects.id"))
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    destination: Mapped[str] = mapped_column(String(120), default="markdown-export")
+    slug: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    approval_hash: Mapped[str | None] = mapped_column(String(64))
+
+
+class DraftRevision(TimestampMixin, Base):
+    __tablename__ = "workspace_draft_revisions"
+    __table_args__ = (UniqueConstraint("draft_id", "version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("workspace_drafts.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class Publication(TimestampMixin, Base):
+    """Idempotent approved export receipt; never implies remote deployment."""
+
+    __tablename__ = "workspace_publications"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("workspace_drafts.id"), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    destination: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(24), default="exported")
+    payload: Mapped[dict] = mapped_column(JSON)

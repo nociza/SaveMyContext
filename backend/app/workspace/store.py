@@ -100,12 +100,52 @@ async def enqueue_source(
                 memory.version += 1
     await db.flush()
     await index_document(db, f"source:{source_id}", title, body)
+    await ensure_source_chunks(db, source)
     return source
+
+
+async def ensure_source_chunks(db, source):
+    from sqlalchemy import delete
+    from app.workspace.models import SourceIndexChunk
+
+    await db.execute(
+        delete(SourceIndexChunk).where(
+            SourceIndexChunk.source_id == source.id,
+            SourceIndexChunk.revision != source.revision,
+        )
+    )
+    if len(source.body) > 48_000:
+        existing = set(
+            (
+                await db.scalars(
+                    select(SourceIndexChunk.id).where(
+                        SourceIndexChunk.source_id == source.id
+                    )
+                )
+            ).all()
+        )
+        for start in range(0, len(source.body), 12000):
+            identity = digest([source.id, source.revision, start])
+            if identity not in existing:
+                db.add(
+                    SourceIndexChunk(
+                        id=identity,
+                        source_id=source.id,
+                        revision=source.revision,
+                        start=start,
+                        end=min(start + 12000, len(source.body)),
+                    )
+                )
 
 
 async def enqueue_session(db, session) -> Source:
     messages = [
-        {"id": m.external_message_id, "role": m.role.value, "content": m.content}
+        {
+            "id": m.external_message_id,
+            "role": m.role.value,
+            "content": m.content,
+            "occurred_at": m.occurred_at.isoformat() if m.occurred_at else None,
+        }
         for m in session.messages
     ]
     return await enqueue_source(
