@@ -29,6 +29,7 @@ test("capture companion pauses offline, retains its queue, and launches one work
     const unapproved = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "SET_CAPTURE_PAUSED", paused: false }));
     expect(unapproved.ok).toBe(false);
     await popup.getByRole("button", { name: "Agree and enable capture" }).click();
+    await expect(popup.locator("#action-status")).toContainText("Capture enabled.");
     await expect(popup.locator("#pause")).toBeEnabled();
     // Refuse accidental whole-corpus or model-worker requests from the new popup.
     await worker.evaluate(() => {

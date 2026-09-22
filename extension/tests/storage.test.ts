@@ -232,6 +232,22 @@ describe("storage", () => {
     expect((await getSettings()).capturePaused).toBe(false);
   });
 
+  it("publishes consent only after activation preferences have finished persisting", async () => {
+    const sync = createStorageArea(), local = createStorageArea();
+    vi.stubGlobal("chrome", { storage: { sync, local } });
+    const { getSettings, acceptCaptureConsent } = await import("../src/shared/storage");
+    let release!: () => void;
+    const blockedWrite = new Promise<void>(resolve => { release = resolve; });
+    sync.set.mockImplementationOnce(async () => { await blockedWrite; });
+    const accepting = acceptCaptureConsent((await getSettings()).backendUrl);
+    await vi.waitFor(() => expect(sync.set).toHaveBeenCalledOnce());
+    expect(await getSettings()).toMatchObject({ captureConsentGranted: false, capturePaused: true });
+    expect(local.state["savemycontext.capture-consent"]).toBeUndefined();
+    release();
+    await accepting;
+    expect(await getSettings()).toMatchObject({ captureConsentGranted: true, capturePaused: false });
+  });
+
   it("creates and caches an installation id in local storage", async () => {
     const sync = createStorageArea();
     const local = createStorageArea();

@@ -27,10 +27,14 @@ const CONSENT_KEY = "savemycontext.capture-consent";
 const CONSENT_VERSION = 1;
 
 export async function acceptCaptureConsent(backendUrl: string): Promise<void> {
-  const current = await getSettings();
-  if (current.backendUrl !== backendUrl) throw new Error("Destination changed. Review it before enabling capture.");
-  await chrome.storage.local.set({ [CONSENT_KEY]: { version: CONSENT_VERSION, backendUrl, acceptedAt: new Date().toISOString() } });
-  await saveSettings({ capturePaused: false });
+  await lockedStorage(SETTINGS_KEY, async () => {
+    const current = await getSettings();
+    if (current.backendUrl !== backendUrl) throw new Error("Destination changed. Review it before enabling capture.");
+    // Persist the unpaused preference first, while the consent gate still denies
+    // capture. Publishing consent last is the single visible activation point.
+    await saveSettingsUnlocked({ capturePaused: false });
+    await chrome.storage.local.set({ [CONSENT_KEY]: { version: CONSENT_VERSION, backendUrl, acceptedAt: new Date().toISOString() } });
+  });
 }
 
 const storageWrites = new Map<string, Promise<void>>();

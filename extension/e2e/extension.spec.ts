@@ -10,6 +10,7 @@ async function enableCapture(options: Page): Promise<void> {
   const popup = await options.context().newPage();
   await popup.goto(options.url().replace("options.html", "popup.html"));
   await popup.getByRole("button", { name: "Agree and enable capture" }).click();
+  await expect(popup.locator("#action-status")).toContainText("Capture enabled.");
   await expect(popup.locator("#consent")).toBeHidden();
   await popup.close();
 }
@@ -378,7 +379,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       })).toBe(false);
       await page.bringToFront();
       const imported = await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }));
-      expect(imported.triggered).toBe(true);
+      expect(imported, JSON.stringify(imported)).toMatchObject({ triggered: true });
 
       await eventually
         .poll(

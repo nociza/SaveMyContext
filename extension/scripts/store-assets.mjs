@@ -35,6 +35,7 @@ try {
   await popup.locator("#consent").waitFor({ state: "visible" });
   const consent = await popup.locator("body").screenshot();
   await popup.getByRole("button", { name: "Agree and enable capture" }).click();
+  await popup.getByText("Capture enabled. Reload an already-open conversation if needed.", { exact: true }).waitFor();
   await popup.locator("#consent").waitFor({ state: "hidden" });
   const companion = await popup.locator("body").screenshot();
   const icon = `data:image/png;base64,${(await readFile(resolve(root, "public/icons/icon-128.png"))).toString("base64")}`;
