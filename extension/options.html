@@ -17,13 +17,13 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <button id="open-dashboard" class="btn btn-secondary" type="button">Open dashboard</button>
+          <button id="open-dashboard" class="btn btn-secondary" type="button">Open workspace</button>
         </div>
       </header>
 
       <p class="intro">
-        Point SaveMyContext at the backend that holds your vault, choose how captures are indexed, and pick the
-        providers the extension should observe. Everything stays on your own machine.
+        Point SaveMyContext at your workspace backend, choose capture filters, and pick the
+        providers the extension should observe. Captures go to your chosen private backend.
       </p>
 
       <form id="settings-form" class="stack">
@@ -95,27 +95,24 @@
 
         <section class="section">
           <div class="section-head">
-            <h2>Vault</h2>
-            <p>The folder on the backend machine that holds your markdown library.</p>
+            <h2>Workspace</h2>
+            <p>Choose where the Open workspace button takes you.</p>
           </div>
           <div class="section-body">
             <label class="field">
-              <span class="field-label">Knowledge storage root</span>
+              <span class="field-label">Workspace URL (optional)</span>
               <input
-                id="knowledge-path"
-                name="knowledge-path"
-                type="text"
-                placeholder="/home/you/Notes"
+                id="workspace-url"
+                name="workspace-url"
+                type="url"
+                placeholder="https://your-dashboard.example/memory"
                 autocomplete="off"
               />
-              <small id="knowledge-path-status">
-                SaveMyContext writes the vault into <code>SaveMyContext/</code> under this folder on the
-                backend machine.
+              <small>
+                Leave blank for the built-in shared workspace. External workspaces handle their own
+                sign-in; the extension never adds your API token to this link.
               </small>
             </label>
-            <div class="inline-actions">
-              <button id="save-knowledge-path" class="btn btn-secondary" type="button">Apply path</button>
-            </div>
           </div>
         </section>
 
@@ -269,8 +266,8 @@
             <div class="field-grid">
               <label class="field">
                 <span class="field-label">Trigger words</span>
-                <input id="trigger-words" name="trigger-words" type="text" placeholder="lorem" />
-                <small>Comma-separated. Default: <code>lorem</code>.</small>
+                <input id="trigger-words" name="trigger-words" type="text" placeholder="Your custom words" />
+                <small>Comma-separated. No words are configured by default.</small>
               </label>
               <label class="field">
                 <span class="field-label">Blacklist words</span>
@@ -283,7 +280,7 @@
               <div>
                 <p class="status-label">Rules in force</p>
                 <p id="indexing-rules-status" class="status-value">
-                  Index everything. Trigger words: lorem. Blacklist: none.
+                  Loading capture filters…
                 </p>
               </div>
               <div>
@@ -296,11 +293,11 @@
 
         <section class="section">
           <div class="section-head">
-            <h2>Discard pile</h2>
+            <h2>Legacy discard routing</h2>
             <p>
-              Discard words capture the session but route it straight to the Discarded pile, skipping
-              classification, summaries, and notifications. Saying a discard word at the start of a chat is
-              the fastest way to mark a quick scratch session that should not pollute the dashboard.
+              Retained for older backends. These words request discard routing while preserving the
+              capture. They are not a privacy filter; use provider/account or indexing exclusions
+              to prevent ingestion. The current workspace does not include a Discarded pile screen.
             </p>
           </div>
           <div class="section-body">
@@ -309,16 +306,15 @@
               <span class="toggle-body">
                 <span class="toggle-title">Enable discard words</span>
                 <span class="toggle-help">
-                  When enabled, sessions whose opening request matches a discard word are saved to the
-                  Discarded pile chronologically and stay recoverable from the dashboard.
+                  Only enable this if your backend uses the legacy discard workflow.
                 </span>
               </span>
             </label>
 
             <label class="field">
               <span class="field-label">Discard words</span>
-              <input id="discard-words" name="discard-words" type="text" placeholder="loom" />
-              <small>Comma-separated. Default: <code>loom</code>.</small>
+              <input id="discard-words" name="discard-words" type="text" placeholder="Your custom words" />
+              <small>Comma-separated. No words are enabled by default.</small>
             </label>
           </div>
         </section>

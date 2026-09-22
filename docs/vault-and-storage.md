@@ -2,6 +2,12 @@
 title: Vault and Storage
 ---
 
+> Historical reference for the pre-workspace backend. The 0.4 extension no longer
+> includes pile/graph screens, prompt editing, or a browser inference runner.
+> Use [Getting Started](getting-started.md) and [Using SaveMyContext](using-save-my-context.md)
+> for the supported workflow. Retained backend compatibility does not imply these
+> extension controls still exist.
+
 # Vault and Storage
 
 SaveMyContext writes a managed Markdown vault on disk. You can open that vault directly in Obsidian or browse it from the filesystem.

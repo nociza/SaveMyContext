@@ -116,6 +116,7 @@ jobs:
           mkdir -p dist
           touch dist/stale-artifact.js
           pnpm build
+          pnpm check:bundle
           test ! -e dist/stale-artifact.js
           test -f dist/manifest.json
           test -z "$(find dist -type f -name '*.map' -print -quit)"

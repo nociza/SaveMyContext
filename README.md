@@ -32,10 +32,10 @@ Python 3.12+, uv, Node.js, and pnpm are required for development.
 git clone https://github.com/nociza/SaveMyContext.git
 cd SaveMyContext/backend
 uv sync --frozen
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
+uv run uvicorn app.main:app --host 127.0.0.1 --port 18888
 ```
 
-Open `http://127.0.0.1:8787/workspace`. SQLite and generated Markdown stay under
+Open `http://127.0.0.1:18888/workspace`. SQLite and generated Markdown stay under
 `backend/data/`, excluded from Git. Loopback bootstrap is available only before
 any application token exists. **Do not expose this service publicly.** For remote
 use, use a private network and protected per-client credentials, or issue scoped
@@ -52,6 +52,16 @@ and a token with `ingest`, `read`, and `workspace:write` permissions. Existing
 capture-only tokens still capture but cannot edit the workspace. Reload an
 already-installed unpacked extension after upgrading.
 
+The **0.4 extension is a capture companion**: connection/queue status, pause/resume,
+explicit history import, page capture, and an **Open workspace** button. New installs
+do not automatically import all history; upgrades preserve existing preferences.
+Optional selection capture and quick search remain available.
+
+Set **Workspace URL** to your authenticated dashboard page, or leave it blank for
+the bundled shared workspace. API credentials are never appended to links. The
+old graph/pile/dashboard/prompt screens redirect there; their visualization
+libraries, duplicate task UI, and browser-LLM runner are no longer bundled.
+
 Existing ChatGPT/Gemini/Grok adapters, page/selection capture, and context bundle
 transport are retained. Provider websites can change independently; capture
 errors remain visible. Browser inference is not needed for the new pipeline.
@@ -63,7 +73,7 @@ The backend package installs `smc-workspace`; its stdlib-only
 `backend/app/workspace/client.py` can also be installed on an agent host.
 
 ```sh
-export SMC_API_URL=http://your-private-host:8787
+export SMC_API_URL=https://your-private-host
 export SMC_TOKEN_FILE=/protected/path/application-token
 smc-workspace remember "Garden idea" --text "My idea is a shaded tea garden."
 smc-workspace search "tea garden"
@@ -142,8 +152,16 @@ cd ../extension && pnpm test && pnpm typecheck && pnpm build
 ```
 
 Browser test against a **disposable** running backend:
-`SMC_WORKSPACE_TEST_URL=http://127.0.0.1:8787 pnpm exec playwright test e2e/workspace.spec.ts`.
+`SMC_WORKSPACE_TEST_URL=http://127.0.0.1:18888 pnpm exec playwright test e2e/workspace.spec.ts`.
 
-See [workspace design](docs/workspace-design.md) for ownership, failure handling,
-migration, and privacy boundaries. Earlier architecture documents describe the
-retained pre-workspace implementation, not default 0.3 behavior.
+See [architecture](docs/architecture.md), [workspace design](docs/workspace-design.md),
+and [contributing](docs/contributing.md). The public project contains the extension,
+core API, shared workspace, and agent client. Installation-specific infrastructure,
+secrets, backup destinations, and deployment automation belong in a separate
+deployment repository; no particular dashboard, NAS, or chat bot is required.
+
+### Licensing
+
+No project license has been selected yet. Public visibility is not an open-source
+license grant. Choosing and adding a license is a separate owner decision; this
+refactor does not silently assign one.

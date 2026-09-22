@@ -1,3 +1,4 @@
+import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
 import type {
   BridgeToExtensionMessage,
   BridgeToPageMessage,
@@ -7,17 +8,14 @@ import type {
   HistorySyncUpdate,
   MainWorldControlPayload,
   ProviderDriftAlert,
-  ProviderName,
-  ProxyPromptResult
+  ProviderName
 } from "../shared/types";
-import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
-import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
 import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
+import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
 
+import { buildProviderDriftAlert, createProviderDriftError, isProviderDriftError } from "./drift";
 import { maybeUpdateGeminiRuntimeContext, runGeminiHistorySync } from "./gemini-history";
 import { runGrokHistorySync } from "./grok-history";
-import { runProxyPrompt, observeProxyCapture } from "./proxy-runner";
-import { buildProviderDriftAlert, createProviderDriftError, isProviderDriftError } from "./drift";
 import {
   countRetryableHistoryFailures,
   dedupeIds,
@@ -26,6 +24,9 @@ import {
 } from "./history-shared";
 
 const OBSERVER_FLAG = "__SAVEMYCONTEXT_NETWORK_OBSERVER__";
+function handleControlPayload(payload: MainWorldControlPayload): void {
+  if (payload.type === "START_HISTORY_SYNC") void runHistorySync(payload);
+}
 const INTERESTING_PATH =
   /backend-api|conversation|conversations|BardFrontendService|StreamGenerate|batchexecute|app-chat|grok|chat/i;
 const CHATGPT_HISTORY_PAGE_LIMIT = 100;
@@ -129,54 +130,6 @@ function postToExtension(message: BridgeToExtensionMessage): void {
   bridgePort.postMessage(message);
 }
 
-function handleControlPayload(payload: MainWorldControlPayload): void {
-  if (payload.type === "START_HISTORY_SYNC") {
-    void runHistorySync(payload);
-    return;
-  }
-
-  const provider = currentProvider();
-  if (!provider) {
-    postToExtension({
-      type: "PROXY_RESULT",
-      payload: {
-        requestId: payload.requestId,
-        ok: false,
-        error: "SaveMyContext proxy prompt can only run on a supported provider page."
-      }
-    });
-    return;
-  }
-
-  void runProxyPrompt(provider, payload.promptText, {
-    preferFastMode: payload.preferFastMode ?? false,
-    requireCompleteJson: payload.requireCompleteJson ?? false
-  })
-    .then((result) => {
-      postToExtension({
-        type: "PROXY_RESULT",
-        payload: {
-          requestId: payload.requestId,
-          ok: true,
-          provider: result.provider,
-          responseText: result.responseText,
-          pageUrl: result.pageUrl,
-          title: result.title
-        }
-      });
-    })
-    .catch((error) => {
-      postToExtension({
-        type: "PROXY_RESULT",
-        payload: {
-          requestId: payload.requestId,
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        }
-      });
-    });
-}
-
 function attachBridgePort(port: MessagePort): void {
   bridgePort = port;
   bridgePort.onmessage = (event: MessageEvent<BridgeToPageMessage>) => {
@@ -196,7 +149,6 @@ function postCapture(capture: Omit<CapturedNetworkEvent, "source">): void {
     ...capture,
     source: "savemycontext-network-observer"
   } satisfies CapturedNetworkEvent;
-  observeProxyCapture(payload);
   postToExtension({
     type: "NETWORK_CAPTURE",
     payload

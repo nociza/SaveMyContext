@@ -1,14 +1,12 @@
+import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
+import { detectProviderFromUrl } from "../shared/provider";
 import type {
   BridgeToExtensionMessage,
   HistorySyncTriggerPayload,
   MainWorldControlPayload,
   PingProviderTabResponse,
-  ProxyPromptResult,
-  RunProviderPromptResponse,
   RuntimeMessage
 } from "../shared/types";
-import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bridge";
-import { detectProviderFromUrl } from "../shared/provider";
 import { extractPageChatContext } from "./chat-context-dump";
 import { createContextSuggestionController } from "./context-suggestions";
 import { createQuickSearchPalette } from "./quick-search";
@@ -22,7 +20,6 @@ const RUNTIME_MESSAGE_RETRY_INTERVAL_MS = 150;
 
 let bridgePort: MessagePort | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
-let proxyPromptInProgress = false;
 let runtimeDispatchQueue = Promise.resolve();
 const quickSearchPalette = createQuickSearchPalette(async <TResponse>(message: RuntimeMessage) => {
   return chrome.runtime.sendMessage(message) as Promise<TResponse>;
@@ -33,13 +30,6 @@ const selectionCaptureController = createSelectionCaptureController(async <TResp
 const contextSuggestionController = createContextSuggestionController(async <TResponse>(message: RuntimeMessage) => {
   return chrome.runtime.sendMessage(message) as Promise<TResponse>;
 });
-const pendingProxyRequests = new Map<
-  string,
-  {
-    resolve: (value: ProxyPromptResult) => void;
-    reject: (reason?: unknown) => void;
-  }
->();
 
 function enqueueRuntimeMessage(message: RuntimeMessage): void {
   const dispatch = async (): Promise<void> => {
@@ -86,23 +76,6 @@ function handleBridgeMessage(message: BridgeToExtensionMessage): void {
       payload: message.payload
     });
     return;
-  }
-
-  if (message.type === "PROXY_RESULT") {
-    const payload = message.payload;
-    if (!payload?.requestId) {
-      return;
-    }
-    const pending = pendingProxyRequests.get(payload.requestId);
-    if (!pending) {
-      return;
-    }
-    pendingProxyRequests.delete(payload.requestId);
-    if (!payload.ok || !payload.responseText || !payload.pageUrl) {
-      pending.reject(new Error(payload.error ?? "The provider page did not return a proxy response."));
-      return;
-    }
-    pending.resolve(payload);
   }
 }
 
@@ -184,25 +157,6 @@ async function postControlMessage(payload: MainWorldControlPayload): Promise<voi
     type: "CONTROL",
     payload
   });
-}
-
-async function requestProxyPrompt(
-  promptText: string,
-  preferFastMode = false,
-  requireCompleteJson = false
-): Promise<ProxyPromptResult> {
-  const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const promise = new Promise<ProxyPromptResult>((resolve, reject) => {
-    pendingProxyRequests.set(requestId, { resolve, reject });
-  });
-  await postControlMessage({
-    type: "RUN_PROXY_PROMPT",
-    requestId,
-    promptText,
-    preferFastMode,
-    requireCompleteJson
-  });
-  return promise;
 }
 
 function notifyPageVisit(): void {
@@ -295,41 +249,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       });
     return true;
   }
-  if (message.type === "RUN_PROVIDER_PROMPT") {
-    if (proxyPromptInProgress) {
-      sendResponse({
-        ok: false,
-        error: "AI processing is already running in this tab."
-      } satisfies RunProviderPromptResponse);
-      return false;
-    }
-    proxyPromptInProgress = true;
-    void requestProxyPrompt(
-      message.payload.promptText,
-      message.payload.preferFastMode ?? false,
-      message.payload.requireCompleteJson ?? false
-    )
-      .then((result) => {
-        sendResponse({
-          ok: true,
-          provider: result.provider,
-          responseText: result.responseText,
-          pageUrl: result.pageUrl,
-          title: result.title
-        } satisfies RunProviderPromptResponse);
-      })
-      .catch((error) => {
-        console.error("SaveMyContext provider prompt run failed", error);
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        } satisfies RunProviderPromptResponse);
-      })
-      .finally(() => {
-        proxyPromptInProgress = false;
-      });
-    return true;
-  }
   if (message.type === "PING_PROVIDER_TAB") {
     sendResponse({
       ok: true,
@@ -343,10 +262,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
 });
 
 window.addEventListener("beforeunload", () => {
-  for (const [requestId, pending] of pendingProxyRequests.entries()) {
-    pendingProxyRequests.delete(requestId);
-    pending.reject(new Error("The provider page was closed before the response completed."));
-  }
   bridgePort?.close();
   bridgePort = null;
 });

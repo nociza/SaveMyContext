@@ -1,52 +1,9 @@
-import {
-  buildBackendHeaders,
-  completeProcessingTask,
-  fetchContextMigrationBundle,
-  fetchKnowledgeSearch,
-  fetchNextProcessingTask,
-  fetchProcessingStatus,
-  fetchSessions,
-  importContextMigrationBundle,
-  redeemConnectionBundle,
-  runDuePileRestructures,
-  saveSourceCaptureToBackend,
-  updateKnowledgeStoragePath,
-  validateBackendConfiguration
-} from "./backend";
-import { buildIngestPayload, mergeSeenMessageIds, mergeMessageFingerprints } from "./diff";
-import { IndexedCaptureStore, OUTBOX_ALARM, enqueueCapture, drainCaptures, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
-import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
-import { bestEffortTabCleanup } from "./tab-cleanup";
-import {
-  buildProviderRefreshAlarmPlan,
-  providerFromRefreshAlarmName,
-  providerRefreshAlarmName
-} from "./provider-refresh";
 import { providerRegistry } from "../providers/registry";
-import { detectProviderFromUrl, supportsProactiveHistorySync } from "../shared/provider";
-import {
-  buildProcessingRepairPrompt,
-  normalizePartialProcessingResponseJson,
-  normalizeProcessingResponseJson
-} from "../injected/proxy-json";
-import {
-  getInstallationId,
-  getProviderHistorySyncState,
-  clearProviderHistorySyncStates,
-  getProcessingWorkerSessionUrl,
-  getProviderSessionSyncStates,
-  getSessionSyncState,
-  getSettings,
-  getStatus,
-  initializeStorage,
-  saveBackendValidation,
-  saveProcessingWorkerSessionUrl,
-  saveProviderHistorySyncState,
-  saveSessionSyncState,
-  saveSettings,
-  setStatus
-} from "../shared/storage";
 import { parseConnectionString } from "../shared/connection";
+import {
+  buildMarkdownContextImportPayload,
+  renderActiveChatMarkdown
+} from "../shared/context-markdown";
 import {
   ALL_REGULAR_PAGE_ORIGINS,
   hasOptionalHostPermissions
@@ -56,7 +13,23 @@ import {
   normalizePageSurfaceScope,
   pageSurfaceScopeAllowsUrl
 } from "../shared/page-surfaces";
+import { detectProviderFromUrl, supportsProactiveHistorySync } from "../shared/provider";
 import { createSourceCaptureKey } from "../shared/source-capture";
+import {
+  clearProviderHistorySyncStates,
+  getInstallationId,
+  getProviderHistorySyncState,
+  getProviderSessionSyncStates,
+  getSessionSyncState,
+  getSettings,
+  getStatus,
+  initializeStorage,
+  saveBackendValidation,
+  saveProviderHistorySyncState,
+  saveSessionSyncState,
+  saveSettings,
+  setStatus
+} from "../shared/storage";
 import type {
   ActiveChatContextResponse,
   ActiveChatContextSnapshot,
@@ -69,23 +42,36 @@ import type {
   KnowledgeSearchResponse,
   NormalizedSessionSnapshot,
   PingProviderTabResponse,
-  ProcessingTaskItem,
   ProviderDriftAlert,
   ProviderHistorySyncState,
   ProviderName,
-  RunProviderPromptResponse,
   RuntimeMessage,
+  SaveConnectionBundleResponse,
+  SaveSettingsResponse,
   SourceCapturePayload,
   SourceCaptureResponse,
-  SaveConnectionBundleResponse,
-  SaveKnowledgePathResponse,
-  SaveSettingsResponse,
   SyncStatus
 } from "../shared/types";
+import { validateWorkspaceUrl } from "../shared/workspace-link";
 import {
-  buildMarkdownContextImportPayload,
-  renderActiveChatMarkdown
-} from "../shared/context-markdown";
+  buildBackendHeaders,
+  fetchContextMigrationBundle,
+  fetchKnowledgeSearch,
+  fetchSessions,
+  importContextMigrationBundle,
+  redeemConnectionBundle,
+  saveSourceCaptureToBackend,
+  validateBackendConfiguration
+} from "./backend";
+import { buildIngestPayload, mergeMessageFingerprints, mergeSeenMessageIds } from "./diff";
+import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
+import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
+import {
+  buildProviderRefreshAlarmPlan,
+  providerFromRefreshAlarmName,
+  providerRefreshAlarmName
+} from "./provider-refresh";
+import { bestEffortTabCleanup } from "./tab-cleanup";
 
 let queue = Promise.resolve();
 const captureOutbox = new IndexedCaptureStore();
@@ -98,16 +84,12 @@ let backendValidationInFlightKey = "";
 let backendValidationLastCompletedAt = 0;
 let backendValidationLastKey = "";
 let backendValidationGeneration = 0;
-let processingWorkerTabId: number | null = null;
-let processingWorkerTabProvider: ProviderName | null = null;
-let processingWorkerTabOwned = false;
 const activeChatContextsByTabId = new Map<number, ActiveChatContextSnapshot>();
 const TAB_MESSAGE_RETRY_MS = 4_000;
 const TAB_MESSAGE_RETRY_INTERVAL_MS = 150;
 const PROVIDER_TAB_READY_TIMEOUT_MS = 10_000;
 const PROVIDER_TAB_READY_INTERVAL_MS = 250;
 const PROVIDER_REFRESH_TAB_LOAD_TIMEOUT_MS = 30_000;
-const PROCESSING_REPAIR_ATTEMPTS = 3;
 const CONTENT_SCRIPT_FILE = "assets/content.js";
 const PAGE_SURFACE_SCRIPT_ID = "savemycontext-page-surfaces-all-pages";
 const PAGE_SURFACE_CLEANUP_FLAG = "data-savemycontext-page-surfaces-cleanup";
@@ -135,16 +117,6 @@ const ACTION_ICON_SIZES = [16, 32, 48, 128] as const;
 const syncIconImageData = new Map<number, ImageData>();
 let actionIconMode: "default" | "syncing" = "default";
 let actionBadgeUpdateSequence = 0;
-
-function refreshedProcessingLastError(status: SyncStatus, pendingCount: number): string | null {
-  if (status.processingInProgress) {
-    return status.processingLastError ?? null;
-  }
-  if (!pendingCount) {
-    return null;
-  }
-  return status.processingLastError ?? null;
-}
 
 const PROVIDER_START_URLS: Record<ProviderName, string> = {
   chatgpt: "https://chatgpt.com/",
@@ -414,21 +386,6 @@ async function syncActionBadge(status: SyncStatus): Promise<void> {
     return;
   }
 
-  if (status.processingInProgress) {
-    await chrome.action.setBadgeBackgroundColor({ color: "#16324B" });
-    if (sequence !== actionBadgeUpdateSequence) {
-      return;
-    }
-    await chrome.action.setBadgeText({ text: "AI" });
-    if (sequence !== actionBadgeUpdateSequence) {
-      return;
-    }
-    await chrome.action.setTitle({
-      title: `SaveMyContext: AI processing running through ${status.processingProvider ?? "provider"}.`
-    });
-    return;
-  }
-
   await chrome.action.setBadgeText({ text: "" });
   if (sequence !== actionBadgeUpdateSequence) {
     return;
@@ -516,20 +473,6 @@ function enqueueTask<T>(task: () => Promise<T>): Promise<T> {
 
 function backendValidationCacheKey(settings: ExtensionSettings): string {
   return `${settings.backendUrl.trim()}::${settings.backendToken ?? ""}`;
-}
-
-function providerFromWorkerModel(model: string | undefined): ProviderName | null {
-  const normalized = model?.trim().toLowerCase() ?? "";
-  if (normalized.includes("chatgpt")) {
-    return "chatgpt";
-  }
-  if (normalized.includes("gemini")) {
-    return "gemini";
-  }
-  if (normalized.includes("grok")) {
-    return "grok";
-  }
-  return null;
 }
 
 function tabMatchesProviderUrl(url: string | undefined, provider: ProviderName): boolean {
@@ -655,58 +598,6 @@ async function ensureProviderRefreshTab(provider: ProviderName): Promise<chrome.
   }
   await waitForTabComplete(tab.id);
   return (await chrome.tabs.get(tab.id)) as chrome.tabs.Tab & { id: number };
-}
-
-async function ensureProcessingWorkerTab(provider: ProviderName): Promise<number> {
-  const savedSessionUrl = await getProcessingWorkerSessionUrl(provider);
-  const targetUrl = savedSessionUrl ?? PROVIDER_START_URLS[provider];
-  const existingTabId = processingWorkerTabId;
-
-  if (typeof existingTabId === "number") {
-    try {
-      const existing = await chrome.tabs.get(existingTabId);
-      if (existing.id && processingWorkerTabProvider === provider) {
-        await chrome.tabs.update(existing.id, { url: targetUrl, active: false });
-        await waitForTabComplete(existing.id);
-        return existing.id;
-      }
-    } catch {
-      processingWorkerTabId = null;
-      processingWorkerTabProvider = null;
-      processingWorkerTabOwned = false;
-    }
-  }
-
-  const reusableTabId = await findReusableProviderTab(provider, targetUrl, Boolean(savedSessionUrl));
-  if (typeof reusableTabId === "number") {
-    processingWorkerTabId = reusableTabId;
-    processingWorkerTabProvider = provider;
-    processingWorkerTabOwned = false;
-    if (savedSessionUrl) {
-      await chrome.tabs.update(reusableTabId, { url: targetUrl, active: false });
-      await waitForTabComplete(reusableTabId);
-    }
-    return reusableTabId;
-  }
-
-  throw new Error(`Open a signed-in ${provider} tab and try again.`);
-}
-
-async function closeProcessingWorkerTab(): Promise<void> {
-  if (typeof processingWorkerTabId !== "number") {
-    return;
-  }
-  try {
-    if (processingWorkerTabOwned) {
-      await chrome.tabs.remove(processingWorkerTabId);
-    }
-  } catch {
-    // Ignore tabs already closed by the user.
-  } finally {
-    processingWorkerTabId = null;
-    processingWorkerTabProvider = null;
-    processingWorkerTabOwned = false;
-  }
 }
 
 function isRetriableTabMessageError(error: unknown): boolean {
@@ -937,6 +828,7 @@ function handleGetActiveChatContext(
 
 async function handleSaveSourceCapture(payload: SourceCapturePayload): Promise<SourceCaptureResponse> {
   const settings = await getSettings();
+  if (settings.capturePaused) return { ok: false, error: "Capture paused" };
   const status = await refreshBackendStatus(false);
   if (status.backendValidationError) {
     return {
@@ -1143,39 +1035,6 @@ async function waitForProviderTabReady(tabId: number, provider: ProviderName): P
   throw new Error(lastError ?? `Timed out waiting for the ${provider} tab to become ready.`);
 }
 
-async function refreshProcessingFields(
-  settings: ExtensionSettings,
-  status: SyncStatus
-): Promise<SyncStatus> {
-  if (status.backendValidationError) {
-    return status;
-  }
-
-  try {
-    const processing = await fetchProcessingStatus({
-      ...settings,
-      backendUrl: status.backendUrl ?? settings.backendUrl
-    });
-    return await setExtensionStatus({
-      backendUrl: status.backendUrl ?? settings.backendUrl,
-      processingMode: processing.mode,
-      processingWorkerModel: processing.worker_model,
-      processingPendingCount: processing.pending_count,
-      processingLastError: refreshedProcessingLastError(status, processing.pending_count)
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return await setExtensionStatus({
-      backendUrl: status.backendUrl ?? settings.backendUrl,
-      backendValidationError: message,
-      processingPendingCount: undefined,
-      processingMode: undefined,
-      processingWorkerModel: undefined,
-      processingLastError: message
-    });
-  }
-}
-
 async function refreshBackendStatus(force = false): Promise<SyncStatus> {
   const settings = await getSettings();
   const validationKey = backendValidationCacheKey(settings);
@@ -1190,7 +1049,7 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
       validationKey === backendValidationLastKey &&
       now - backendValidationLastCompletedAt < BACKEND_VALIDATION_TTL_MS
     ) {
-      return await reconcileHistorySyncStatus(await refreshProcessingFields(settings, await getStatus()));
+      return await reconcileHistorySyncStatus(await getStatus());
     }
   }
 
@@ -1200,13 +1059,6 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
 
     try {
       const { normalizedUrl, capabilities } = await validateBackendConfiguration(settings);
-      const processing = await fetchProcessingStatus(
-        {
-          ...settings,
-          backendUrl: normalizedUrl
-        },
-        capabilities
-      );
       const latestSettings = await getSettings();
       if (
         validationGeneration !== backendValidationGeneration ||
@@ -1225,20 +1077,6 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         backendValidationError: null,
         backendMarkdownRoot: capabilities.storage.markdown_root ?? undefined,
         backendVaultRoot: capabilities.storage.vault_root ?? undefined,
-        processingMode: processing.mode,
-        processingWorkerModel: processing.worker_model,
-        processingPendingCount: processing.pending_count,
-        processingLastError: refreshedProcessingLastError(await getStatus(), processing.pending_count)
-      });
-      void runDuePileRestructures(
-        {
-          ...settings,
-          backendUrl: normalizedUrl
-        },
-        { limit_per_pile: 10 },
-        capabilities
-      ).catch((error) => {
-        console.debug("SaveMyContext due pile restructure skipped", error);
       });
       backendValidationLastKey = validationKey;
       backendValidationLastCompletedAt = Date.now();
@@ -1259,9 +1097,6 @@ async function refreshBackendStatus(force = false): Promise<SyncStatus> {
         backendValidationError: message,
         backendMarkdownRoot: undefined,
         backendVaultRoot: undefined,
-        processingPendingCount: undefined,
-        processingMode: undefined,
-        processingWorkerModel: undefined
       });
       backendValidationLastKey = validationKey;
       backendValidationLastCompletedAt = Date.now();
@@ -1380,6 +1215,7 @@ async function handleScheduledProviderRefresh(provider: ProviderName): Promise<v
   scheduledProviderRefreshesInFlight.add(provider);
   try {
     const settings = await getSettings();
+    if (settings.capturePaused) return;
     if (!buildProviderRefreshAlarmPlan(settings).some((item) => item.provider === provider)) {
       await chrome.alarms.clear(providerRefreshAlarmName(provider));
       return;
@@ -1486,6 +1322,25 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
+  if (["GET_DELIVERY_STATUS", "SET_CAPTURE_PAUSED", "IMPORT_ACTIVE_HISTORY"].includes(message.type)) {
+    // These controls belong to extension pages, never the provider page bridge.
+    if (!_sender.url?.startsWith(chrome.runtime.getURL(""))) {
+      sendResponse({ ok: false, error: "Extension page required" }); return false;
+    }
+    void (async () => {
+      if (message.type === "GET_DELIVERY_STATUS") return { pending: await captureOutbox.count() };
+      if (message.type === "SET_CAPTURE_PAUSED") {
+        await saveSettings({ capturePaused: Boolean(message.paused) });
+        if (!message.paused) void flushCaptureOutbox();
+        return { ok: true, paused: Boolean(message.paused) };
+      }
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const provider = tab?.url ? detectProviderFromUrl(tab.url) : null;
+      if (!provider || !supportsProactiveHistorySync(provider)) return { triggered: false, reason: "Open a supported provider first" };
+      return enqueueTask(() => handlePageVisit({ provider, pageUrl: tab.url! }, tab.id, true));
+    })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "Could not complete the extension action" }));
+    return true;
+  }
   if (message.type === "NETWORK_CAPTURE") {
     void enqueueTask(() => handleCapture(message.payload, _sender.tab?.id))
       .then(() => sendResponse({ ok: true }))
@@ -1553,19 +1408,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return true;
   }
 
-  if (message.type === "SAVE_KNOWLEDGE_PATH") {
-    void enqueueTask(() => handleSaveKnowledgePath(message.payload.markdownRoot))
-      .then(sendResponse)
-      .catch((error) => {
-        console.error("SaveMyContext knowledge path save failed", error);
-        sendResponse({
-          ok: false,
-          error: error instanceof Error ? error.message : String(error)
-        } satisfies SaveKnowledgePathResponse);
-      });
-    return true;
-  }
-
   if (message.type === "SAVE_SOURCE_CAPTURE") {
     void enqueueTask(() => handleSaveSourceCapture(message.payload))
       .then(sendResponse)
@@ -1620,286 +1462,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return false;
   }
 
-  if (message.type === "START_PROCESSING") {
-    void enqueueTask(() => startProcessingWorker())
-      .then(sendResponse)
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("SaveMyContext processing start failed", error);
-        void setExtensionStatus({
-          processingInProgress: false,
-          processingLastError: message,
-          processingLastRunAt: new Date().toISOString()
-        }).finally(() => {
-          sendResponse({ ok: false, error: message });
-        });
-      });
-    return true;
-  }
-
   return false;
 });
-
-async function runProviderPromptInTab(
-  tabId: number,
-  promptText: string,
-  preferFastMode = false,
-  requireCompleteJson = false
-): Promise<Required<Pick<RunProviderPromptResponse, "responseText" | "pageUrl">> & RunProviderPromptResponse> {
-  const response = await sendMessageToTabWithRetry<RunProviderPromptResponse>(tabId, {
-    type: "RUN_PROVIDER_PROMPT",
-    payload: {
-      promptText,
-      preferFastMode,
-      requireCompleteJson
-    }
-  } satisfies RuntimeMessage);
-
-  if (!response || !response.ok || !response.responseText || !response.pageUrl) {
-    throw new Error(response?.error ?? "The provider tab did not return a response.");
-  }
-
-  return response as Required<Pick<RunProviderPromptResponse, "responseText" | "pageUrl">> & RunProviderPromptResponse;
-}
-
-function isRecoverableProcessingCompletionError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Processing completion failed with 400:/i.test(message);
-}
-
-async function submitProcessingCompletion(
-  settings: ExtensionSettings,
-  taskRefs: Array<{ sessionId: string; taskKey?: string; sourceRevision?: string }>,
-  responseText: string,
-  todoSourceRevision: string | undefined
-): Promise<number> {
-  const sourceRevisions: Record<string, string> = {};
-  for (const task of taskRefs) {
-    if (!task.sourceRevision) {
-      throw new Error("The processing task is missing its source revision. Fetch a new task and retry.");
-    }
-    sourceRevisions[task.sessionId] = task.sourceRevision;
-  }
-  await completeProcessingTask(settings, {
-    sessionIds: taskRefs.map((task) => task.sessionId),
-    responseText,
-    todoSourceRevision,
-    sourceRevisions
-  });
-  return taskRefs.length;
-}
-
-async function completeProcessingTaskWithRecovery(
-  settings: ExtensionSettings,
-  provider: ProviderName,
-  tabId: number,
-  tasks: ProcessingTaskItem[],
-  initialResponseText: string,
-  todoSourceRevision: string | undefined
-): Promise<number> {
-  const taskRefs = tasks.map((task) => ({
-    sessionId: task.session_id,
-    taskKey: task.task_key,
-    sourceRevision: task.source_revision
-  }));
-  let candidate = initialResponseText;
-  let lastError = "The provider did not return valid JSON.";
-
-  for (let attempt = 0; attempt < PROCESSING_REPAIR_ATTEMPTS; attempt += 1) {
-    const normalized = normalizeProcessingResponseJson(candidate, taskRefs);
-    if (normalized.ok) {
-      try {
-        return await submitProcessingCompletion(
-          settings,
-          taskRefs,
-          normalized.jsonText,
-          todoSourceRevision
-        );
-      } catch (error) {
-        if (!isRecoverableProcessingCompletionError(error)) {
-          throw error;
-        }
-        lastError = error instanceof Error ? error.message : String(error);
-      }
-    } else {
-      lastError = normalized.error;
-      if (taskRefs.length > 1) {
-        const partial = normalizePartialProcessingResponseJson(candidate, taskRefs);
-        if (partial.ok && partial.tasks.length < taskRefs.length) {
-          try {
-            return await submitProcessingCompletion(
-              settings,
-              partial.tasks,
-              partial.jsonText,
-              todoSourceRevision
-            );
-          } catch (error) {
-            if (!isRecoverableProcessingCompletionError(error)) {
-              throw error;
-            }
-            lastError = error instanceof Error ? error.message : String(error);
-          }
-        }
-      }
-    }
-
-    if (attempt >= PROCESSING_REPAIR_ATTEMPTS - 1) {
-      throw new Error(lastError);
-    }
-
-    const repaired = await runProviderPromptInTab(
-      tabId,
-      buildProcessingRepairPrompt(candidate, lastError, taskRefs),
-      true,
-      true
-    );
-    if (repaired.provider && repaired.provider !== provider) {
-      throw new Error(
-        `The repair response came from ${repaired.provider} while ${provider} was expected.`
-      );
-    }
-    await saveProcessingWorkerSessionUrl(provider, repaired.pageUrl);
-    candidate = repaired.responseText;
-  }
-
-  throw new Error(lastError);
-}
-
-async function runProcessingWorkerLoop(
-  settings: ExtensionSettings,
-  provider: ProviderName,
-  workerModel: string,
-  tabId: number
-): Promise<void> {
-  let processedCount = 0;
-
-  try {
-    while (true) {
-      const task = await fetchNextProcessingTask(settings);
-      const sessionIds = task.tasks.map((item) => item.session_id);
-      if (!task.available || !task.prompt || !task.tasks.length || !sessionIds.length) {
-        const finalStatus = await fetchProcessingStatus(settings);
-        await setExtensionStatus({
-          processingInProgress: false,
-          processingProvider: provider,
-          processingWorkerModel: workerModel,
-          processingProcessedCount: processedCount,
-          processingPendingCount: finalStatus.pending_count,
-          processingLastError: null,
-          processingLastRunAt: new Date().toISOString()
-        });
-        await closeProcessingWorkerTab();
-        return;
-      }
-
-      const proxyResult = await runProviderPromptInTab(tabId, task.prompt, true, true);
-      if (proxyResult.provider && proxyResult.provider !== provider) {
-        throw new Error(
-          `The processing tab returned a ${proxyResult.provider} response while ${provider} was expected.`
-        );
-      }
-      await saveProcessingWorkerSessionUrl(provider, proxyResult.pageUrl);
-      const completedCount = await completeProcessingTaskWithRecovery(
-        settings,
-        provider,
-        tabId,
-        task.tasks,
-        proxyResult.responseText,
-        task.todo_source_revision
-      );
-
-      processedCount += completedCount;
-      const processingStatus = await fetchProcessingStatus(settings);
-      await setExtensionStatus({
-        processingInProgress: true,
-        processingProvider: provider,
-        processingWorkerModel: workerModel,
-        processingProcessedCount: processedCount,
-        processingPendingCount: processingStatus.pending_count,
-        processingLastError: null,
-        processingLastRunAt: new Date().toISOString()
-      });
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    let pendingCount: number | undefined;
-    try {
-      const processingStatus = await fetchProcessingStatus(settings);
-      pendingCount = processingStatus.pending_count;
-    } catch {
-      pendingCount = undefined;
-    }
-    await setExtensionStatus({
-      processingInProgress: false,
-      processingProvider: provider,
-      processingWorkerModel: workerModel,
-      processingProcessedCount: processedCount,
-      processingPendingCount: pendingCount,
-      processingLastError: message,
-      processingLastRunAt: new Date().toISOString()
-    });
-    await closeProcessingWorkerTab();
-  }
-}
-
-async function startProcessingWorker(): Promise<{ ok: boolean; error?: string }> {
-  const settings = await getSettings();
-  const status = await refreshBackendStatus(false);
-  if (status.backendValidationError) {
-    return { ok: false, error: status.backendValidationError };
-  }
-  if (status.processingInProgress) {
-    return { ok: false, error: "AI processing is already running." };
-  }
-
-  const resolvedSettings = {
-    ...settings,
-    backendUrl: status.backendUrl ?? settings.backendUrl
-  };
-  const processingStatus = await fetchProcessingStatus(resolvedSettings);
-  await setExtensionStatus({
-    processingMode: processingStatus.mode,
-    processingWorkerModel: processingStatus.worker_model,
-    processingPendingCount: processingStatus.pending_count,
-    processingLastError: null
-  });
-
-  if (!processingStatus.enabled) {
-    return { ok: false, error: "Backend-side browser processing is not enabled." };
-  }
-  if (!processingStatus.pending_count) {
-    return { ok: true };
-  }
-  const provider = providerFromWorkerModel(processingStatus.worker_model);
-  if (!provider || !processingStatus.worker_model) {
-    return { ok: false, error: "Backend did not provide a supported browser worker model." };
-  }
-
-  const tabId = await ensureProcessingWorkerTab(provider);
-  await waitForProviderTabReady(tabId, provider);
-  await setExtensionStatus({
-    processingInProgress: true,
-    processingProvider: provider,
-    processingWorkerModel: processingStatus.worker_model,
-    processingPendingCount: processingStatus.pending_count,
-    processingProcessedCount: 0,
-    processingLastError: null
-  });
-
-  try {
-    void runProcessingWorkerLoop(resolvedSettings, provider, processingStatus.worker_model, tabId);
-    return { ok: true };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await setExtensionStatus({
-      processingInProgress: false,
-      processingProvider: provider,
-      processingLastError: `Could not reach the provider tab: ${message}`
-    });
-    await closeProcessingWorkerTab();
-    return { ok: false, error: `Could not reach the provider tab: ${message}` };
-  }
-}
 
 function findMatchingProvider(event: CapturedNetworkEvent) {
   for (const provider of providerRegistry) {
@@ -1947,13 +1511,12 @@ function extractExternalSessionIds(
 
 async function handlePageVisit(
   payload: { provider: ProviderName; pageUrl: string },
-  tabId: number | undefined
+  tabId: number | undefined,
+  explicit = false
 ): Promise<{ triggered: boolean; reason?: string }> {
   clearActiveChatContext(tabId);
-  if (typeof tabId === "number" && tabId === processingWorkerTabId) {
-    return { triggered: false, reason: "processing-worker-tab" };
-  }
   const settings = await getSettings();
+  if (settings.capturePaused) return { triggered: false, reason: "Capture paused" };
   const backendStatus = await refreshBackendStatus(false);
   if (backendStatus.backendValidationError) {
     return { triggered: false, reason: "backend-unavailable" };
@@ -1961,7 +1524,7 @@ async function handlePageVisit(
   if (!settings.enabledProviders[payload.provider]) {
     return { triggered: false, reason: "provider-disabled" };
   }
-  if (!settings.autoSyncHistory) {
+  if (!settings.autoSyncHistory && !explicit) {
     return { triggered: false, reason: "auto-sync-disabled" };
   }
   if (!supportsProactiveHistorySync(payload.provider)) {
@@ -2236,11 +1799,12 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
 }
 
 async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promise<void> {
-  if (typeof tabId === "number" && tabId === processingWorkerTabId) {
-    return;
-  }
 
   const settings = await getSettings();
+  if (settings.capturePaused) {
+    if (event.historySyncRunId) historySyncRunErrors.set(event.historySyncRunId, "Capture paused during import; retry after resuming.");
+    return;
+  }
   const scraper = findMatchingProvider(event);
   if (!scraper || !settings.enabledProviders[scraper.provider]) {
     return;
@@ -2314,7 +1878,7 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
   const backendUrl = settings.backendUrl.replace(/\/$/, "");
   await enqueueCapture(captureOutbox, backendUrl, payload);
   await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
-  await setExtensionStatus({ pendingCaptureCount: (await captureOutbox.list()).length });
+  await setExtensionStatus({ pendingCaptureCount: await captureOutbox.count() });
   void flushCaptureOutbox();
 }
 
@@ -2327,9 +1891,16 @@ function flushCaptureOutbox(): Promise<void> {
 
 async function deliverCaptureOutbox(): Promise<void> {
   const settings = await getSettings();
+  if (settings.capturePaused) return;
   const backendUrl = settings.backendUrl.replace(/\/$/, "");
   try {
     await drainCaptures(captureOutbox, backendUrl, async ({ payload }) => {
+      // Recheck between deliveries: pause, destination, token, and account filters
+      // can change while a long import is draining. An in-flight request may finish.
+      const settings = await getSettings();
+      if (settings.capturePaused || settings.backendUrl.replace(/\/$/, "") !== backendUrl) {
+        throw new Error("Capture delivery paused; queued evidence retained locally.");
+      }
       const snapshot: NormalizedSessionSnapshot = {
         provider: payload.provider, externalSessionId: payload.external_session_id,
         accountKey: payload.account_key, accountLabel: payload.account_label,
@@ -2385,10 +1956,14 @@ async function deliverCaptureOutbox(): Promise<void> {
     }
     await setExtensionStatus({ backendUrl, lastError: message });
   }
-  await setExtensionStatus({ pendingCaptureCount: (await captureOutbox.list()).length });
+  await setExtensionStatus({ pendingCaptureCount: await captureOutbox.count() });
 }
 
 async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<SaveSettingsResponse> {
+  if (update.workspaceUrl !== undefined) {
+    try { update.workspaceUrl = validateWorkspaceUrl(update.workspaceUrl); }
+    catch { return { ok: false, error: "Workspace URL must be HTTPS or local HTTP, without credentials, query, or fragment." }; }
+  }
   const currentSettings = await getSettings();
   const candidateSettings: ExtensionSettings = {
     ...currentSettings,
@@ -2409,13 +1984,6 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
 
   try {
     const { normalizedUrl, capabilities } = await validateBackendConfiguration(candidateSettings);
-    const processing = await fetchProcessingStatus(
-      {
-        ...candidateSettings,
-        backendUrl: normalizedUrl
-      },
-      capabilities
-    );
     const saved = await saveSettings({
       ...update,
       backendUrl: normalizedUrl
@@ -2438,10 +2006,6 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendValidationError: null,
       backendMarkdownRoot: capabilities.storage.markdown_root ?? undefined,
       backendVaultRoot: capabilities.storage.vault_root ?? undefined,
-      processingMode: processing.mode,
-      processingWorkerModel: processing.worker_model,
-      processingPendingCount: processing.pending_count,
-      processingLastError: null
     });
     return {
       ok: true,
@@ -2457,9 +2021,6 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendValidationError: message,
       backendMarkdownRoot: undefined,
       backendVaultRoot: undefined,
-      processingPendingCount: undefined,
-      processingMode: undefined,
-      processingWorkerModel: undefined
     });
     return {
       ok: false,
@@ -2488,43 +2049,4 @@ async function handleSaveConnectionBundle(payload: {
     ...response,
     redeemed
   };
-}
-
-async function handleSaveKnowledgePath(markdownRoot: string): Promise<SaveKnowledgePathResponse> {
-  const nextPath = markdownRoot.trim();
-  if (!nextPath) {
-    return {
-      ok: false,
-      error: "Enter an absolute knowledge storage path."
-    };
-  }
-
-  const settings = await getSettings();
-  const status = await refreshBackendStatus(false);
-  if (status.backendValidationError) {
-    return {
-      ok: false,
-      error: status.backendValidationError
-    };
-  }
-
-  try {
-    const storage = await updateKnowledgeStoragePath(
-      {
-        ...settings,
-        backendUrl: status.backendUrl ?? settings.backendUrl
-      },
-      nextPath
-    );
-    await refreshBackendStatus(true);
-    return {
-      ok: true,
-      storage
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
 }

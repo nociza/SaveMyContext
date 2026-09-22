@@ -13,8 +13,7 @@ describe("extension manifest", () => {
       "https://chatgpt.com/*",
       "https://chat.openai.com/*",
       "https://gemini.google.com/*",
-      "https://grok.com/*",
-      "https://claude.ai/*"
+      "https://grok.com/*"
     ]);
   });
 

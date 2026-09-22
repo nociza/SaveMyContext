@@ -1,4 +1,3 @@
-@import "@fontsource-variable/inter";
 
 :root {
   color-scheme: light;
@@ -17,7 +16,7 @@
   --warn-soft: rgba(176, 133, 44, 0.12);
   --danger: #b04a35;
   --danger-soft: rgba(176, 74, 53, 0.1);
-  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-family: var(--font-sans);
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;

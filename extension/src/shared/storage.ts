@@ -1,20 +1,20 @@
-import type {
-  BackendCapabilities,
-  BrowserProviderName,
-  ProviderName,
-  ExtensionSettings,
-  ProviderHistorySyncState,
-  SessionSyncState,
-  SyncStatus
-} from "./types";
-import {
-  normalizeProviderRefreshIntervalMinutes,
-  PROVIDER_REFRESH_DEFAULT_INTERVAL_MINUTES
-} from "./provider-refresh";
 import {
   DEFAULT_PAGE_SURFACE_SCOPE,
   normalizePageSurfaceScope
 } from "./page-surfaces";
+import {
+  normalizeProviderRefreshIntervalMinutes,
+  PROVIDER_REFRESH_DEFAULT_INTERVAL_MINUTES
+} from "./provider-refresh";
+import type {
+  BackendCapabilities,
+  BrowserProviderName,
+  ExtensionSettings,
+  ProviderHistorySyncState,
+  ProviderName,
+  SessionSyncState,
+  SyncStatus
+} from "./types";
 
 const SETTINGS_KEY = "savemycontext.settings";
 const SECRET_SETTINGS_KEY = "savemycontext.settings.secrets";
@@ -22,7 +22,6 @@ const SETTINGS_CACHE_KEY = "savemycontext.settings.cache";
 const SYNC_STATE_KEY = "savemycontext.sync-state";
 const STATUS_KEY = "savemycontext.status";
 const HISTORY_SYNC_KEY = "savemycontext.history-sync";
-const PROCESSING_WORKER_KEY = "savemycontext.processing-worker";
 const INSTALLATION_ID_KEY = "savemycontext.installation-id";
 
 const storageWrites = new Map<string, Promise<void>>();
@@ -39,6 +38,8 @@ async function lockedStorage<T>(key: string, operation: () => Promise<T>): Promi
 }
 
 export const defaultSettings: ExtensionSettings = {
+  workspaceUrl: "",
+  capturePaused: false,
   backendUrl: "http://127.0.0.1:18888",
   backendToken: "",
   enabledProviders: {
@@ -46,14 +47,14 @@ export const defaultSettings: ExtensionSettings = {
     gemini: true,
     grok: true
   },
-  autoSyncHistory: true,
+  autoSyncHistory: false,
   scheduledProviderRefreshEnabled: false,
   scheduledProviderRefreshIntervalMinutes: PROVIDER_REFRESH_DEFAULT_INTERVAL_MINUTES,
   indexingMode: "all",
-  triggerWords: ["lorem"],
+  triggerWords: [],
   blacklistWords: [],
-  discardWordsEnabled: true,
-  discardWords: ["loom"],
+  discardWordsEnabled: false,
+  discardWords: [],
   selectionCaptureEnabled: false,
   contextSuggestionsEnabled: false,
   contextSuggestionsFloatingButtonEnabled: true,
@@ -68,6 +69,8 @@ function mergeSettings(
 ): ExtensionSettings {
   return {
     backendUrl: current.backendUrl ?? defaultSettings.backendUrl,
+    workspaceUrl: current.workspaceUrl ?? "",
+    capturePaused: current.capturePaused ?? false,
     backendToken: secrets.backendToken ?? defaultSettings.backendToken,
     enabledProviders: {
       ...defaultSettings.enabledProviders,
@@ -126,6 +129,8 @@ function shouldPersistSettings(current: Partial<ExtensionSettings>): boolean {
 
 function publicSettings(settings: ExtensionSettings | Partial<ExtensionSettings>) {
   return {
+    workspaceUrl: settings.workspaceUrl ?? "",
+    capturePaused: settings.capturePaused ?? false,
     backendUrl: settings.backendUrl ?? defaultSettings.backendUrl,
     enabledProviders: {
       ...defaultSettings.enabledProviders,
@@ -189,8 +194,14 @@ export async function getSettings(): Promise<ExtensionSettings> {
 }
 
 export async function saveSettings(update: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
+  return lockedStorage(SETTINGS_KEY, () => saveSettingsUnlocked(update));
+}
+
+async function saveSettingsUnlocked(update: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
   const current = await getSettings();
   const next: ExtensionSettings = {
+    workspaceUrl: update.workspaceUrl ?? current.workspaceUrl ?? "",
+    capturePaused: update.capturePaused ?? current.capturePaused ?? false,
     backendUrl: update.backendUrl ?? current.backendUrl,
     backendToken: update.backendToken ?? current.backendToken,
     enabledProviders: {
@@ -326,28 +337,4 @@ export async function saveProviderHistorySyncState(
 
 export async function clearProviderHistorySyncStates(): Promise<void> {
   await lockedStorage(HISTORY_SYNC_KEY, () => chrome.storage.local.set({ [HISTORY_SYNC_KEY]: {} }));
-}
-
-export async function getProcessingWorkerSessionUrl(provider: ProviderName): Promise<string | undefined> {
-  const stored = await chrome.storage.local.get(PROCESSING_WORKER_KEY);
-  const state = (stored[PROCESSING_WORKER_KEY] ?? {}) as {
-    sessionUrls?: Partial<Record<ProviderName, string>>;
-  };
-  const value = state.sessionUrls?.[provider]?.trim();
-  return value || undefined;
-}
-
-export async function saveProcessingWorkerSessionUrl(provider: ProviderName, sessionUrl: string): Promise<void> {
-  const stored = await chrome.storage.local.get(PROCESSING_WORKER_KEY);
-  const state = (stored[PROCESSING_WORKER_KEY] ?? {}) as {
-    sessionUrls?: Partial<Record<ProviderName, string>>;
-  };
-  await chrome.storage.local.set({
-    [PROCESSING_WORKER_KEY]: {
-      sessionUrls: {
-        ...(state.sessionUrls ?? {}),
-        [provider]: sessionUrl
-      }
-    }
-  });
 }

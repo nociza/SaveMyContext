@@ -10,8 +10,11 @@ The `docs/` folder is intentionally user-facing. If you contribute to SaveMyCont
 
 Understand the two main parts of the project:
 
-- `backend/`: FastAPI service, storage, processing, and vault generation
-- `extension/`: Chrome extension for capture, search, dashboard, and settings
+- `backend/`: FastAPI service, SQLite ledger, shared workspace, optional processing, and agent client
+- `extension/`: lightweight capture, reliable delivery, optional quick search, settings, and workspace launcher
+
+There is no selected project license yet. Resolve licensing before treating this
+as a generally reusable open-source release; public visibility alone is insufficient.
 
 ## Local setup
 
@@ -31,6 +34,7 @@ pnpm install
 pnpm test
 pnpm typecheck
 pnpm build
+pnpm check:bundle
 pnpm test:e2e
 ```
 
@@ -46,9 +50,16 @@ pnpm test:e2e
 - provider capture reliability
 - vault readability
 - search quality
-- graph quality
+- source attribution and review quality
 - onboarding and installation polish
 - docs clarity
+
+Keep provider fixtures sanitized: no real conversations, account identifiers, tokens,
+or browser profiles. Capture changes need parser and browser regression tests,
+including drift, retries, and project membership. UI work belongs in the shared
+workspace instead of a second extension-specific app. Do not restore browser-based
+model workers. Hostnames, NAS layouts, and private deployment instructions belong
+in the deployment repository, not the portable product.
 
 ## When you change user-facing behavior
 

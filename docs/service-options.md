@@ -1,67 +1,24 @@
 ---
-title: Service Options
-description: Use the self-hosted backend today and understand the managed-service roadmap.
+title: Deployment Options
 ---
 
-# Service Options
+# Deployment Options
 
-SaveMyContext is designed around one extension API and two deployment paths. The self-hosted backend is available
-today. The hosted path is an architectural roadmap and control-plane preview, not an operating managed data plane.
+The supported product is the self-hosted core plus its capture extension and
+shared workspace. There is no operating managed hosting service.
 
-## Managed Backend Roadmap
+Start locally using [Getting Started](getting-started.md), or run the same API
+on a private server. Use HTTPS, scoped per-client credentials, encrypted backups,
+and a restore test before storing important data remotely.
 
-The intended hosted path is for users who want SaveMyContext to provide and operate the backend.
+An existing private dashboard can host the shared workspace behind its own
+authentication boundary. Set the extension's optional Workspace URL to that page.
+The API and UI addresses need not be the same, and the extension never places API
+credentials in dashboard links.
 
-This path should handle:
+Keep deployment-specific hosts, tunnels, secrets, backup destinations, and release
+automation in your own deployment repository. A public installation must not need
+the maintainer's lab infrastructure.
 
-- account creation and sign-in
-- paid plan management
-- hosted database and storage
-- production monitoring and backups
-- connection strings or tokens that the extension can use directly
-- operational limits that protect the service from abuse
-
-The extension should not need a separate hosted implementation. It should connect to the hosted backend through the same public SaveMyContext API contract that self-hosted users use.
-
-The current cloud workspace does not yet provision Railway resources, persistent storage, secrets, backups, or
-extension-compatible connection strings. Its customer signup, plan-change, key-creation, and instance-plan mutations
-therefore fail closed on production-like deployments.
-
-## Self-Hosted Backend
-
-The self-hosted path is available today through the `savemycontext` package.
-
-```bash
-uv tool install savemycontext
-smc install
-```
-
-For a backend that other devices can reach:
-
-```bash
-smc install --remote
-```
-
-Remote mode prints a connection string that starts with `smc_conn_1_`. Paste that string into the extension settings to enroll the browser profile.
-
-## Shared Product Contract
-
-The hosted service and the self-hosted package should share the same core implementation wherever possible:
-
-- ingestion routes
-- token scopes
-- connection bundle redemption
-- pile classification
-- processing pipeline behavior
-- search, graph, dashboard, and vault output contracts
-- extension compatibility checks
-
-Hosted-only code should stay focused on account management, billing, deployment, tenancy, observability, and infrastructure. Product behavior should live in the open backend first so the hosted service and self-hosted users do not drift.
-
-## What To Read Next
-
-- [Architecture and Production Roadmap](architecture.md)
-- [Getting Started](getting-started.md)
-- [Remote Access](remote-access.md)
-- [Security and Access](security-and-access.md)
-- [Vault and Storage](vault-and-storage.md)
+Legacy hosted-control-plane experiments are not part of the supported onboarding
+path. This release does not provision paid accounts, cloud infrastructure, or billing.

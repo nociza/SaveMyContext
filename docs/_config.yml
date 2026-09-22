@@ -10,13 +10,13 @@ nav:
     url: /
   - title: Get Started
     url: /getting-started/
-  - title: Service Options
+  - title: Deployment
     url: /service-options/
   - title: Remote Access
     url: /remote-access/
   - title: Security
     url: /security-and-access/
-  - title: Docs
+  - title: Usage
     url: /using-save-my-context/
 
 defaults:

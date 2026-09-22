@@ -4,168 +4,71 @@ title: Getting Started
 
 # Getting Started
 
-This is the shortest path to a working SaveMyContext setup, with clear expectations for what happens after you install it.
+Build from this repository to get the current capture companion and shared workspace.
+Python 3.12+, uv, Node.js, pnpm, and a Chromium browser are needed.
 
-## What you need
+## 1. Start the private backend
 
-- `uv` for the backend install
-- Chrome or another Chromium browser
-- `pnpm` to build the extension bundle
-- An OpenAI-compatible key or Google AI key if you want richer AI summaries and graph extraction
-
-SaveMyContext still works without an AI key, but it falls back to simpler heuristics.
-
-## 1. Pick your setup
-
-### One machine only
-
-If you just want the backend on the machine you are using right now:
-
-```bash
-uv tool install savemycontext
-smc install
+```sh
+git clone https://github.com/nociza/SaveMyContext.git
+cd SaveMyContext/backend
+uv sync --frozen
+uv run uvicorn app.main:app --host 127.0.0.1 --port 18888
 ```
 
-### One host for all of your devices
+Open `http://127.0.0.1:18888/workspace`. Runtime data stays in the ignored
+`backend/data/` directory. No model key is required. External interpretation is
+off by default; capture does not infer commitments from arbitrary conversation text.
 
-If this machine should serve your laptop, phone, tablet, or other Chrome profiles too:
+Loopback bootstrap works only before an application token exists. For a remote
+backend, use HTTPS, private access controls, and a scoped token. Do not expose an
+unauthenticated service. See [security](security-and-access.md).
 
-```bash
-uv tool install savemycontext
-smc install --remote
+## 2. Build the extension
+
+In another terminal:
+
+```sh
+cd SaveMyContext/extension
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
-That installs SaveMyContext as a user service, starts it in the background, enables managed remote access, and prints the first connection string.
+Open your browser's extensions page, enable Developer mode, and load
+`extension/dist` as an unpacked extension. After rebuilding an existing installation,
+click Reload on its extension card.
 
-The package name is still `savemycontext`; it installs the `smc` command.
+## 3. Connect
 
-Useful checks:
+Open extension Settings. Enter the backend URL and scoped token, or use an existing
+connection bundle. The default URL matches the backend command above.
 
-```bash
-smc status
-smc logs -f
-smc config path
-```
+Capture and quick search require `ingest` and `read`. Editing through the built-in
+workspace also requires `workspace:write`; a capture-only token cannot edit tasks.
+Tokens are kept in local browser storage and are never added to workspace links.
 
-If you do not want a background service yet, run it in the foreground:
+Optionally set **Workspace URL** to your authenticated dashboard page. Leave it
+blank to use the bundled instance of the same shared workspace component.
+Remote backends request only their required host permission when you connect.
 
-```bash
-smc config init
-smc run
-```
+## 4. Capture and import
 
-The default local backend URL is:
+Visit a supported AI conversation while signed in. Supported response traffic
+is captured as you work. To import older conversations, open the popup from that
+provider tab and choose **Import history**, then confirm.
 
-```text
-http://127.0.0.1:18888
-```
+New installations do not automatically import all history. Existing installations
+keep their previous setting. Optional automatic/scheduled imports and capture
+filters remain in Settings.
 
-## 2. Add an AI provider to the backend
+Pause stops new saves and queued delivery; it does not erase existing evidence.
+An already-sent request may finish. Activity while paused is not captured; import
+history after resuming if you need to recover it.
 
-SaveMyContext still captures and stores everything without an AI key. Add one if you want cleaner summaries, better classification, and richer graph extraction.
+## Upgrading from the old extension
 
-A simple OpenAI-compatible setup looks like this:
+The old dashboard, pile, note, and prompt URLs redirect to the shared workspace.
+The extension no longer runs AI prompts in provider tabs or changes backend
+storage paths. No database migration or deletion is required for this update.
 
-```bash
-smc config set \
-  --openai-api-key YOUR_KEY \
-  --openai-base-url https://openrouter.ai/api/v1 \
-  --openai-model openai/gpt-4.1-mini
-```
-
-You can also use a Google key:
-
-```bash
-smc config set --google-api-key YOUR_KEY
-```
-
-## 3. Build and load the extension
-
-The extension is currently loaded unpacked.
-
-```bash
-cd extension
-pnpm install
-pnpm run dev
-```
-
-Then open `chrome://extensions`, enable Developer Mode, and load `extension/dist`.
-
-## 4. Connect the extension to the backend
-
-Open the SaveMyContext settings page from the extension.
-
-### Fast remote setup
-
-If you ran `smc install --remote`, you already have the first connection string. Paste that `smc_conn_1_...` value into the extension's `Connection string` field.
-
-If you want to mint another reusable string later:
-
-```bash
-smc share
-```
-
-If you do not pass `--username`, the CLI automatically manages the local owner account used for issued device tokens.
-
-For stronger policies, create per-device bundles instead:
-
-```bash
-smc invite --device laptop
-smc invite --security per_device_code --device work-laptop
-```
-
-### Manual setup
-
-You can also enter the backend URL and token directly if you do not want to use connection strings.
-
-- Local backend: `http://127.0.0.1:18888`
-- Remote backend: `https://your-domain`
-
-If your backend already uses app-token auth, create a token and paste it into the extension settings:
-
-```bash
-smc init-admin --username admin
-smc token create --name chrome-extension --scope ingest --scope read
-```
-
-The extension validates the backend before saving the settings. It checks:
-
-- that the server is actually SaveMyContext
-- that the extension version is compatible
-- that remote URLs use `https://`
-- that the token is valid
-- that the token includes `ingest` and `read`
-
-## 5. Turn on the features you want
-
-In the extension settings you can control:
-
-- `Auto Sync History`
-- enabled providers: ChatGPT, Gemini, and Grok
-- indexing mode: index everything or require trigger words
-- blacklist words
-- selection capture
-
-## 6. Trigger the first sync
-
-Visit ChatGPT, Gemini, or Grok while signed in. When `Auto Sync History` is enabled, SaveMyContext will:
-
-1. read available conversation history from the provider site
-2. sync the conversations to the backend
-3. classify each conversation
-4. write Markdown notes and related source files
-5. update the graph and dashboards
-
-Open the extension popup and then `Dashboard` to confirm that sessions, messages, and graph data are appearing.
-
-Three concrete first-run checks:
-
-- ask ChatGPT to help with research and confirm the session appears in `factual`
-- use Gemini for a journal-style reflection and confirm it lands in `journal`
-- ask the model to update a shared task list and confirm `To-Do List.md` changes
-
-## Read next
-
-- [Using SaveMyContext](using-save-my-context.md)
-- [Vault and Storage](vault-and-storage.md)
-- [Troubleshooting](troubleshooting.md)
+[Using SaveMyContext](using-save-my-context.md) · [Troubleshooting](troubleshooting.md)

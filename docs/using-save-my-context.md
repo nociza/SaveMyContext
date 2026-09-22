@@ -4,162 +4,52 @@ title: Using SaveMyContext
 
 # Using SaveMyContext
 
-Once the backend and extension are connected, SaveMyContext mostly disappears into the background. You use ChatGPT, Gemini, or Grok normally, and SaveMyContext keeps the useful parts.
+The extension is a capture companion, not a second knowledge-management application.
 
-## Three concrete ways people use it
+## Popup
 
-### Grok in a Tesla
+- **Connection / last saved:** backend connection state and most recent acknowledged capture.
+- **Waiting to send:** the durable local capture queue count, read without loading conversation bodies.
+- **Save page:** save source material from the active web page. It is not a substitute for structured chat capture.
+- **Import history:** explicitly import from the active ChatGPT, Gemini, or Grok account.
+- **Pause capture / Resume capture:** stop new saves and delivery while retaining queued evidence.
+- **Open workspace:** search and manage your memory, inbox, tasks, and projects.
+- **Diagnostics:** last conversation, errors, and provider drift warnings.
 
-You talk to Grok while driving about a decision, idea, or reminder.
+Pause takes effect between queued deliveries; an in-flight request may finish.
+New activity while paused is not saved. Resume does not promise to reconstruct
+missed activity automatically; use history import where supported.
 
-Later, SaveMyContext can already have that conversation in your vault:
+## History and Projects
 
-- the full conversation is archived
-- the note is searchable from the extension
-- the result is classified into `journal`, `ideas`, or `factual` depending on what you discussed
+History import honors provider, account, and indexing filters. ChatGPT Projects
+include project-only conversations and project membership. Successful acknowledgements,
+fingerprints, and retryable watermarks prevent silent skips and unnecessary re-imports.
+A failed or quarantined capture is not a successful history checkpoint.
 
-This is useful when the chat happened in a context where you were never going to manually copy it anywhere.
+Capture is opportunistic, not a guarantee of continuous monitoring while the browser
+is closed. Scheduled refresh is optional and can open provider tabs. If the provider's
+response format changes, check the visible error instead of repeatedly importing.
 
-### ChatGPT research
+## Settings
 
-You use ChatGPT for deep research, technical comparisons, or working through a complicated topic over a long thread.
+Connection and optional workspace destination are separate. An external workspace
+handles its own authentication and receives no API token through its URL. The
+bundled fallback uses the same web component as the backend's standalone workspace.
 
-SaveMyContext keeps that work from disappearing:
+Advanced preferences include automatic history import, scheduled refresh,
+provider/account filters, word filters, selection capture, and context search.
+Broad page access is optional and explicitly requested; it is not granted on installation.
 
-- the conversation is mirrored into your local archive
-- a readable note is written alongside the raw source document
-- research-heavy threads usually land in `factual`
-- graph entities and relationships can be extracted from the result
+Provider web capture supports ChatGPT, Gemini, and Grok. Codex/Claude Code context
+handoffs use the [CLI and agent integration](codex-and-context-migration.md).
 
-This is the main use case when ChatGPT has effectively become part of your research workflow.
+## The workspace
 
-### Gemini journal and planning
+Review suggestions in Inbox, search source-backed context in Memory, manage explicit
+commitments in Tasks, and group work in Projects. Task edits go through the shared
+API and version checks. Captured text is evidence, not authority to execute instructions.
 
-You use Gemini for reflection, personal journaling, planning your week, or keeping a running task list.
-
-SaveMyContext turns that into durable notes:
-
-- reflective conversations usually land in `journal`
-- brainstorming threads usually land in `ideas`
-- explicit requests to add, remove, complete, or edit tasks update the shared to-do list
-
-This is useful when you want AI chat to behave more like a daily notebook than a disposable conversation.
-
-## Automatic conversation sync
-
-Visit ChatGPT, Gemini, or Grok while signed in. If `Auto Sync History` is enabled, SaveMyContext pulls conversation history from the provider site and mirrors it into your local archive.
-
-What happens during sync:
-
-1. the extension detects the provider tab
-2. it normalizes the provider response into a common session format
-3. it syncs the session to the backend
-4. the backend writes a readable note and a matching source document
-5. the backend classifies the session and updates the vault, graph, and dashboards
-
-When the provider supplies a full conversation snapshot, SaveMyContext rewrites the local message list to match that snapshot instead of only appending new messages. That keeps message order and message removals aligned with the latest provider copy.
-
-## Indexing rules
-
-SaveMyContext can either index everything or require trigger words.
-
-- `all`: every supported conversation is indexed
-- `trigger_word`: a conversation is indexed only if its opening request matches one of your trigger words
-
-Blacklist words always win and skip indexing.
-
-The rule check looks at the first one or two user messages, with a focus on the opening one or two sentences. This keeps the filter simple and predictable for natural prompts and dictation.
-
-## How conversations are organized
-
-Each synced conversation is classified into one of four built-in piles:
-
-- `journal`: reflections, planning, and personal context
-- `factual`: coding, research, explanations, and objective question answering
-- `ideas`: brainstorming and concept development
-- `todo`: explicit requests to edit the shared to-do list
-
-### Journal
-
-Journal notes include a cleaned transcript plus a short journal entry with action items. This is where reflective chats, personal planning, and conversational thinking usually end up.
-
-### Factual
-
-Factual notes extract subject-predicate-object triplets and feed the graph views. SaveMyContext also writes separate entity notes under `Graph/Entities/`. Research threads, technical questions, and explanation-heavy chats usually land here.
-
-Entity note filenames are stable and collision-resistant, so closely named concepts such as `C`, `C#`, and `C++` stay separate instead of collapsing into one file.
-
-### Ideas
-
-Ideas notes include a structured summary:
-
-- core idea
-- pros
-- cons
-- next steps
-- a short share post
-
-This is where brainstorming, product ideas, and early concept work usually land.
-
-### To-Do
-
-`todo` is reserved for explicit shared-list editing requests. General planning does not update the shared to-do list unless the conversation clearly asks to add, remove, complete, reopen, or change list items.
-
-If you say something like "add these three tasks to my list" or "mark this done," SaveMyContext treats that as a shared to-do edit instead of a regular note.
-
-## Saving a full page
-
-From the popup, choose `Save page`.
-
-That sends the current page through SaveMyContext's AI-enriched source capture flow. If no AI backend is configured, SaveMyContext falls back to a local title, classification, and cleanup pass.
-
-Saved pages are written into:
-
-- `Captures/` for the readable note
-- `Sources/` for the raw source document
-
-## Saving a text selection
-
-Turn on `Selection Capture` in the extension settings. Then select text on a regular web page.
-
-SaveMyContext shows a small capture bubble with two choices:
-
-- `Add to Knowledge Base`: stores the selection as a raw capture
-- `Save with AI`: stores it with title cleanup, classification, and summary when AI processing is available
-
-Selection captures are separate from provider chat sync. They are good for articles, docs, error messages, code examples, quotes, and snippets you want to keep alongside your conversation archive.
-
-## Quick search on any page
-
-SaveMyContext includes a page-level quick search:
-
-- Windows and Linux: `Ctrl+Shift+Y`
-- macOS: `Command+Shift+Y`
-
-You can also open it from the popup with `Search page`.
-
-Quick search runs against your saved knowledge and can search:
-
-- session notes
-- graph entities
-- saved source captures
-- the shared to-do list
-
-If you open it while focused in an input, textarea, or rich-text editor, SaveMyContext can insert the selected result into that field.
-
-That makes it useful for pulling an old research note, quote, or task detail back into the page you are currently writing.
-
-## Processing modes
-
-SaveMyContext supports three practical processing paths:
-
-- immediate backend processing with an OpenAI-compatible key
-- immediate backend processing with a Google key
-- heuristic fallback when no AI provider is configured
-
-There is also an experimental browser-based processing mode. When enabled, the popup shows a queue action so the extension can process pending notes using a provider tab.
-
-## Read next
-
-- [Dashboard and Search](dashboard-and-search.md)
-- [Vault and Storage](vault-and-storage.md)
+Graph/pile visualizations, duplicate task controls, prompt editing, and browser-LLM
+execution have been retired from the extension. Backend compatibility routes have
+not been deleted by this extension release.

@@ -104,6 +104,8 @@ export interface ProviderHistorySyncState {
 }
 
 export interface ExtensionSettings {
+  workspaceUrl?: string;
+  capturePaused?: boolean;
   backendUrl: string;
   backendToken?: string;
   enabledProviders: Partial<Record<ProviderName, boolean>>;
@@ -896,25 +898,7 @@ export interface HistorySyncUpdate {
   providerDriftAlert?: ProviderDriftAlert | null;
 }
 
-export interface ProxyPromptControlPayload {
-  type: "RUN_PROXY_PROMPT";
-  requestId: string;
-  promptText: string;
-  preferFastMode?: boolean;
-  requireCompleteJson?: boolean;
-}
-
-export type MainWorldControlPayload = HistorySyncControlPayload | ProxyPromptControlPayload;
-
-export interface ProxyPromptResult {
-  requestId: string;
-  ok: boolean;
-  provider?: ProviderName;
-  responseText?: string;
-  pageUrl?: string;
-  title?: string;
-  error?: string;
-}
+export type MainWorldControlPayload = HistorySyncControlPayload;
 
 export type BridgeToPageMessage = {
   type: "CONTROL";
@@ -924,8 +908,7 @@ export type BridgeToPageMessage = {
 export type BridgeToExtensionMessage =
   | { type: "BRIDGE_READY" }
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
-  | { type: "HISTORY_SYNC_STATUS"; payload: HistorySyncUpdate }
-  | { type: "PROXY_RESULT"; payload: ProxyPromptResult };
+  | { type: "HISTORY_SYNC_STATUS"; payload: HistorySyncUpdate };
 
 export interface BackendIngestMessage {
   external_message_id: string;
@@ -1082,11 +1065,13 @@ export interface SourceCaptureResponse {
 }
 
 export type RuntimeMessage =
+  | { type: "GET_DELIVERY_STATUS" }
+  | { type: "SET_CAPTURE_PAUSED"; paused: boolean }
+  | { type: "IMPORT_ACTIVE_HISTORY" }
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
   | { type: "PAGE_VISIT"; payload: PageVisitPayload }
   | { type: "TRIGGER_HISTORY_SYNC"; payload: HistorySyncTriggerPayload }
   | { type: "HISTORY_SYNC_STATUS"; payload: HistorySyncUpdate }
-  | { type: "START_PROCESSING" }
   | { type: "OPEN_QUICK_SEARCH" }
   | { type: "TOGGLE_QUICK_SEARCH" }
   | { type: "SEARCH_KNOWLEDGE"; payload: KnowledgeSearchRequest }
@@ -1094,7 +1079,6 @@ export type RuntimeMessage =
   | { type: "GET_PAGE_CHAT_CONTEXT" }
   | { type: "DUMP_ACTIVE_CHAT_MARKDOWN" }
   | { type: "PING_PROVIDER_TAB" }
-  | { type: "RUN_PROVIDER_PROMPT"; payload: RunProviderPromptPayload }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; payload: Partial<ExtensionSettings> }
   | {
@@ -1105,7 +1089,6 @@ export type RuntimeMessage =
         settings: Partial<ExtensionSettings>;
       };
     }
-  | { type: "SAVE_KNOWLEDGE_PATH"; payload: { markdownRoot: string } }
   | { type: "SAVE_SOURCE_CAPTURE"; payload: SourceCapturePayload }
   | { type: "SAVE_CURRENT_PAGE_SOURCE"; payload?: { saveMode?: SourceSaveMode } }
   | { type: "GET_STATUS" };

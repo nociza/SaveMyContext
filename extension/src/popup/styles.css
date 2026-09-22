@@ -1,0 +1,19 @@
+:root { font: 14px/1.5 system-ui, sans-serif; color: #26352f; background: #f8faf8; color-scheme: light dark; }
+body { width: 340px; margin: 0; padding: 20px; box-sizing: border-box; }
+header { display: flex; align-items: center; justify-content: space-between; }
+h1 { font-size: 19px; letter-spacing: -.5px; margin: 0; }
+h2 { font-size: 13px; margin: 0; }
+p { margin: 8px 0; }
+#connection { font-weight: 600; }
+.muted, dt { color: #64756c; }
+dl { border-top: 1px solid #dce4df; padding-top: 12px; font-size: 12px; }
+dt { margin-top: 6px; } dd { margin: 0; overflow-wrap: anywhere; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+button { font: inherit; border: 1px solid #cbd7ce; border-radius: 8px; padding: 9px; background: #fff; color: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible { outline: 2px solid #287450; outline-offset: 2px; }
+#open-dashboard { width: 100%; margin-top: 8px; background: #265b43; color: white; border-color: #265b43; }
+#settings { font-size: 12px; padding: 5px 8px; }
+#action-status { font-size: 12px; }
+#provider-drift-card { padding: 10px; border: 1px solid #c69956; border-radius: 8px; }
+@media (prefers-color-scheme: dark) { :root { background: #17251e; color: #e3ece6; } button { background: #23362b; border-color: #4a5c50; } .muted, dt { color: #b2c2b7; } }

@@ -1,6 +1,6 @@
-import type { BackendIngestPayload, ExtensionSettings } from "../shared/types";
 import { providerRegistry } from "../providers/registry";
 import { evaluateIndexingRules } from "../shared/indexing-rules";
+import type { BackendIngestPayload,ExtensionSettings } from "../shared/types";
 
 export const OUTBOX_ALARM = "smc-capture-outbox-v1";
 const MAX_BYTES = 128 * 1024 * 1024;
@@ -68,6 +68,9 @@ export class IndexedCaptureStore implements CaptureStore {
   }
   async put(item: PendingCapture): Promise<void> {
     await this.transaction("readwrite", (store) => store.put(item));
+  }
+  async count(): Promise<number> {
+    return this.transaction("readonly", (store) => store.count());
   }
   async remove(id: string): Promise<void> {
     await this.transaction("readwrite", (store) => store.delete(id));

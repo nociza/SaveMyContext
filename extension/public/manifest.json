@@ -1,19 +1,28 @@
 {
   "manifest_version": 3,
   "name": "SaveMyContext",
-  "version": "0.3.0",
-  "description": "Capture AI chat deltas from supported providers and sync them to a local SaveMyContext backend.",
-  "permissions": ["storage", "tabs", "scripting", "activeTab", "alarms", "clipboardWrite"],
+  "version": "0.4.0",
+  "description": "Capture AI conversations into your private workspace. Durable delivery, explicit history import, and ChatGPT Projects support.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "alarms",
+    "clipboardWrite"
+  ],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
-    "https://claude.ai/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
-  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
   "background": {
     "service_worker": "assets/background.js",
     "type": "module"
@@ -30,10 +39,11 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
-        "https://grok.com/*",
-        "https://claude.ai/*"
+        "https://grok.com/*"
       ],
-      "js": ["assets/content.js"],
+      "js": [
+        "assets/content.js"
+      ],
       "run_at": "document_start"
     },
     {
@@ -41,10 +51,11 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
-        "https://grok.com/*",
-        "https://claude.ai/*"
+        "https://grok.com/*"
       ],
-      "js": ["assets/injected.js"],
+      "js": [
+        "assets/injected.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     }

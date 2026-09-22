@@ -149,20 +149,22 @@ describe("storage", () => {
     expect(sync.set).toHaveBeenCalledTimes(1);
     expect(sync.set).toHaveBeenCalledWith({
       "savemycontext.settings": {
+        workspaceUrl: "",
+        capturePaused: false,
         backendUrl: "http://127.0.0.1:9000",
         enabledProviders: {
           chatgpt: true,
           gemini: true,
           grok: true
         },
-        autoSyncHistory: true,
+        autoSyncHistory: false,
         scheduledProviderRefreshEnabled: false,
         scheduledProviderRefreshIntervalMinutes: 60,
         indexingMode: "all",
-        triggerWords: ["lorem"],
+        triggerWords: [],
         blacklistWords: [],
-        discardWordsEnabled: true,
-        discardWords: ["loom"],
+        discardWordsEnabled: false,
+        discardWords: [],
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
         contextSuggestionsFloatingButtonEnabled: true,
@@ -173,20 +175,22 @@ describe("storage", () => {
     });
     expect(local.set).toHaveBeenCalledWith({
       "savemycontext.settings.cache": {
+        workspaceUrl: "",
+        capturePaused: false,
         backendUrl: "http://127.0.0.1:9000",
         enabledProviders: {
           chatgpt: true,
           gemini: true,
           grok: true
         },
-        autoSyncHistory: true,
+        autoSyncHistory: false,
         scheduledProviderRefreshEnabled: false,
         scheduledProviderRefreshIntervalMinutes: 60,
         indexingMode: "all",
-        triggerWords: ["lorem"],
+        triggerWords: [],
         blacklistWords: [],
-        discardWordsEnabled: true,
-        discardWords: ["loom"],
+        discardWordsEnabled: false,
+        discardWords: [],
         selectionCaptureEnabled: false,
         contextSuggestionsEnabled: false,
         contextSuggestionsFloatingButtonEnabled: true,
@@ -195,6 +199,20 @@ describe("storage", () => {
         enabledAccountKeys: {}
       }
     });
+  });
+
+  it("persists pause and workspace settings without syncing the API token or resetting existing preferences", async () => {
+    const sync = createStorageArea();
+    const local = createStorageArea();
+    vi.stubGlobal("chrome", { storage: { sync, local } });
+    const { saveSettings, getSettings, initializeStorage } = await import("../src/shared/storage");
+    await saveSettings({ autoSyncHistory: true, triggerWords: ["custom"], backendToken: "private-secret" });
+    await saveSettings({ capturePaused: true, workspaceUrl: "https://dashboard.example/memory" });
+    await initializeStorage();
+    expect(await getSettings()).toMatchObject({ capturePaused: true, workspaceUrl: "https://dashboard.example/memory", autoSyncHistory: true, triggerWords: ["custom"], backendToken: "private-secret" });
+    expect(JSON.stringify(sync.state)).not.toContain("private-secret");
+    await Promise.all([saveSettings({ capturePaused: false }), saveSettings({ workspaceUrl: "https://updated.example/memory" })]);
+    expect(await getSettings()).toMatchObject({ capturePaused: false, workspaceUrl: "https://updated.example/memory" });
   });
 
   it("creates and caches an installation id in local storage", async () => {

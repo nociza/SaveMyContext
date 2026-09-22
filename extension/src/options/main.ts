@@ -1,16 +1,6 @@
+import { validateWorkspaceUrl, workspaceUrl } from "../shared/workspace-link";
 import "./styles.css";
 
-import type {
-  ExtensionSettings,
-  ProviderDriftAlert,
-  ProviderName,
-  RuntimeMessage,
-  SaveConnectionBundleResponse,
-  SaveKnowledgePathResponse,
-  SaveSettingsResponse,
-  SyncStatus
-} from "../shared/types";
-import { describeIndexingMode, normalizeRuleWords } from "../shared/indexing-rules";
 import { parseConnectionString } from "../shared/connection";
 import {
   acquireOptionalHostPermissions,
@@ -18,19 +8,28 @@ import {
   removeOptionalHostPermissions,
   safelyRemovableHostPermissions
 } from "../shared/host-permissions";
+import { describeIndexingMode, normalizeRuleWords } from "../shared/indexing-rules";
 import {
   normalizeProviderRefreshIntervalMinutes,
   PROVIDER_REFRESH_MAX_INTERVAL_MINUTES,
   PROVIDER_REFRESH_MIN_INTERVAL_MINUTES
 } from "../shared/provider-refresh";
+import type {
+  ExtensionSettings,
+  ProviderDriftAlert,
+  ProviderName,
+  RuntimeMessage,
+  SaveConnectionBundleResponse,
+  SaveSettingsResponse,
+  SyncStatus
+} from "../shared/types";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
 const connectionStringInput = document.querySelector<HTMLInputElement>("#connection-string");
 const verificationCodeInput = document.querySelector<HTMLInputElement>("#verification-code");
 const backendUrlInput = document.querySelector<HTMLInputElement>("#backend-url");
 const backendTokenInput = document.querySelector<HTMLInputElement>("#backend-token");
-const knowledgePathInput = document.querySelector<HTMLInputElement>("#knowledge-path");
-const saveKnowledgePathButton = document.querySelector<HTMLButtonElement>("#save-knowledge-path");
+const workspaceUrlInput = document.querySelector<HTMLInputElement>("#workspace-url");
 const autoSyncHistoryInput = document.querySelector<HTMLInputElement>("#auto-sync-history");
 const scheduledProviderRefreshEnabledInput = document.querySelector<HTMLInputElement>("#scheduled-provider-refresh-enabled");
 const scheduledProviderRefreshIntervalInput = document.querySelector<HTMLInputElement>("#scheduled-provider-refresh-interval");
@@ -64,7 +63,6 @@ const historySync = document.querySelector<HTMLParagraphElement>("#history-sync"
 const providerDriftCard = document.querySelector<HTMLDivElement>("#provider-drift-card");
 const providerDrift = document.querySelector<HTMLParagraphElement>("#provider-drift");
 const backendValidation = document.querySelector<HTMLParagraphElement>("#backend-validation");
-const knowledgePathStatus = document.querySelector<HTMLParagraphElement>("#knowledge-path-status");
 const indexingRulesStatus = document.querySelector<HTMLParagraphElement>("#indexing-rules-status");
 const lastIndexing = document.querySelector<HTMLParagraphElement>("#last-indexing");
 const openDashboardButton = document.querySelector<HTMLButtonElement>("#open-dashboard");
@@ -74,7 +72,6 @@ let loadPromise: Promise<void> | null = null;
 let loadQueued = false;
 let formHydrated = false;
 let formDirty = false;
-let knowledgePathDirty = false;
 
 function formatProviderName(provider: ProviderName): string {
   if (provider === "chatgpt") {
@@ -133,10 +130,6 @@ function formatRecentCapture(status: SyncStatus): string {
 }
 
 function formatHistorySync(settings: ExtensionSettings, status: SyncStatus): string {
-  if (!settings.autoSyncHistory) {
-    return "Disabled";
-  }
-
   if (status.historySyncInProgress) {
     const provider = formatProviderList(status.historySyncActiveProviders, status.historySyncProvider);
     const progress =
@@ -158,7 +151,7 @@ function formatHistorySync(settings: ExtensionSettings, status: SyncStatus): str
     return `${status.historySyncLastResult ?? "success"} ${formatDate(status.historySyncLastCompletedAt)}${count}`;
   }
 
-  return "Idle";
+  return settings.autoSyncHistory ? "Automatic import enabled" : "Manual import from the popup";
 }
 
 function formatProviderDriftAlert(alert?: ProviderDriftAlert | null): string {
@@ -205,6 +198,7 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
   if (backendUrlInput) {
     backendUrlInput.value = settings.backendUrl;
   }
+  if (workspaceUrlInput) workspaceUrlInput.value = settings.workspaceUrl || "";
   if (backendTokenInput) {
     backendTokenInput.value = settings.backendToken ?? "";
   }
@@ -272,10 +266,6 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
 function render(settings: ExtensionSettings, status: SyncStatus): void {
   syncFormFromSettings(settings);
 
-  if (knowledgePathInput && !knowledgePathDirty && status.backendMarkdownRoot) {
-    knowledgePathInput.value = status.backendMarkdownRoot;
-  }
-
   if (lastSuccess) {
     lastSuccess.textContent = formatDate(status.lastSuccessAt);
   }
@@ -305,16 +295,6 @@ function render(settings: ExtensionSettings, status: SyncStatus): void {
       backendValidation.textContent = `${status.backendProduct ?? "savemycontext"} ${status.backendVersion} (${status.backendAuthMode ?? "unknown"})`;
     } else {
       backendValidation.textContent = "Not validated yet";
-    }
-  }
-  if (knowledgePathStatus) {
-    if (status.backendValidationError) {
-      knowledgePathStatus.textContent = "Validate the backend before changing the knowledge path.";
-    } else if (status.backendMarkdownRoot && status.backendVaultRoot) {
-      knowledgePathStatus.textContent = `Current root: ${status.backendMarkdownRoot}. Vault: ${status.backendVaultRoot}.`;
-    } else {
-      knowledgePathStatus.textContent =
-        "This path lives on the backend machine. SaveMyContext writes the vault into SaveMyContext/ under this folder.";
     }
   }
 }
@@ -349,9 +329,10 @@ form?.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const nextSettings: Partial<ExtensionSettings> = {
+    workspaceUrl: workspaceUrlInput?.value.trim() ?? "",
     backendUrl: backendUrlInput?.value.trim() ?? "",
     backendToken: backendTokenInput?.value.trim() ?? "",
-    autoSyncHistory: autoSyncHistoryInput?.checked ?? true,
+    autoSyncHistory: autoSyncHistoryInput?.checked ?? false,
     scheduledProviderRefreshEnabled: scheduledProviderRefreshEnabledInput?.checked ?? false,
     scheduledProviderRefreshIntervalMinutes: normalizeProviderRefreshIntervalMinutes(
       scheduledProviderRefreshIntervalInput?.value
@@ -378,8 +359,16 @@ form?.addEventListener("submit", async (event) => {
     }
   };
   const triggerWords = normalizeRuleWords(triggerWordsInput?.value ?? "");
-  nextSettings.triggerWords =
-    nextSettings.indexingMode === "trigger_word" && triggerWords.length === 0 ? ["lorem"] : triggerWords;
+  nextSettings.triggerWords = triggerWords;
+  try {
+    nextSettings.workspaceUrl = validateWorkspaceUrl(nextSettings.workspaceUrl || "");
+    if (nextSettings.indexingMode === "trigger_word" && !triggerWords.length) {
+      throw new Error("Enter at least one trigger word or turn off trigger-word filtering.");
+    }
+  } catch (error) {
+    if (saveStatus) saveStatus.textContent = error instanceof Error ? error.message : "Invalid settings";
+    return;
+  }
 
   const connectionString = connectionStringInput?.value.trim() ?? "";
   if (!connectionString && !nextSettings.backendUrl) {
@@ -496,8 +485,8 @@ backendTokenInput?.addEventListener("input", () => {
   formDirty = true;
 });
 
-knowledgePathInput?.addEventListener("input", () => {
-  knowledgePathDirty = true;
+workspaceUrlInput?.addEventListener("input", () => {
+  formDirty = true;
 });
 
 autoSyncHistoryInput?.addEventListener("change", () => {
@@ -576,33 +565,7 @@ for (const input of Object.values(providerInputs)) {
 }
 
 openDashboardButton?.addEventListener("click", () => {
-  void chrome.tabs.create({ url: chrome.runtime.getURL("workspace.html") });
-});
-
-saveKnowledgePathButton?.addEventListener("click", async () => {
-  const markdownRoot = knowledgePathInput?.value.trim() ?? "";
-  const response = await sendMessage<SaveKnowledgePathResponse>({
-    type: "SAVE_KNOWLEDGE_PATH",
-    payload: {
-      markdownRoot
-    }
-  });
-  if (!response.ok) {
-    if (knowledgePathStatus) {
-      knowledgePathStatus.textContent = response.error ?? "Could not update the knowledge path.";
-    }
-    return;
-  }
-  knowledgePathDirty = false;
-  if (knowledgePathInput && response.storage?.markdown_root) {
-    knowledgePathInput.value = response.storage.markdown_root;
-  }
-  if (knowledgePathStatus && response.storage) {
-    const persistedTo = response.storage.persisted_to ? ` Persisted to ${response.storage.persisted_to}.` : "";
-    knowledgePathStatus.textContent =
-      `Vault moved to ${response.storage.vault_root}. Rebuilt ${response.storage.regenerated_session_count} sessions.${persistedTo}`;
-  }
-  await load();
+  if (currentSettings) void chrome.tabs.create({ url: workspaceUrl(currentSettings) });
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

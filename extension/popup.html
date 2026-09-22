@@ -5,9 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>SaveMyContext</title>
-    <script type="module" src="/src/popup/main.tsx"></script>
+    <script type="module" src="/src/popup/main.ts"></script>
   </head>
   <body data-page="popup">
-    <div id="root" data-page="popup"></div>
+    <header><h1>SaveMyContext</h1><button id="settings">Settings</button></header>
+    <p id="connection" role="status">Checking connection…</p>
+    <p id="capture-state" class="muted"></p><p id="pending" class="muted"></p>
+    <p id="capture-warning" role="status" hidden></p>
+    <dl><dt>Last saved</dt><dd id="last-success">—</dd><dt>History import</dt><dd id="history-sync">—</dd></dl>
+    <div id="provider-drift-card" hidden><h2>Capture needs attention</h2><p id="provider-drift"></p></div>
+    <div class="actions"><button id="save-page" disabled>Save page</button><button id="import-history" disabled>Import history</button><button id="pause" disabled>Pause capture</button></div>
+    <button id="open-dashboard" disabled>Open workspace</button>
+    <p id="action-status" role="status" aria-live="polite"></p>
+    <details><summary>Diagnostics</summary><dl><dt>Last conversation</dt><dd id="last-session">None</dd><dt>Last error</dt><dd id="last-error">None</dd></dl></details>
   </body>
 </html>
