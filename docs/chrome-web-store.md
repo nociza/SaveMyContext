@@ -8,6 +8,27 @@ This is a submission kit, **not a claim of Google approval or publication**.
 Account registration, identity/trader declarations, agreements and payment belong
 to the publisher. Do not put private backend credentials into this repository.
 
+## Current submission record
+
+As of September 22, 2026, version 0.4.2 is uploaded as a **Draft**, not submitted
+or published. The listing text, category (Productivity → Tools), language, icon,
+two screenshots and small promotional tile were saved and verified after opening
+the draft again. Privacy disclosures, reviewer instructions and Unlisted
+distribution still need to be saved before submission. Browser controls stopped
+responding during privacy entry; do not assume attempted changes persisted.
+
+- Chrome item ID: `nmenckaggbchlanbhgbnlgodepgkeoaj`.
+- Package source: `623cd834b8990a0449f4b5c119f77a17030a6539`.
+- ZIP: `savemycontext-0.4.2.zip`, 127,403 bytes.
+- SHA-256: `1f983a971fa7bc10329eedf82829ee109d22b6980abec1553f2afe606b71a562`.
+- [Release CI](https://github.com/nociza/SaveMyContext/actions/runs/35696490004):
+  all jobs passed, including browser end-to-end and shared-workspace tests.
+
+Continue editing this existing item; do not upload a duplicate new item. The
+publisher has approved the three Limited Use certifications and unlisted beta
+submission. Any additional account agreement or identity declaration still
+requires the publisher's review.
+
 ## Listing fields
 
 - Name: **SaveMyContext**
