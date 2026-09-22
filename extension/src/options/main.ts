@@ -72,6 +72,21 @@ let loadPromise: Promise<void> | null = null;
 let loadQueued = false;
 let formHydrated = false;
 let formDirty = false;
+let saving = false;
+const fields = document.querySelector<HTMLFieldSetElement>("#settings-fields")!;
+const saveButton = document.querySelector<HTMLButtonElement>("#save-settings")!;
+
+function setSaveStatus(message: string, tone = "error") {
+  if (!saveStatus) return;
+  saveStatus.textContent = message;
+  saveStatus.dataset.tone = tone;
+}
+
+function markDirty() {
+  if (!formHydrated || saving) return;
+  formDirty = true;
+  setSaveStatus("You have unsaved changes.", "neutral");
+}
 
 function formatProviderName(provider: ProviderName): string {
   if (provider === "chatgpt") {
@@ -232,6 +247,7 @@ function syncFormFromSettings(settings: ExtensionSettings): void {
   if (accountCaptureIncludeInput) {
     accountCaptureIncludeInput.checked = settings.accountCaptureMode === "include";
   }
+  document.getElementById("account-fields")!.hidden = settings.accountCaptureMode !== "include";
   for (const [provider, input] of Object.entries(accountAllowInputs)) {
     if (input) {
       input.value = (settings.enabledAccountKeys?.[provider as ProviderName] ?? []).join(", ");
@@ -273,7 +289,11 @@ function render(settings: ExtensionSettings, status: SyncStatus): void {
     lastSession.textContent = formatRecentCapture(status);
   }
   if (lastError) {
-    lastError.textContent = status.historySyncLastError ?? status.lastError ?? "None";
+    const error = status.historySyncLastError || status.lastError;
+    lastError.textContent = error || "None";
+    const card = document.getElementById("last-error-card")!;
+    card.hidden = !error;
+    card.classList.toggle("status-card-danger", Boolean(error));
   }
   if (historySync) {
     historySync.textContent = formatHistorySync(settings, status);
@@ -291,8 +311,10 @@ function render(settings: ExtensionSettings, status: SyncStatus): void {
   if (backendValidation) {
     if (status.backendValidationError) {
       backendValidation.textContent = status.backendValidationError;
-    } else if (status.backendValidatedAt && status.backendVersion) {
-      backendValidation.textContent = `${status.backendProduct ?? "savemycontext"} ${status.backendVersion} (${status.backendAuthMode ?? "unknown"})`;
+    } else if (status.backendValidatedAt) {
+      backendValidation.textContent = status.backendVersion
+        ? `Connected · ${status.backendProduct ?? "savemycontext"} ${status.backendVersion}`
+        : "Connected";
     } else {
       backendValidation.textContent = "Not validated yet";
     }
@@ -315,6 +337,9 @@ async function load(): Promise<void> {
       currentSettings = settings;
       currentStatus = status;
       render(settings, status);
+      fields.disabled = saving;
+      saveButton.disabled = saving;
+      if (openDashboardButton) openDashboardButton.disabled = false;
     } while (loadQueued);
   })();
 
@@ -325,8 +350,7 @@ async function load(): Promise<void> {
   }
 }
 
-form?.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function savePreferences(): Promise<void> {
 
   const nextSettings: Partial<ExtensionSettings> = {
     workspaceUrl: workspaceUrlInput?.value.trim() ?? "",
@@ -366,14 +390,14 @@ form?.addEventListener("submit", async (event) => {
       throw new Error("Enter at least one trigger word or turn off trigger-word filtering.");
     }
   } catch (error) {
-    if (saveStatus) saveStatus.textContent = error instanceof Error ? error.message : "Invalid settings";
+    setSaveStatus(error instanceof Error ? error.message : "Invalid settings");
     return;
   }
 
   const connectionString = connectionStringInput?.value.trim() ?? "";
   if (!connectionString && !nextSettings.backendUrl) {
     if (saveStatus) {
-      saveStatus.textContent = "Enter a connection string or a backend URL.";
+      setSaveStatus("Enter a connection string or a backend URL.");
     }
     return;
   }
@@ -384,7 +408,7 @@ form?.addEventListener("submit", async (event) => {
       requestedBackendUrl = parseConnectionString(connectionString).baseUrl;
     } catch (error) {
       if (saveStatus) {
-        saveStatus.textContent = error instanceof Error ? error.message : "Connection string is invalid.";
+        setSaveStatus(error instanceof Error ? error.message : "Connection string is invalid.");
       }
       return;
     }
@@ -400,16 +424,16 @@ form?.addEventListener("submit", async (event) => {
     if (!acquisition.granted) {
       await removeOptionalHostPermissions(newlyGrantedOrigins);
       if (saveStatus) {
-        saveStatus.textContent =
+        setSaveStatus(
           nextSettings.pageSurfaceScope === "all_pages"
             ? "SaveMyContext needs all-page access before page surfaces can be enabled."
-            : "SaveMyContext needs access to the selected backend origin before it can connect.";
+            : "SaveMyContext needs access to the selected backend origin before it can connect.");
       }
       return;
     }
   } catch (error) {
     if (saveStatus) {
-      saveStatus.textContent = error instanceof Error ? error.message : "Could not request backend access.";
+      setSaveStatus(error instanceof Error ? error.message : "Could not request backend access.");
     }
     return;
   }
@@ -434,7 +458,7 @@ form?.addEventListener("submit", async (event) => {
       console.warn("SaveMyContext could not roll back newly granted host access", error);
     }
     if (saveStatus) {
-      saveStatus.textContent = response.error ?? "Could not validate the backend.";
+      setSaveStatus(response.error ?? "Could not validate the backend.");
     }
     if (backendValidation) {
       backendValidation.textContent = response.error ?? "Could not validate the backend.";
@@ -464,108 +488,73 @@ form?.addEventListener("submit", async (event) => {
     verificationCodeInput.value = "";
   }
   if (saveStatus) {
-    saveStatus.textContent = "Settings saved.";
+    setSaveStatus("Settings saved.", "success");
   }
   await load();
+}
+
+form?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (saving || !formHydrated) return;
+  saving = true;
+  fields.disabled = true;
+  saveButton.disabled = true;
+  saveButton.setAttribute("aria-busy", "true");
+  saveButton.textContent = "Saving…";
+  setSaveStatus("Checking your connection and saving…", "neutral");
+  try {
+    await savePreferences();
+  } catch {
+    // A transport failure can happen after a committed save. Do not revoke access
+    // or overwrite the user's form until the background worker can confirm it.
+    setSaveStatus("Could not confirm the save. Reopen Settings to check, or try again.");
+  } finally {
+    saving = false;
+    fields.disabled = false;
+    saveButton.disabled = false;
+    saveButton.setAttribute("aria-busy", "false");
+    saveButton.textContent = "Save settings";
+  }
 });
 
-connectionStringInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-verificationCodeInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-backendUrlInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-backendTokenInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-workspaceUrlInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-autoSyncHistoryInput?.addEventListener("change", () => {
-  formDirty = true;
-});
-
+form?.addEventListener("input", markDirty);
+form?.addEventListener("change", markDirty);
 scheduledProviderRefreshEnabledInput?.addEventListener("change", () => {
-  formDirty = true;
   if (scheduledProviderRefreshIntervalInput) {
     scheduledProviderRefreshIntervalInput.disabled = !scheduledProviderRefreshEnabledInput.checked;
   }
 });
-
-scheduledProviderRefreshIntervalInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-selectionCaptureEnabledInput?.addEventListener("change", () => {
-  formDirty = true;
-});
-
-pageSurfaceScopeInput?.addEventListener("change", () => {
-  formDirty = true;
-});
-
 contextSuggestionsEnabledInput?.addEventListener("change", () => {
-  formDirty = true;
   if (contextSuggestionsFloatingButtonEnabledInput) {
     contextSuggestionsFloatingButtonEnabledInput.disabled = !contextSuggestionsEnabledInput.checked;
   }
 });
-
-contextSuggestionsFloatingButtonEnabledInput?.addEventListener("change", () => {
-  formDirty = true;
-});
-
 accountCaptureIncludeInput?.addEventListener("change", () => {
-  formDirty = true;
+  document.getElementById("account-fields")!.hidden = !accountCaptureIncludeInput.checked;
   for (const input of Object.values(accountAllowInputs)) {
-    if (input) {
-      input.disabled = !accountCaptureIncludeInput.checked;
-    }
+    if (input) input.disabled = !accountCaptureIncludeInput.checked;
   }
 });
-
-for (const input of Object.values(accountAllowInputs)) {
-  input?.addEventListener("input", () => {
-    formDirty = true;
-  });
-}
-
-indexingModeInput?.addEventListener("change", () => {
-  formDirty = true;
+window.addEventListener("beforeunload", event => {
+  if (formDirty) event.preventDefault();
 });
 
-triggerWordsInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-blacklistWordsInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-discardWordsEnabledInput?.addEventListener("change", () => {
-  formDirty = true;
-});
-
-discardWordsInput?.addEventListener("input", () => {
-  formDirty = true;
-});
-
-for (const input of Object.values(providerInputs)) {
-  input?.addEventListener("change", () => {
-    formDirty = true;
-  });
+const sectionLinks = [...document.querySelectorAll<HTMLAnchorElement>(".settings-nav a")];
+const observer = new IntersectionObserver(entries => {
+  const visible = entries.find(entry => entry.isIntersecting);
+  if (!visible) return;
+  for (const link of sectionLinks) {
+    if (link.hash === "#" + visible.target.id) link.setAttribute("aria-current", "location");
+    else link.removeAttribute("aria-current");
+  }
+}, { rootMargin: "-5% 0px -65% 0px" });
+for (const link of sectionLinks) {
+  const section = document.querySelector(link.hash);
+  if (section) observer.observe(section);
 }
 
 openDashboardButton?.addEventListener("click", () => {
-  if (currentSettings) void chrome.tabs.create({ url: workspaceUrl(currentSettings) });
+  if (currentSettings) void chrome.tabs.create({ url: workspaceUrl(currentSettings) }).catch(() => setSaveStatus("Could not open the workspace. Please try again."));
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -580,8 +569,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 
   if (changes["savemycontext.settings"] || changes["savemycontext.settings.cache"] || changes["savemycontext.settings.secrets"]) {
-    void load();
+    void load().catch(() => setSaveStatus("Could not load settings. Reopen this page to try again."));
   }
 });
 
-void load();
+void load().then(() => {
+  if (!formDirty) setSaveStatus("Your settings are up to date.", "neutral");
+}).catch(() => setSaveStatus("Could not load settings. Reopen this page to try again."));

@@ -8,25 +8,39 @@
     <script type="module" src="/src/popup/main.ts"></script>
   </head>
   <body data-page="popup">
-    <header><h1>SaveMyContext</h1><button id="settings">Settings</button></header>
-    <p id="connection" role="status">Checking connection…</p>
-    <section id="consent" hidden aria-labelledby="consent-title">
-      <h2 id="consent-title">Choose what you save</h2>
-      <p>Enable capture to save conversations you open or create on enabled AI providers, including messages, titles, URLs, account identifiers, and ChatGPT Project context.</p>
-      <p>Destination: <strong id="consent-destination"></strong></p>
-      <p>Provider and account filters are in Settings. All accounts on enabled providers are included by default. History import is separate and off by default.</p>
-      <p>Queued chats are encrypted in this browser until delivered. Your backend controls storage and any optional AI processing. You can pause at any time.</p>
-      <a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy and deletion details</a>
-      <button id="enable-capture">Agree and enable capture</button>
-    </section>
-    <p id="capture-state" class="muted"></p><p id="pending" class="muted"></p>
-    <p id="capture-warning" role="status" hidden></p>
-    <dl><dt>Last saved</dt><dd id="last-success">—</dd><dt>History import</dt><dd id="history-sync">—</dd></dl>
-    <div id="provider-drift-card" hidden><h2>Capture needs attention</h2><p id="provider-drift"></p></div>
-    <div class="actions"><button id="save-page" disabled>Save page</button><button id="import-history" disabled>Import history</button><button id="pause" disabled>Pause capture</button></div>
-    <button id="open-dashboard" disabled>Open workspace</button>
-    <p id="action-status" role="status" aria-live="polite"></p>
-    <details><summary>Diagnostics &amp; local data</summary><dl><dt>Last conversation</dt><dd id="last-session">None</dd><dt>Last error</dt><dd id="last-error">None</dd></dl><button id="clear-queue">Discard queued captures</button><p>This pauses capture and removes unsent chats only. Already delivered data stays on your backend.</p></details>
-    <footer><a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy</a></footer>
+    <header>
+      <div class="brand"><img class="brand-mark" src="/icons/icon-48.png" alt="" /><div><h1>SaveMyContext</h1><p>Keep what matters.</p></div></div>
+      <button id="settings" class="btn-quiet">Settings</button>
+    </header>
+    <main>
+      <section class="capture-card" id="capture-card" aria-labelledby="capture-state">
+        <div class="status-top"><span class="eyebrow"><span class="state-dot" aria-hidden="true"></span>Capture</span><span id="connection" role="status">Checking connection…</span></div>
+        <h2 id="capture-state">Getting ready…</h2>
+        <p id="capture-detail">Reading your capture preferences.</p>
+        <button id="setup-connection" hidden>Set up connection</button>
+        <div class="capture-bottom"><span id="pending">Checking delivery…</span><button id="pause" class="btn-quiet" disabled>Pause capture</button></div>
+      </section>
+      <section id="consent" hidden aria-labelledby="consent-title">
+        <h2 id="consent-title">Choose what you save</h2>
+        <p>Enable capture to save conversations you open or create on enabled AI providers, including messages, titles, URLs, account identifiers, and ChatGPT Project context.</p>
+        <p>Destination: <strong id="consent-destination"></strong></p>
+        <p>Provider and account filters are in Settings. All accounts on enabled providers are included by default. History import is separate and off by default.</p>
+        <p>Queued chats are encrypted in this browser until delivered. Your backend controls storage and any optional AI processing. You can pause at any time.</p>
+        <a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy and deletion details</a>
+        <button id="enable-capture" class="btn-primary" disabled>Agree and enable capture</button>
+      </section>
+      <p id="capture-warning" class="notice" role="status" hidden></p>
+      <div id="provider-drift-card" class="notice" hidden><h2>Capture needs attention</h2><p id="provider-drift"></p></div>
+      <div class="actions"><button id="save-page" disabled aria-describedby="page-hint">Save page</button><button id="import-history" disabled aria-describedby="page-hint">Import history</button></div>
+      <p id="page-hint">Save a page or import conversations from a supported AI provider.</p>
+      <section class="activity" aria-label="Recent activity">
+        <div class="section-label"><span class="eyebrow">Recent activity</span></div>
+        <dl><dt>Last saved</dt><dd id="last-success">—</dd><dt>History import</dt><dd id="history-sync">—</dd></dl>
+      </section>
+      <button id="open-dashboard" class="btn-primary" disabled>Open workspace</button>
+      <p id="action-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      <details><summary>Diagnostics &amp; local data</summary><dl><dt>Last conversation</dt><dd id="last-session">None</dd><dt>Last error</dt><dd id="last-error">None</dd></dl><button id="clear-queue" disabled>Discard queued captures</button><p>This pauses capture and removes unsent chats only. Already delivered data stays on your backend.</p></details>
+    </main>
+    <footer><span>Saved to your chosen backend</span><a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy</a></footer>
   </body>
 </html>

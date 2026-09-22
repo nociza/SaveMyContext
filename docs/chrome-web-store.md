@@ -2,11 +2,33 @@
 title: Chrome Web Store release
 ---
 
-# Chrome Web Store release — 0.4.2 unlisted beta
+# Chrome Web Store releases
 
 This is a submission kit, **not a claim of Google approval or publication**.
 Account registration, identity/trader declarations, agreements and payment belong
 to the publisher. Do not put private backend credentials into this repository.
+
+## Prepared update — 0.4.3
+
+Version 0.4.3 refreshes the popup and Settings with a shared light/dark design,
+section navigation, a persistent save bar, clearer action availability and safer
+busy/error/draft states. No additional browser permissions, remote code, capture
+defaults, backend migrations or consent changes are introduced.
+
+This update is packaged locally, **not submitted or published**. The existing
+0.4.2 review below must not be cancelled as part of this UI update. Same-ID unpacked
+installations can reload the rebuilt `extension/dist` without clearing their
+settings or queued evidence. Switching to a new extension ID is not a reload;
+see the install/upgrade caveats below.
+
+Local verification: TypeScript and 145 unit tests pass; 19 browser integration
+tests pass (the four standalone-workspace tests require their own disposable
+server and run separately in CI). Light/dark popup and narrow/desktop Settings
+screenshots were inspected. The ZIP passes its integrity check and two packaging
+runs produce the same hash.
+
+- Prepared ZIP: `savemycontext-0.4.3.zip`, 134,190 bytes.
+- SHA-256: `1ed5ca1701d5eb3229747efe89fe0c386fef77b9d92a53028aad88a50a02d898`.
 
 ## Current submission record
 
@@ -127,10 +149,10 @@ pnpm test
 pnpm package:store
 pnpm exec playwright test
 pnpm store:assets
-python3 -m zipfile -t release/savemycontext-0.4.2.zip
+python3 -m zipfile -t release/savemycontext-0.4.3.zip
 ```
 
-Upload **only** `extension/release/savemycontext-0.4.2.zip`, not a repository archive.
+For the prepared update, use **only** `extension/release/savemycontext-0.4.3.zip`, not a repository archive.
 The package has a root manifest, sorted entries, fixed timestamps, license/notices
 and a SHA-256 sidecar. Repeating packaging on the same build must give the same hash.
 The CI checks this. The packaging allowlist rejects source maps, tools, secrets

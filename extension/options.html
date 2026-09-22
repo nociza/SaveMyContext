@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>SaveMyContext · Settings</title>
     <script type="module" src="/src/options/main.ts"></script>
   </head>
@@ -10,40 +11,74 @@
     <main class="shell">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-mark">C</div>
+          <img class="brand-mark" src="/icons/icon-48.png" alt="" />
           <div class="brand-text">
             <p class="eyebrow">SaveMyContext</p>
             <h1>Settings</h1>
           </div>
         </div>
         <div class="topbar-actions">
-          <button id="open-dashboard" class="btn btn-secondary" type="button">Open workspace</button>
+          <button id="open-dashboard" disabled class="btn btn-secondary" type="button">Open workspace</button>
         </div>
       </header>
 
-      <p class="intro">
-        Point SaveMyContext at your workspace backend, choose capture filters, and pick the
-        providers the extension should observe. Captures go to your chosen private backend.
-      </p>
-
-      <p class="intro">Capture requires consent in the extension popup after connecting.
-        <a href="popup.html">Review capture consent</a> ·
-        <a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy and deletion</a>
-      </p>
-
+      <div class="intro-panel">
+        <h2>A little setup. A lot less remembering.</h2>
+        <p class="intro">Connect your workspace and choose what stays with you. Capture stays under your control.</p>
+        <p class="privacy-note">Connecting does not enable capture. <a href="popup.html">Review capture consent</a> ·
+          <a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy &amp; deletion</a>
+        </p>
+      </div>
+      <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Settings sections">
+        <a href="#connection-section">Connection</a>
+        <a href="#capture-section">Providers &amp; accounts</a>
+        <a href="#tools-section">Page tools</a>
+        <a href="#automation-section">Automation</a>
+        <a href="#rules-section">Capture rules</a>
+        <a href="#activity-section">Activity</a>
+      </nav>
       <form id="settings-form" class="stack">
-        <section class="section">
+        <fieldset id="settings-fields" disabled>
+          <legend class="sr-only">Extension preferences</legend>
+        <section class="section" id="connection-section">
           <div class="section-head">
             <h2>Connection</h2>
             <p>Where the extension should send and read captured context.</p>
           </div>
           <div class="section-body">
             <label class="field">
+              <span class="field-label">Backend URL</span>
+              <input
+                id="backend-url"
+                name="backend-url"
+                type="url"
+                placeholder="http://127.0.0.1:18888"
+              />
+              <small>Your local backend address or a remote HTTPS endpoint.</small>
+            </label>
+
+            <label class="field">
+              <span class="field-label">App token</span>
+              <input
+                id="backend-token"
+                name="backend-token"
+                type="password"
+                placeholder="savemycontext_pat_…"
+                autocomplete="new-password"
+              />
+              <small>Required for remote backends. Leave blank only for local bootstrap access.</small>
+            </label>
+
+            <details class="connection-bundle">
+              <summary>Use a connection string instead <span>Quick setup</span></summary>
+              <div class="bundle-fields">
+            <label class="field">
               <span class="field-label">Connection string</span>
               <input
                 id="connection-string"
                 name="connection-string"
-                type="text"
+                type="password"
                 placeholder="smc_conn_1_…"
                 autocomplete="off"
               />
@@ -62,28 +97,8 @@
               <small>Only needed for higher-security per-device bundles.</small>
             </label>
 
-            <label class="field">
-              <span class="field-label">Backend URL</span>
-              <input
-                id="backend-url"
-                name="backend-url"
-                type="url"
-                placeholder="http://127.0.0.1:18888"
-              />
-              <small>Manual fallback. Leave this blank if you are using a connection string.</small>
-            </label>
-
-            <label class="field">
-              <span class="field-label">App token</span>
-              <input
-                id="backend-token"
-                name="backend-token"
-                type="password"
-                placeholder="savemycontext_pat_…"
-                autocomplete="new-password"
-              />
-              <small>Manual fallback. Not needed when you paste a connection string.</small>
-            </label>
+              </div>
+            </details>
 
             <div class="status-row">
               <div>
@@ -98,7 +113,7 @@
           </div>
         </section>
 
-        <section class="section">
+        <section class="section" id="workspace-section">
           <div class="section-head">
             <h2>Workspace</h2>
             <p>Choose where the Open workspace button takes you.</p>
@@ -121,46 +136,58 @@
           </div>
         </section>
 
-        <section class="section">
-          <div class="section-head">
-            <h2>Capture</h2>
-            <p>Control what the extension collects from AI chats and regular web pages.</p>
-          </div>
+        <section class="section" id="capture-section">
+          <div class="section-head"><h2>Providers &amp; accounts</h2><p>Choose which conversations can be captured. All enabled accounts are included unless you restrict them.</p></div>
           <div class="section-body">
+            <div class="provider-grid">
+              <label class="chip-toggle">
+                <input id="provider-chatgpt" type="checkbox" />
+                <span>ChatGPT</span>
+              </label>
+              <label class="chip-toggle">
+                <input id="provider-gemini" type="checkbox" />
+                <span>Gemini</span>
+              </label>
+              <label class="chip-toggle">
+                <input id="provider-grok" type="checkbox" />
+                <span>Grok</span>
+              </label>
+            </div>
+
             <label class="toggle">
-              <input id="auto-sync-history" type="checkbox" />
+              <input id="account-capture-include" type="checkbox" aria-controls="account-fields" />
               <span class="toggle-body">
-                <span class="toggle-title">Auto-sync history</span>
+                <span class="toggle-title">Only capture listed accounts</span>
                 <span class="toggle-help">
-                  When enabled, visiting a supported provider triggers a historical sync using your current
-                  session.
+                  Default is to capture every signed-in account and label each saved fact, idea, journal entry, and
+                  to-do with its account. Enable this when a provider profile should be ignored.
                 </span>
               </span>
             </label>
 
-            <label class="toggle">
-              <input id="scheduled-provider-refresh-enabled" type="checkbox" />
-              <span class="toggle-body">
-                <span class="toggle-title">Provider refresh scheduler</span>
-                <span class="toggle-help">
-                  Keep signed-in provider tabs refreshed on a timer so unattended browser sessions continue syncing.
-                </span>
-              </span>
-            </label>
+            <div class="field-grid" id="account-fields" hidden>
+              <label class="field">
+                <span class="field-label">ChatGPT accounts</span>
+                <input id="account-allow-chatgpt" name="account-allow-chatgpt" type="text" placeholder="work@example.com, chatgpt:default" />
+                <small>Comma-separated account keys, emails, or labels.</small>
+              </label>
+              <label class="field">
+                <span class="field-label">Gemini accounts</span>
+                <input id="account-allow-gemini" name="account-allow-gemini" type="text" placeholder="u0, gemini:u1" />
+                <small>Gemini account keys come from the <code>/u/0</code>, <code>/u/1</code> profile in the URL.</small>
+              </label>
+              <label class="field">
+                <span class="field-label">Grok accounts</span>
+                <input id="account-allow-grok" name="account-allow-grok" type="text" placeholder="personal, work@example.com" />
+                <small>Comma-separated account keys, emails, or labels.</small>
+              </label>
+            </div>
+          </div>
+        </section>
 
-            <label class="field">
-              <span class="field-label">Refresh interval</span>
-              <input
-                id="scheduled-provider-refresh-interval"
-                name="scheduled-provider-refresh-interval"
-                type="number"
-                min="15"
-                max="1440"
-                step="5"
-              />
-              <small>Minutes between scheduled refreshes for each enabled provider. Providers are staggered.</small>
-            </label>
-
+        <section class="section" id="tools-section">
+          <div class="section-head"><h2>Page tools</h2><p>Small helpers that meet you where you work. Each is optional.</p></div>
+          <div class="section-body">
             <label class="toggle">
               <input id="selection-capture-enabled" type="checkbox" />
               <span class="toggle-body">
@@ -205,55 +232,52 @@
               </span>
             </label>
 
-            <div class="provider-grid">
-              <label class="chip-toggle">
-                <input id="provider-chatgpt" type="checkbox" />
-                <span>ChatGPT</span>
-              </label>
-              <label class="chip-toggle">
-                <input id="provider-gemini" type="checkbox" />
-                <span>Gemini</span>
-              </label>
-              <label class="chip-toggle">
-                <input id="provider-grok" type="checkbox" />
-                <span>Grok</span>
-              </label>
-            </div>
+          </div>
+        </section>
 
+        <section class="section" id="automation-section">
+          <div class="section-head"><h2>Automation</h2><p>History imports and background refresh are separate from capturing the conversation you open.</p></div>
+          <div class="section-body">
             <label class="toggle">
-              <input id="account-capture-include" type="checkbox" />
+              <input id="auto-sync-history" type="checkbox" />
               <span class="toggle-body">
-                <span class="toggle-title">Only capture listed accounts</span>
+                <span class="toggle-title">Auto-sync history</span>
                 <span class="toggle-help">
-                  Default is to capture every signed-in account and label each saved fact, idea, journal entry, and
-                  to-do with its account. Enable this when a provider profile should be ignored.
+                  When enabled, visiting a supported provider triggers a historical sync using your current
+                  session.
                 </span>
               </span>
             </label>
 
-            <div class="field-grid">
-              <label class="field">
-                <span class="field-label">ChatGPT accounts</span>
-                <input id="account-allow-chatgpt" name="account-allow-chatgpt" type="text" placeholder="work@example.com, chatgpt:default" />
-                <small>Comma-separated account keys, emails, or labels.</small>
-              </label>
-              <label class="field">
-                <span class="field-label">Gemini accounts</span>
-                <input id="account-allow-gemini" name="account-allow-gemini" type="text" placeholder="u0, gemini:u1" />
-                <small>Gemini account keys come from the <code>/u/0</code>, <code>/u/1</code> profile in the URL.</small>
-              </label>
-              <label class="field">
-                <span class="field-label">Grok accounts</span>
-                <input id="account-allow-grok" name="account-allow-grok" type="text" placeholder="personal, work@example.com" />
-                <small>Comma-separated account keys, emails, or labels.</small>
-              </label>
-            </div>
+            <label class="toggle">
+              <input id="scheduled-provider-refresh-enabled" type="checkbox" />
+              <span class="toggle-body">
+                <span class="toggle-title">Provider refresh scheduler</span>
+                <span class="toggle-help">
+                  Keep signed-in provider tabs refreshed on a timer so unattended browser sessions continue syncing.
+                </span>
+              </span>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Refresh interval</span>
+              <input
+                id="scheduled-provider-refresh-interval"
+                name="scheduled-provider-refresh-interval"
+                type="number"
+                min="15"
+                max="1440"
+                step="5"
+              />
+              <small>Minutes between scheduled refreshes for each enabled provider. Providers are staggered.</small>
+            </label>
+
           </div>
         </section>
 
-        <section class="section">
+        <section class="section" id="rules-section">
           <div class="section-head">
-            <h2>Indexing rules</h2>
+            <h2>Capture rules</h2>
             <p>Decide which conversations make it into your vault and which get skipped.</p>
           </div>
           <div class="section-body">
@@ -296,7 +320,35 @@
           </div>
         </section>
 
-        <section class="section">
+        <section class="section section-muted" id="activity-section">
+          <div class="section-head">
+            <h2>Activity</h2>
+            <p>Diagnostics so you can see what happened last.</p>
+          </div>
+          <div class="section-body">
+            <div class="status-grid">
+              <div>
+                <p class="status-label">Last session</p>
+                <p id="last-session" class="status-value">n/a</p>
+              </div>
+              <div>
+                <p class="status-label">History sync</p>
+                <p id="history-sync" class="status-value">Idle</p>
+              </div>
+              <div id="provider-drift-card" class="status-card status-card-warning" hidden>
+                <p class="status-label">Provider drift</p>
+                <p id="provider-drift" class="status-value">None</p>
+              </div>
+              <div id="last-error-card" class="status-card" hidden>
+                <p class="status-label">Last error</p>
+                <p id="last-error" class="status-value">None</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <details class="section legacy-settings">
+          <summary>Legacy compatibility <span>For older backends only</span></summary>
           <div class="section-head">
             <h2>Legacy discard routing</h2>
             <p>
@@ -322,40 +374,15 @@
               <small>Comma-separated. No words are enabled by default.</small>
             </label>
           </div>
-        </section>
+        </details>
 
-        <section class="section section-muted">
-          <div class="section-head">
-            <h2>Activity</h2>
-            <p>Diagnostics so you can see what happened last.</p>
-          </div>
-          <div class="section-body">
-            <div class="status-grid">
-              <div>
-                <p class="status-label">Last session</p>
-                <p id="last-session" class="status-value">n/a</p>
-              </div>
-              <div>
-                <p class="status-label">History sync</p>
-                <p id="history-sync" class="status-value">Idle</p>
-              </div>
-              <div id="provider-drift-card" class="status-card status-card-warning" hidden>
-                <p class="status-label">Provider drift</p>
-                <p id="provider-drift" class="status-value">None</p>
-              </div>
-              <div class="status-card status-card-danger">
-                <p class="status-label">Last error</p>
-                <p id="last-error" class="status-value">None</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
+        </fieldset>
         <div class="submit-row">
-          <button class="btn btn-primary" type="submit">Save settings</button>
-          <p id="save-status" class="status"></p>
+          <div><p id="save-status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading your settings…</p><span class="save-note">Changes apply only when you save.</span></div>
+          <button id="save-settings" class="btn btn-primary" type="submit" disabled>Save settings</button>
         </div>
       </form>
+      </div>
     </main>
   </body>
 </html>

@@ -8,6 +8,12 @@ The extension is a capture companion, not a second knowledge-management applicat
 
 ## Popup
 
+The compact popup follows your system's light/dark appearance. The capture card
+explains the current state and any setup needed; disabled actions include a reason
+below them. Only one action can run at a time, including during background status
+updates. Errors stay visible so you can retry; cancelling an import or queue
+discard does not change your data.
+
 - **Connection / last saved:** backend connection state and most recent acknowledged capture.
 - **Waiting to send:** the durable local capture queue count, read without loading conversation bodies.
 - **Save page:** save source material from the active web page. It is not a substitute for structured chat capture.
@@ -32,6 +38,17 @@ is closed. Scheduled refresh is optional and can open provider tabs. If the prov
 response format changes, check the visible error instead of repeatedly importing.
 
 ## Settings
+
+Use the section navigation to jump between Connection, Providers & accounts, Page
+tools, Automation, Capture rules, and Activity. On narrow screens the navigation
+scrolls horizontally. The save bar stays available as you scroll; edits are
+explicitly saved, never auto-applied. Background sync updates do not replace
+unsaved edits, and leaving with a draft prompts before discarding it.
+
+Legacy discard routing is collapsed by default. It is a compatibility option,
+not a privacy filter. The Activity section only highlights errors when one exists.
+Account lists appear when account filtering is enabled. For a connection bundle,
+expand **Use a connection string instead**; its credential-bearing value is masked.
 
 Connection and optional workspace destination are separate. An external workspace
 handles its own authentication and receives no API token through its URL. The
