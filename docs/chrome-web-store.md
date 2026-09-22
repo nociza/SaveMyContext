@@ -13,9 +13,15 @@ to the publisher. Do not put private backend credentials into this repository.
 As of September 22, 2026, version 0.4.2 is uploaded as a **Draft**, not submitted
 or published. The listing text, category (Productivity → Tools), language, icon,
 two screenshots and small promotional tile were saved and verified after opening
-the draft again. Privacy disclosures, reviewer instructions and Unlisted
-distribution still need to be saved before submission. Browser controls stopped
-responding during privacy entry; do not assume attempted changes persisted.
+the draft again. The purpose, permission explanations, privacy URL, no-remote-code
+answer, six directly evidenced data categories (identifiers, authentication,
+communications, web history, activity and website content), and three approved
+Limited Use certifications were saved with Google's "Item saved" confirmation.
+Disclosure of health/financial/location content incidentally present in saved
+text is awaiting a publisher choice. Unlisted was selected and Save draft clicked,
+but its persistence must still be verified. Reviewer instructions were entered
+but saving has not been confirmed because browser controls stopped responding
+again. Do not assume attempted changes persisted; this item is not submitted.
 
 - Chrome item ID: `nmenckaggbchlanbhgbnlgodepgkeoaj`.
 - Package source: `623cd834b8990a0449f4b5c119f77a17030a6539`.
@@ -141,6 +147,11 @@ should appear. These generated assets are kept out of source control; their
 reproducible generator is checked in.
 
 ## Reviewer instructions
+
+The dashboard's Additional instructions field permits only 500 characters. Use
+this short note (482 characters), which links to the full procedure below:
+
+> Self-hosted; no maintainer credentials or AI key needed. Full setup/tests: https://github.com/nociza/SaveMyContext/blob/main/docs/chrome-web-store.md#reviewer-instructions . Fresh backend/: uv sync --frozen; uv run uvicorn app.main:app --host 127.0.0.1 --port 18888. Configure extension to this local URL; enable capture in popup. Use own test provider account. Chats/pages may contain health, financial or location text; no dedicated collection of these. Details in privacy policy.
 
 This extension requires a user-operated backend, not a paid account. No project
 account or maintainer credentials are necessary for local testing:
