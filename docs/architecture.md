@@ -43,7 +43,7 @@ versioned and cannot be silently undone by a later capture.
 
 SQLite is the authoritative operational ledger. Basic Memory is an optional
 service-managed search projection. Cold raw evidence can be moved to a verified,
-encrypted archive using the [archive workflow](evidence-archive.md); this does not
+optionally encrypted archive using the [archive workflow](evidence-archive.md); this does not
 move live SQLite onto a network filesystem. Archive roots and backup policies are
 installation configuration, never hard-coded provider requirements.
 

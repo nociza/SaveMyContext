@@ -151,7 +151,8 @@ site operation, never an automatic side effect of source archival.
 
 Eight additive tables hold summaries, map cache, source index pointers, facets,
 topic links, drafts, draft revisions, and export receipts. Take and restore-test a
-consistent encrypted application backup before deploying. SQLite stays on local
+consistent protected application backup before deploying. Encryption is an operator
+policy; plaintext backups expose their contents to anyone with storage access. SQLite stays on local
 disk; no NAS relocation or historical cleanup is required. Old releases can ignore
 these tables, but restoring an old backup loses new writing/review state.
 

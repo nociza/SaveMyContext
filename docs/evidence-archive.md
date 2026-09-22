@@ -25,7 +25,7 @@ When full, the entire new capture rolls back with HTTP 503 / Retry-After, so a
 client must retry rather than assume success. NAS outages do not affect normal
 reading/search; full context exports explicitly fail with 503 when required
 evidence is unavailable. No evidence is silently dropped. A crash after upload
-can leave a harmless unreferenced encrypted pack; automatic garbage collection
+can leave a harmless unreferenced pack; automatic garbage collection
 is deliberately absent.
 
 ## Configuration

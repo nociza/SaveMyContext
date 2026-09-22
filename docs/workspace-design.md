@@ -68,8 +68,9 @@ legacy interfaces are retained for compatibility, not part of the new default.
 
 ## Privacy and operations
 
-Application content stays out of Git, telemetry, and generic monitoring alerts.
-Backups cover the database plus any non-rebuildable attachments and are encrypted
-before leaving the host. Archive size determines capacity and backup destination;
+Application content stays out of source repositories, telemetry, and generic monitoring alerts.
+Backups cover the database plus any non-rebuildable attachments. Encryption is
+recommended; an operator may explicitly choose private plaintext backups and
+accept that repository/storage access exposes their contents. Archive size determines capacity and backup destination;
 small-state Git backups are not an unbounded conversation archive strategy.
 Notifications remain opt-in. Source imports never enable them.
