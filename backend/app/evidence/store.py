@@ -1,7 +1,7 @@
-"""Encrypted, content-addressed packs with verified read-after-write.
+"""Content-addressed gzip packs with optional age and verified read-after-write.
 
 No network mounts, plaintext spool files, or provider-specific schema. The
-catalog belongs to SQLite; the remote archive contains immutable ciphertext.
+catalog belongs to SQLite; the remote archive contains immutable pack bytes.
 """
 from __future__ import annotations
 
@@ -42,6 +42,11 @@ class Archive:
     def __init__(self, config: Path):
         try:
             self.config = json.loads(config.read_text())
+            if not isinstance(self.config, dict):
+                raise ValueError("Configuration must be an object")
+            self.encryption = self.config.get("encryption", "age")
+            if self.encryption not in ("age", "none"):
+                raise ValueError("Unsupported encryption mode")
         except (OSError, ValueError, TypeError):
             raise EvidenceUnavailable() from None
 
@@ -67,9 +72,15 @@ class Archive:
             raise EvidenceUnavailable() from None
 
     def _decrypt(self, ciphertext: bytes) -> dict:
-        compressed = self._run(
-            [self.config.get("age", "age"), "--decrypt", "-i", self.config["identity"]], ciphertext
-        )
+        try:
+            compressed = self._run(
+                [self.config.get("age", "age"), "--decrypt", "-i", self.config["identity"]], ciphertext
+            )
+        except KeyError:
+            raise EvidenceUnavailable() from None
+        return self._decode(compressed)
+
+    def _decode(self, compressed: bytes) -> dict:
         # Bound decompression, including corrupted/malicious archive files.
         import io
         try:
@@ -78,7 +89,7 @@ class Archive:
             if len(plain) > MAX_PACK:
                 raise EvidenceUnavailable()
             pack = json.loads(plain)
-            if pack.get("version") != 1 or not isinstance(pack.get("objects"), dict):
+            if not isinstance(pack, dict) or pack.get("version") != 1 or not isinstance(pack.get("objects"), dict):
                 raise EvidenceUnavailable()
             for key, value in pack["objects"].items():
                 if valid_hash(key) != digest(canonical(value)):
@@ -90,10 +101,15 @@ class Archive:
     def read_pack(self, key: str) -> dict:
         response = self._request({"op": "get", "key": valid_hash(key)})
         try:
-            ciphertext = base64.b64decode(response["data"], validate=True)
-            if digest(ciphertext) != key:
+            data = base64.b64decode(response["data"], validate=True)
+            if len(data) > MAX_PACK or digest(data) != key:
                 raise EvidenceUnavailable()
-            return self._decrypt(ciphertext)
+            encoding = response.get("encoding", "gzip+age")  # v1 receivers
+            if encoding == "gzip":
+                return self._decode(data)
+            if encoding == "gzip+age":
+                return self._decrypt(data)
+            raise EvidenceUnavailable()
         except (KeyError, ValueError, TypeError):
             raise EvidenceUnavailable() from None
 
@@ -101,12 +117,24 @@ class Archive:
         plain = canonical(pack)
         if len(plain) > MAX_PACK:
             raise EvidenceUnavailable()
-        ciphertext = self._run(
-            [self.config.get("age", "age"), "--encrypt", "-r", self.config["recipient"]],
-            gzip.compress(plain, compresslevel=6, mtime=0),
-        )
-        key = digest(ciphertext)
-        self._request({"op": "put", "key": key, "data": base64.b64encode(ciphertext).decode("ascii")})
+        data = gzip.compress(plain, compresslevel=6, mtime=0)
+        encoding = "gzip"
+        if self.encryption == "age":
+            try:
+                data = self._run(
+                    [self.config.get("age", "age"), "--encrypt", "-r", self.config["recipient"]], data,
+                )
+            except KeyError:
+                raise EvidenceUnavailable() from None
+            encoding = "gzip+age"
+        if len(data) > MAX_PACK:
+            raise EvidenceUnavailable()
+        key = digest(data)
+        response = self._request({"op": "put", "key": key, "encoding": encoding,
+                                  "data": base64.b64encode(data).decode("ascii")})
+        # Require an encoding-aware acknowledgment before accepting this write.
+        if encoding == "gzip" and response.get("encoding") != encoding:
+            raise EvidenceUnavailable()
         # A write acknowledgment alone never permits retiring inline evidence.
         if canonical(self.read_pack(key)) != plain:
             raise EvidenceUnavailable()

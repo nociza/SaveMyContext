@@ -45,7 +45,12 @@ def handle(root: Path, request: dict) -> dict:
     key = request.get("key", "")
     if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{64}", key):
         raise ValueError("Invalid key")
-    target = root / (key + ".json.gz.age")
+    encoding = request.get("encoding", "gzip+age")
+    if encoding not in ("gzip", "gzip+age"):
+        raise ValueError("Unsupported encoding")
+    if request.get("op") == "get" and "encoding" not in request:
+        encoding = "gzip" if (root / (key + ".json.gz")).exists() else "gzip+age"
+    target = root / (key + (".json.gz" if encoding == "gzip" else ".json.gz.age"))
     if target.is_symlink():
         raise ValueError("Symlink object")
     if request.get("op") == "put":
@@ -72,13 +77,13 @@ def handle(root: Path, request: dict) -> dict:
                 os.unlink(temporary)
         if target.read_bytes() != data:
             raise ValueError("Object collision or corruption")
-        return {"ok": True}
+        return {"ok": True, "encoding": encoding}
     if request.get("op") == "get":
         with target.open("rb") as stream:
             data = stream.read(MAX_OBJECT + 1)
         if len(data) > MAX_OBJECT or hashlib.sha256(data).hexdigest() != key:
             raise ValueError("Corrupt object")
-        return {"ok": True, "data": base64.b64encode(data).decode("ascii")}
+        return {"ok": True, "encoding": encoding, "data": base64.b64encode(data).decode("ascii")}
     raise ValueError("Unsupported operation")
 
 

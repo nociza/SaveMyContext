@@ -112,6 +112,80 @@ def test_missing_or_wrong_volume_never_creates_root(tmp_path, monkeypatch):
     assert not mount.exists()
 
 
+def test_plaintext_pack_roundtrip_needs_no_age_or_key(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"encryption": "none", "age": "/nonexistent"}))
+    archive = Archive(config)
+    monkeypatch.setattr(archive, "_request", lambda request: handle(tmp_path, request))
+    value = {"text": "Plaintext fixture 茶"}
+    pack = {"version": 1, "objects": {digest(canonical(value)): value}}
+    key = archive.write_pack(pack)
+    assert (tmp_path / (key + ".json.gz")).is_file()
+    assert archive.write_pack(pack) == key  # deterministic, no duplicate ciphertext
+    assert archive.read_pack(key) == pack
+    (tmp_path / (key + ".json.gz")).write_bytes(b"corrupt")
+    with pytest.raises(ValueError):
+        archive.read_pack(key)
+
+
+def test_unknown_encoding_and_symlink_plaintext_fail_closed(tmp_path):
+    key = "a" * 64
+    with pytest.raises(ValueError):
+        handle(tmp_path, {"op": "get", "key": key, "encoding": "../escape"})
+    (tmp_path / (key + ".json.gz")).symlink_to(tmp_path / "missing")
+    with pytest.raises(ValueError):
+        handle(tmp_path, {"op": "put", "key": key, "encoding": "gzip", "data": ""})
+
+
+@pytest.mark.skipif(not shutil.which("age-keygen"), reason="age optional outside deployment")
+def test_plaintext_migration_mixed_reads_resume_and_keyless_recovery(tmp_path, monkeypatch):
+    from app.evidence.migrate_plaintext import migrate_pack
+    path = database(tmp_path)
+    identity = tmp_path / "identity"
+    subprocess.run(["age-keygen", "-o", str(identity)], check=True, capture_output=True)
+    recipient = subprocess.check_output(["age-keygen", "-y", str(identity)], text=True).strip()
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"identity": str(identity), "recipient": recipient}))
+    archive = Archive(config)
+    root = tmp_path / "archive"
+    root.mkdir()
+    monkeypatch.setattr(archive, "_request", lambda request: handle(root, request))
+    transfer_batch(path, archive)
+    with sqlite3.connect(path) as db:
+        old = db.execute("SELECT pack_hash FROM evidence_objects").fetchone()[0]
+        refs = db.execute("SELECT evidence_ref FROM sync_events").fetchall()
+    archive.encryption = "none"
+    assert migrate_pack(path, archive, old)["applied"] is False
+    assert len(list(root.iterdir())) == 1
+    result = migrate_pack(path, archive, old, apply=True)
+    assert result["catalog_objects"] == 1
+    assert migrate_pack(path, archive, old, apply=True)["catalog_objects"] == 0
+    assert len(list(root.iterdir())) == 2
+    assert (root / (old + ".json.gz.age")).exists()
+    archive.config = {"encryption": "none", "age": "/nonexistent"}
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT evidence_ref FROM sync_events").fetchall() == refs
+        assert resolve(db, archive, refs[0][0])["nested"][0] == "private fixture"
+    with pytest.raises(EvidenceUnavailable):
+        archive.read_pack(old)
+
+
+def test_plaintext_migration_failure_preserves_catalog(tmp_path):
+    from app.evidence.migrate_plaintext import migrate_pack
+    path, archive = database(tmp_path), MemoryArchive()
+    transfer_batch(path, archive)
+    archive.encryption = "none"
+    with sqlite3.connect(path) as db:
+        old = db.execute("SELECT pack_hash FROM evidence_objects").fetchone()[0]
+    def fail(pack):
+        raise EvidenceUnavailable()
+    archive.write_pack = fail
+    with pytest.raises(EvidenceUnavailable):
+        migrate_pack(path, archive, old, apply=True)
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT pack_hash FROM evidence_objects").fetchone()[0] == old
+
+
 @pytest.mark.skipif(not shutil.which("age-keygen"), reason="age optional outside deployment")
 def test_real_age_roundtrip_readback_and_corruption(tmp_path, monkeypatch):
     identity = tmp_path / "key"
