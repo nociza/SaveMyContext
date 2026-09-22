@@ -7,7 +7,7 @@ import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcu
 const GROK_HISTORY_PAGE_SIZE = 100;
 const GROK_HISTORY_DETAIL_CONCURRENCY = 4;
 const GROK_ORIGIN = "https://grok.com";
-const nativeFetch = window.fetch.bind(window);
+import { authorizedHistoryFetch as nativeFetch } from "./capture-permission";
 
 interface GrokHistoryHooks {
   runId: string;

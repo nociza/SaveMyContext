@@ -16,4 +16,8 @@ button:focus-visible { outline: 2px solid #287450; outline-offset: 2px; }
 #settings { font-size: 12px; padding: 5px 8px; }
 #action-status { font-size: 12px; }
 #provider-drift-card { padding: 10px; border: 1px solid #c69956; border-radius: 8px; }
+#consent { padding: 12px; border: 1px solid #8aa795; border-radius: 10px; font-size: 12px; }
+#consent-destination { overflow-wrap: anywhere; }
+#enable-capture { display: block; width: 100%; margin-top: 12px; background: #265b43; color: white; }
+a { color: inherit; } footer, details p { font-size: 11px; margin-top: 12px; }
 @media (prefers-color-scheme: dark) { :root { background: #17251e; color: #e3ece6; } button { background: #23362b; border-color: #4a5c50; } .muted, dt { color: #b2c2b7; } }

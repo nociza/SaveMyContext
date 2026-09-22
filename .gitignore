@@ -19,6 +19,7 @@ extension/node_modules/
 extension/.vite/
 extension/playwright-report/
 extension/test-results/
+extension/release/
 frontend/dist/
 frontend/node_modules/
 .pnpm-store/

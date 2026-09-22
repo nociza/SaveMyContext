@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join,resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { chromium,expect,test,type APIRequestContext } from "@playwright/test";
+import { chromium,expect,test,type APIRequestContext,type Page } from "@playwright/test";
+
+async function enableCapture(options: Page): Promise<void> {
+  const popup = await options.context().newPage();
+  await popup.goto(options.url().replace("options.html", "popup.html"));
+  await popup.getByRole("button", { name: "Agree and enable capture" }).click();
+  await expect(popup.locator("#consent")).toBeHidden();
+  await popup.close();
+}
 
 const currentDir = fileURLToPath(new URL(".", import.meta.url));
 const extensionRoot = resolve(currentDir, "..");
@@ -289,6 +297,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       const conversationUrl = "https://chatgpt.com/";
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
@@ -520,6 +529,7 @@ test("skips indexing when trigger-word mode is enabled and the opening request d
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       const conversationUrl = "https://chatgpt.com/";
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
@@ -697,6 +707,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await serviceWorker.evaluate((skippedId) => {
         return chrome.storage.local.set({
@@ -1154,6 +1165,7 @@ test("surfaces provider drift alerts when Gemini history shapes change", async (
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await context.route(/^https:\/\/gemini\.google\.com\/app(?:\/.*)?$/, async (route) => {
         await route.fulfill({
@@ -1308,6 +1320,7 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await serviceWorker.evaluate((skippedId) => {
         return chrome.storage.local.set({
@@ -1707,6 +1720,7 @@ test("falls back to Grok response-node and load-responses when direct responses 
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await context.route(/^https:\/\/grok\.com(?:\/c\/.*)?$/, async (route) => {
         await route.fulfill({
@@ -1926,6 +1940,7 @@ test("surfaces provider drift alerts when Grok history shapes change", async ({}
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await context.route(/^https:\/\/grok\.com(?:\/c\/.*)?$/, async (route) => {
         await route.fulfill({
@@ -2097,6 +2112,7 @@ test("searches the knowledge base and injects a fact into the focused page field
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await context.route("https://example.com/compose", async (route) => {
         await route.fulfill({
@@ -2213,6 +2229,7 @@ test("shows the selection capture pop-up and saves the selected text into the ba
         (form as HTMLFormElement).requestSubmit();
       });
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
+      await enableCapture(optionsPage);
 
       await context.route("https://example.com/article", async (route) => {
         await route.fulfill({

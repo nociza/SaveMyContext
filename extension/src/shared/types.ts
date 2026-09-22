@@ -106,6 +106,8 @@ export interface ProviderHistorySyncState {
 export interface ExtensionSettings {
   workspaceUrl?: string;
   capturePaused?: boolean;
+  /** Derived from local, destination-bound consent; never accepted from synced settings. */
+  captureConsentGranted?: boolean;
   backendUrl: string;
   backendToken?: string;
   enabledProviders: Partial<Record<ProviderName, boolean>>;
@@ -898,7 +900,7 @@ export interface HistorySyncUpdate {
   providerDriftAlert?: ProviderDriftAlert | null;
 }
 
-export type MainWorldControlPayload = HistorySyncControlPayload;
+export type MainWorldControlPayload = HistorySyncControlPayload | { type: "SET_CAPTURE_ENABLED"; enabled: boolean };
 
 export type BridgeToPageMessage = {
   type: "CONTROL";
@@ -1067,6 +1069,8 @@ export interface SourceCaptureResponse {
 export type RuntimeMessage =
   | { type: "GET_DELIVERY_STATUS" }
   | { type: "SET_CAPTURE_PAUSED"; paused: boolean }
+  | { type: "ACCEPT_CAPTURE_CONSENT"; backendUrl: string }
+  | { type: "CLEAR_CAPTURE_QUEUE" }
   | { type: "IMPORT_ACTIVE_HISTORY" }
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
   | { type: "PAGE_VISIT"; payload: PageVisitPayload }

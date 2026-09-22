@@ -14,8 +14,9 @@ Understand the product boundaries:
 - `frontend/`: independent static app and dashboard embedding package; the sole UI source of truth
 - `extension/`: lightweight capture, reliable delivery, optional quick search, settings, and workspace launcher
 
-There is no selected project license yet. Resolve licensing before treating this
-as a generally reusable open-source release; public visibility alone is insufficient.
+The project uses Apache-2.0. Contributions intentionally submitted for inclusion
+are governed by that license; preserve third-party attribution and do not submit
+code you do not have permission to contribute. See the root LICENSE and NOTICE.
 
 ## Local setup
 

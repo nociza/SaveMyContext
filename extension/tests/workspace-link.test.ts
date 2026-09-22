@@ -22,7 +22,7 @@ describe("workspace launcher", () => {
   });
   it("does not import all history or apply arbitrary word filters on a new installation", () => {
     expect(defaultSettings.autoSyncHistory).toBe(false);
-    expect(defaultSettings.capturePaused).toBe(false);
+    expect(defaultSettings.capturePaused).toBe(true);
     expect(defaultSettings.triggerWords).toEqual([]);
     expect(defaultSettings.discardWordsEnabled).toBe(false);
   });

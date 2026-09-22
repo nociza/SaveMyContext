@@ -10,9 +10,10 @@ test("frontend builds independently with only Node, without Python, backend, or 
   const root = fileURLToPath(new URL("../", import.meta.url));
   const copy = await mkdtemp(join(tmpdir(), "smc-standalone-build-"));
   try {
-    for (const name of ["src", "scripts", "package.json"]) await cp(join(root, name), join(copy, name), { recursive: true });
+    for (const name of ["src", "scripts", "package.json", "LICENSE", "NOTICE"]) await cp(join(root, name), join(copy, name), { recursive: true });
     execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: copy });
     const html = await readFile(join(copy, "dist/index.html"), "utf8");
+    assert.equal(await readFile(join(copy, "dist/LICENSE"), "utf8"), await readFile(join(root, "LICENSE"), "utf8"));
     assert.match(html, /\.\/assets\/app.js/);
     assert.doesNotMatch(html, /backend|chrome-extension|dash\.berkeleycs/);
     const component = await readFile(join(copy, "dist/assets/workspace.js"), "utf8");

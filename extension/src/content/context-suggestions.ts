@@ -356,10 +356,10 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
   async function refreshSettings(): Promise<void> {
     try {
       const settings = await sendMessage<
-        Pick<ExtensionSettings, "contextSuggestionsEnabled" | "contextSuggestionsFloatingButtonEnabled" | "pageSurfaceScope">
+        Pick<ExtensionSettings, "contextSuggestionsEnabled" | "contextSuggestionsFloatingButtonEnabled" | "pageSurfaceScope" | "captureConsentGranted" | "capturePaused">
       >({ type: "GET_SETTINGS" });
       enabled =
-        Boolean(settings.contextSuggestionsEnabled) &&
+        Boolean(settings.captureConsentGranted && !settings.capturePaused && settings.contextSuggestionsEnabled) &&
         pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, window.location.href);
       floatingButtonEnabled = settings.contextSuggestionsFloatingButtonEnabled !== false;
     } catch {

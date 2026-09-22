@@ -275,10 +275,12 @@ export function createSelectionCaptureController(sendMessage: RuntimeRequester):
     try {
       const settings = await sendMessage<{
         selectionCaptureEnabled?: boolean;
+        captureConsentGranted?: boolean;
+        capturePaused?: boolean;
         pageSurfaceScope?: "ai_providers" | "all_pages";
       }>({ type: "GET_SETTINGS" });
       enabled =
-        Boolean(settings.selectionCaptureEnabled) &&
+        Boolean(settings.captureConsentGranted && !settings.capturePaused && settings.selectionCaptureEnabled) &&
         pageSurfaceScopeAllowsUrl(settings.pageSurfaceScope, window.location.href);
       if (!enabled) {
         hide();

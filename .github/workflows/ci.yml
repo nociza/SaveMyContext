@@ -144,6 +144,13 @@ jobs:
           test ! -e dist/stale-artifact.js
           test -f dist/manifest.json
           test -z "$(find dist -type f -name '*.map' -print -quit)"
+      - name: Verify reproducible Chrome Web Store archive
+        run: |
+          node scripts/package-store.mjs
+          cp release/*.sha256 /tmp/smc-release.sha256
+          node scripts/package-store.mjs
+          cmp release/*.sha256 /tmp/smc-release.sha256
+          python3 -m zipfile -t release/savemycontext-*.zip
 
   extension-e2e:
     name: Extension end-to-end

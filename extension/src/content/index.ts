@@ -2,6 +2,7 @@ import { BRIDGE_CONNECT_SOURCE, MAIN_WORLD_READY_ATTRIBUTE } from "../shared/bri
 import { detectProviderFromUrl } from "../shared/provider";
 import type {
   BridgeToExtensionMessage,
+  ExtensionSettings,
   HistorySyncTriggerPayload,
   MainWorldControlPayload,
   PingProviderTabResponse,
@@ -21,6 +22,24 @@ const RUNTIME_MESSAGE_RETRY_INTERVAL_MS = 150;
 let bridgePort: MessagePort | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
 let runtimeDispatchQueue = Promise.resolve();
+let captureEnabled = false;
+let permissionGeneration = 0;
+
+async function syncCapturePermission(): Promise<void> {
+  // Default-deny in both worlds. Never forward a private capture before consent.
+  const generation = ++permissionGeneration;
+  try {
+    const settings: ExtensionSettings = await chrome.runtime.sendMessage({ type: "GET_SETTINGS" });
+    if (generation !== permissionGeneration) return;
+    const provider = detectProviderFromUrl(location.href);
+    captureEnabled = Boolean(settings.captureConsentGranted && !settings.capturePaused && provider && settings.enabledProviders[provider]);
+    await postControlMessage({ type: "SET_CAPTURE_ENABLED", enabled: captureEnabled });
+  } catch {
+    if (generation !== permissionGeneration) return;
+    captureEnabled = false;
+    bridgePort?.postMessage({ type: "CONTROL", payload: { type: "SET_CAPTURE_ENABLED", enabled: false } });
+  }
+}
 const quickSearchPalette = createQuickSearchPalette(async <TResponse>(message: RuntimeMessage) => {
   return chrome.runtime.sendMessage(message) as Promise<TResponse>;
 });
@@ -63,6 +82,7 @@ function isMainWorldReady(): boolean {
 
 function handleBridgeMessage(message: BridgeToExtensionMessage): void {
   if (message.type === "NETWORK_CAPTURE") {
+    if (!captureEnabled) return;
     enqueueRuntimeMessage({
       type: "NETWORK_CAPTURE",
       payload: message.payload
@@ -230,13 +250,16 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
   if (message.type === "TRIGGER_HISTORY_SYNC") {
     const payload: HistorySyncTriggerPayload = message.payload;
-    void postControlMessage({
-      type: "START_HISTORY_SYNC",
-      historyFingerprints: payload.historyFingerprints,
-      syncedSessionIds: payload.syncedSessionIds,
-      previousTopSessionId: payload.previousTopSessionId,
-      previousTopSessionIds: payload.previousTopSessionIds,
-      refreshSessionIds: payload.refreshSessionIds
+    void syncCapturePermission().then(() => {
+      if (!captureEnabled) throw new Error("Capture is paused or awaiting consent");
+      return postControlMessage({
+        type: "START_HISTORY_SYNC",
+        historyFingerprints: payload.historyFingerprints,
+        syncedSessionIds: payload.syncedSessionIds,
+        previousTopSessionId: payload.previousTopSessionId,
+        previousTopSessionIds: payload.previousTopSessionIds,
+        refreshSessionIds: payload.refreshSessionIds
+      });
     })
       .then(() => {
         sendResponse({ ok: true });
@@ -266,7 +289,10 @@ window.addEventListener("beforeunload", () => {
   bridgePort = null;
 });
 
-void ensureBridgeReady().catch(() => undefined);
+chrome.storage.onChanged.addListener(changes => {
+  if (["savemycontext.settings", "savemycontext.settings.cache", "savemycontext.capture-consent"].some(key => key in changes)) void syncCapturePermission();
+});
+void syncCapturePermission();
 installNavigationObserver();
 installPageVisitObserver();
 notifyPageVisit();

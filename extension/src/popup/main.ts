@@ -19,6 +19,8 @@ async function refresh() {
       chrome.runtime.sendMessage({ type: "GET_DELIVERY_STATUS" }) as Promise<{ pending: number }>,
     ]);
     settings = configuration;
+    document.getElementById("consent")!.hidden = Boolean(settings.captureConsentGranted);
+    text("consent-destination", settings.backendUrl);
     button("open-dashboard").disabled = false;
     text("connection", status.backendValidationError ? "Connection needs attention" : status.backendValidatedAt ? "Connected" : "Not connected yet");
     text("last-success", status.lastSuccessAt ? new Date(status.lastSuccessAt).toLocaleString() : "Nothing saved yet");
@@ -33,7 +35,7 @@ async function refresh() {
     text("provider-drift", status.providerDriftAlert ? `${status.providerDriftAlert.provider}: ${status.providerDriftAlert.message}` : "");
     document.getElementById("provider-drift-card")!.hidden = !status.providerDriftAlert;
     button("pause").textContent = settings.capturePaused ? "Resume capture" : "Pause capture";
-    button("pause").disabled = false;
+    button("pause").disabled = !settings.captureConsentGranted;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const provider = tab?.url ? detectProviderFromUrl(tab.url) : null;
     const supported = Boolean(provider && supportsProactiveHistorySync(provider));
@@ -62,6 +64,17 @@ action("pause", async () => {
   const result = await chrome.runtime.sendMessage({ type: "SET_CAPTURE_PAUSED", paused: !settings.capturePaused });
   if (!result?.ok) throw new Error(result?.error || "Could not change capture state");
   text("action-status", result.paused ? "Paused. Existing queued evidence is retained." : "Capture resumed.");
+});
+action("enable-capture", async () => {
+  const result = await chrome.runtime.sendMessage({ type: "ACCEPT_CAPTURE_CONSENT", backendUrl: settings.backendUrl });
+  if (!result?.ok) throw new Error(result?.error || "Could not enable capture");
+  text("action-status", "Capture enabled. Reload an already-open conversation if needed.");
+});
+action("clear-queue", async () => {
+  if (!confirm("Permanently discard all unsent captures from this browser and pause capture? This cannot be undone. Already delivered data will not be deleted.")) return;
+  const result = await chrome.runtime.sendMessage({ type: "CLEAR_CAPTURE_QUEUE" });
+  if (!result?.ok) throw new Error(result?.error || "Could not clear the queue");
+  text("action-status", "Queued captures discarded. Capture is paused.");
 });
 action("import-history", async () => {
   if (!confirm("Import conversation history from the active provider into your private workspace? Your provider/account filters still apply.")) {

@@ -184,6 +184,7 @@ deployment repository; no particular dashboard, NAS, or chat bot is required.
 
 ### Licensing
 
-No project license has been selected yet. Public visibility is not an open-source
-license grant. Choosing and adding a license is a separate owner decision; this
-refactor does not silently assign one.
+SaveMyContext is licensed under the [Apache License 2.0](LICENSE).
+Third-party dependencies retain their own licenses. See [NOTICE](NOTICE).
+
+[Privacy policy](docs/privacy.md) · [Chrome Web Store release guide](docs/chrome-web-store.md)

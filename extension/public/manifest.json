@@ -1,15 +1,14 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "116",
   "name": "SaveMyContext",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Capture AI conversations into your private workspace. Durable delivery, explicit history import, and ChatGPT Projects support.",
   "permissions": [
     "storage",
-    "tabs",
     "scripting",
     "activeTab",
-    "alarms",
-    "clipboardWrite"
+    "alarms"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

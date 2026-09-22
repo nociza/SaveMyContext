@@ -1,6 +1,7 @@
 {
   "name": "savemycontext-extension",
-  "version": "0.4.1",
+  "version": "0.4.2",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "dependencies": { "@savemycontext/ui": "link:../frontend" },
@@ -11,6 +12,8 @@
     "debug:browser": "node scripts/manual-debug-browser.mjs",
     "typecheck": "tsc --noEmit",
     "check:bundle": "node scripts/check-bundle.mjs",
+    "package:store": "pnpm build && pnpm check:bundle && node scripts/package-store.mjs",
+    "store:assets": "node scripts/store-assets.mjs",
     "build:capture-preview": "node scripts/build-capture-preview.mjs",
     "test": "vitest run tests",
     "test:e2e": "pnpm build && playwright test"

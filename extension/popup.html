@@ -10,6 +10,15 @@
   <body data-page="popup">
     <header><h1>SaveMyContext</h1><button id="settings">Settings</button></header>
     <p id="connection" role="status">Checking connection…</p>
+    <section id="consent" hidden aria-labelledby="consent-title">
+      <h2 id="consent-title">Choose what you save</h2>
+      <p>Enable capture to save conversations you open or create on enabled AI providers, including messages, titles, URLs, account identifiers, and ChatGPT Project context.</p>
+      <p>Destination: <strong id="consent-destination"></strong></p>
+      <p>Provider and account filters are in Settings. All accounts on enabled providers are included by default. History import is separate and off by default.</p>
+      <p>Queued chats are encrypted in this browser until delivered. Your backend controls storage and any optional AI processing. You can pause at any time.</p>
+      <a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy and deletion details</a>
+      <button id="enable-capture">Agree and enable capture</button>
+    </section>
     <p id="capture-state" class="muted"></p><p id="pending" class="muted"></p>
     <p id="capture-warning" role="status" hidden></p>
     <dl><dt>Last saved</dt><dd id="last-success">—</dd><dt>History import</dt><dd id="history-sync">—</dd></dl>
@@ -17,6 +26,7 @@
     <div class="actions"><button id="save-page" disabled>Save page</button><button id="import-history" disabled>Import history</button><button id="pause" disabled>Pause capture</button></div>
     <button id="open-dashboard" disabled>Open workspace</button>
     <p id="action-status" role="status" aria-live="polite"></p>
-    <details><summary>Diagnostics</summary><dl><dt>Last conversation</dt><dd id="last-session">None</dd><dt>Last error</dt><dd id="last-error">None</dd></dl></details>
+    <details><summary>Diagnostics &amp; local data</summary><dl><dt>Last conversation</dt><dd id="last-session">None</dd><dt>Last error</dt><dd id="last-error">None</dd></dl><button id="clear-queue">Discard queued captures</button><p>This pauses capture and removes unsent chats only. Already delivered data stays on your backend.</p></details>
+    <footer><a href="https://github.com/nociza/SaveMyContext/blob/main/docs/privacy.md" target="_blank" rel="noopener noreferrer">Privacy</a></footer>
   </body>
 </html>

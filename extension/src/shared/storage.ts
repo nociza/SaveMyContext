@@ -23,6 +23,15 @@ const SYNC_STATE_KEY = "savemycontext.sync-state";
 const STATUS_KEY = "savemycontext.status";
 const HISTORY_SYNC_KEY = "savemycontext.history-sync";
 const INSTALLATION_ID_KEY = "savemycontext.installation-id";
+const CONSENT_KEY = "savemycontext.capture-consent";
+const CONSENT_VERSION = 1;
+
+export async function acceptCaptureConsent(backendUrl: string): Promise<void> {
+  const current = await getSettings();
+  if (current.backendUrl !== backendUrl) throw new Error("Destination changed. Review it before enabling capture.");
+  await chrome.storage.local.set({ [CONSENT_KEY]: { version: CONSENT_VERSION, backendUrl, acceptedAt: new Date().toISOString() } });
+  await saveSettings({ capturePaused: false });
+}
 
 const storageWrites = new Map<string, Promise<void>>();
 async function lockedStorage<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -39,7 +48,8 @@ async function lockedStorage<T>(key: string, operation: () => Promise<T>): Promi
 
 export const defaultSettings: ExtensionSettings = {
   workspaceUrl: "",
-  capturePaused: false,
+  capturePaused: true,
+  captureConsentGranted: false,
   backendUrl: "http://127.0.0.1:18888",
   backendToken: "",
   enabledProviders: {
@@ -185,12 +195,16 @@ export async function initializeStorage(): Promise<void> {
 export async function getSettings(): Promise<ExtensionSettings> {
   const [stored, local] = await Promise.all([
     chrome.storage.sync.get(SETTINGS_KEY),
-    chrome.storage.local.get([SECRET_SETTINGS_KEY, SETTINGS_CACHE_KEY])
+    chrome.storage.local.get([SECRET_SETTINGS_KEY, SETTINGS_CACHE_KEY, CONSENT_KEY])
   ]);
   const current =
     ((local[SETTINGS_CACHE_KEY] ?? stored[SETTINGS_KEY] ?? {}) as Partial<ExtensionSettings>);
   const secretSettings = (local[SECRET_SETTINGS_KEY] ?? {}) as Pick<ExtensionSettings, "backendToken">;
-  return mergeSettings(current, secretSettings);
+  const settings = mergeSettings(current, secretSettings);
+  const consent = local[CONSENT_KEY] as { version?: number; backendUrl?: string } | undefined;
+  settings.captureConsentGranted = consent?.version === CONSENT_VERSION && consent?.backendUrl === settings.backendUrl;
+  settings.capturePaused = !settings.captureConsentGranted || settings.capturePaused;
+  return settings;
 }
 
 export async function saveSettings(update: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
@@ -240,7 +254,7 @@ async function saveSettingsUnlocked(update: Partial<ExtensionSettings>): Promise
     backendUrl: next.backendUrl,
     autoSyncHistory: next.autoSyncHistory
   });
-  return next;
+  return getSettings();
 }
 
 export async function getInstallationId(): Promise<string> {

@@ -1,6 +1,7 @@
 import { providerRegistry } from "../providers/registry";
 import { evaluateIndexingRules } from "../shared/indexing-rules";
 import type { BackendIngestPayload,ExtensionSettings } from "../shared/types";
+import { createCaptureKey, openCapture, sealCapture, type SealedCapture } from "./capture-cipher";
 
 export const OUTBOX_ALARM = "smc-capture-outbox-v1";
 const MAX_BYTES = 128 * 1024 * 1024;
@@ -40,37 +41,79 @@ export interface CaptureStore {
 
 /** Private extension-origin IndexedDB, not sync storage and never provider localStorage. */
 export class IndexedCaptureStore implements CaptureStore {
+  private keyPromise?: Promise<CryptoKey>;
   private async database(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open("smc-capture-outbox", 1);
-      request.onupgradeneeded = () => request.result.createObjectStore("captures", { keyPath: "id" });
+      const request = indexedDB.open("smc-capture-outbox", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains("captures")) db.createObjectStore("captures", { keyPath: "id" });
+        if (!db.objectStoreNames.contains("keys")) db.createObjectStore("keys");
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(new Error("Cannot open capture outbox"));
       request.onblocked = () => reject(new Error("Capture outbox upgrade blocked"));
     });
   }
 
-  private async transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  private async transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>, storeName = "captures"): Promise<T> {
     const db = await this.database();
     try {
       return await new Promise<T>((resolve, reject) => {
-        const tx = db.transaction("captures", mode);
-        const request = action(tx.objectStore("captures"));
+        const tx = db.transaction(storeName, mode);
+        const request = action(tx.objectStore(storeName));
         tx.oncomplete = () => resolve(request.result);
         tx.onabort = tx.onerror = () => reject(new Error("Capture outbox transaction failed"));
       });
     } finally { db.close(); }
   }
 
+  private key(): Promise<CryptoKey> {
+    this.keyPromise ??= (async () => {
+      const existing = await this.transaction("readonly", store => store.get("aes-gcm-v1"), "keys");
+      if (existing) return existing as CryptoKey;
+      const key = await createCaptureKey();
+      try { await this.transaction("readwrite", store => store.add(key, "aes-gcm-v1"), "keys"); }
+      catch {
+        // Another extension context may have won the first-use race. Never replace its key.
+        const winner = await this.transaction("readonly", store => store.get("aes-gcm-v1"), "keys");
+        if (winner) return winner as CryptoKey;
+        throw new Error("Cannot persist capture encryption key");
+      }
+      return key;
+    })().catch(error => { this.keyPromise = undefined; throw error; });
+    return this.keyPromise;
+  }
+
   async list(): Promise<PendingCapture[]> {
-    const items = await this.transaction("readonly", (store) => store.getAll());
+    const records: (PendingCapture | SealedCapture)[] = await this.transaction("readonly", (store) => store.getAll());
+    const key = await this.key();
+    const items: PendingCapture[] = [];
+    for (const record of records) {
+      if ("ciphertext" in record) items.push(await openCapture(record, key));
+      else {
+        // Legacy data is replaced only after encryption succeeds. A failed migration
+        // retains the original, never silently drops an undelivered conversation.
+        const sealed = await sealCapture(record, key);
+        await this.transaction("readwrite", store => {
+          const request = store.get(record.id);
+          request.onsuccess = () => { if (request.result && !("ciphertext" in request.result)) store.put(sealed); };
+          return request;
+        });
+        items.push(record);
+      }
+    }
     return items.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }
   async put(item: PendingCapture): Promise<void> {
-    await this.transaction("readwrite", (store) => store.put(item));
+    const sealed = await sealCapture(item, await this.key());
+    await this.transaction("readwrite", (store) => store.put(sealed));
   }
   async count(): Promise<number> {
-    return this.transaction("readonly", (store) => store.count());
+    return (await this.list()).length;
+  }
+  async clear(): Promise<void> {
+    await this.transaction("readwrite", store => store.clear());
   }
   async remove(id: string): Promise<void> {
     await this.transaction("readwrite", (store) => store.delete(id));

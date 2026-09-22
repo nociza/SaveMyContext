@@ -24,6 +24,11 @@ test("capture companion pauses offline, retains its queue, and launches one work
     const origin = `chrome-extension://${new URL(worker.url()).host}`;
     const popup = await context.newPage();
     await popup.goto(`${origin}/popup.html`);
+    await expect(popup.locator("#consent")).toBeVisible();
+    await expect(popup.locator("#pause")).toBeDisabled();
+    const unapproved = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "SET_CAPTURE_PAUSED", paused: false }));
+    expect(unapproved.ok).toBe(false);
+    await popup.getByRole("button", { name: "Agree and enable capture" }).click();
     await expect(popup.locator("#pause")).toBeEnabled();
     // Refuse accidental whole-corpus or model-worker requests from the new popup.
     await worker.evaluate(() => {
@@ -47,7 +52,7 @@ test("capture companion pauses offline, retains its queue, and launches one work
     await popup.evaluate(async () => {
       // Seed only synthetic queued evidence on an isolated extension origin.
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("smc-capture-outbox", 1);
+        const request = indexedDB.open("smc-capture-outbox", 2);
         request.onupgradeneeded = () => request.result.createObjectStore("captures", { keyPath: "id" });
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
@@ -61,6 +66,17 @@ test("capture companion pauses offline, retains its queue, and launches one work
     });
     await popup.reload();
     await expect(popup.locator("#pending")).toHaveText("1 waiting to send");
+    const storedQueue = await popup.evaluate(async () => new Promise<any[]>((resolve, reject) => {
+      const request = indexedDB.open("smc-capture-outbox", 2);
+      request.onsuccess = () => {
+        const db = request.result, tx = db.transaction("captures"), get = tx.objectStore("captures").getAll();
+        tx.oncomplete = () => { db.close(); resolve(get.result); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      };
+    }));
+    expect(storedQueue[0]).toHaveProperty("ciphertext");
+    expect(storedQueue[0]).not.toHaveProperty("payload");
+    expect(storedQueue[0]).not.toHaveProperty("backendUrl");
     await popup.screenshot({ path: testInfo.outputPath("companion-paused.png") });
     await popup.locator("#pause").click();
     await expect(popup.locator("#pause")).toHaveText("Pause capture");

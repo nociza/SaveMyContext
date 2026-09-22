@@ -16,6 +16,8 @@ nav:
     url: /remote-access/
   - title: Security
     url: /security-and-access/
+  - title: Privacy
+    url: /privacy/
   - title: Usage
     url: /using-save-my-context/
 

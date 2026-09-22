@@ -91,5 +91,5 @@ Do not edit `backend/app/workspace/web/` directly. CI checks for drift between
 that distribution and this source. The backend supplies its configured API prefix
 at runtime; standalone hosts supply their own `assets/config.json`.
 
-No license has been selected for the project yet; `private: true` prevents an
-accidental npm publication. This package introduces no new license grant.
+Licensed under Apache-2.0; see [LICENSE](LICENSE). `private: true` prevents
+accidental npm publication and does not restrict reuse under that license.

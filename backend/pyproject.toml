@@ -3,6 +3,8 @@ name = "savemycontext"
 version = "0.3.0"
 description = "Self-hosted FastAPI backend and Linux/macOS service CLI for SaveMyContext"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 authors = [{ name = "SaveMyContext" }]
 keywords = ["ai", "chrome-extension", "fastapi", "knowledge-base", "obsidian", "self-hosted"]

@@ -55,7 +55,7 @@ NAS, private tunnel, chat bot, or infrastructure repository.
 
 Fleet-specific rollout scripts, runtime secrets, machine inventory, monitoring
 destinations, and archive mount paths belong in the deployment repository.
-No hosted service or license grant is implied by the public code.
+The project is Apache-2.0 licensed; no hosted service is included with the code.
 
 The old graph/pile API is retained for compatibility, but its extension UI and
 browser inference runner are no longer maintained. Do not add new clients for those

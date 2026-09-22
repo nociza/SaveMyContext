@@ -10,6 +10,7 @@ const backend = process.argv.includes("--backend") || process.argv.includes("--c
 const destination = backend ? join(root, "../backend/app/workspace/web") : join(root, "dist");
 const files = new Map([...sources].map(([name, bytes]) => [backend ? name : `assets/${name}`, bytes]));
 files.set("index.html", Buffer.from(html.replaceAll("__SMC_ASSETS__", backend ? "/workspace-assets" : "./assets")));
+if (!backend) for (const name of ["LICENSE", "NOTICE"]) files.set(name, await readFile(join(root, name)));
 // Keep vendored files for Python wheels: no Node or frontend checkout needed at runtime.
 files.set("BUILD.txt", Buffer.from("Generated from frontend/src by frontend/scripts/build.mjs. Do not edit these copies.\n"));
 if (process.argv.includes("--check-backend")) {

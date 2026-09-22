@@ -1,6 +1,7 @@
 {
   "name": "@savemycontext/ui",
   "version": "0.4.0",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "Standalone and embeddable SaveMyContext workspace, with no runtime framework dependency",
@@ -10,7 +11,7 @@
     "./embed": { "types": "./src/embed.d.ts", "default": "./src/embed.js" },
     "./workspace.css": "./src/workspace.css"
   },
-  "files": ["src"],
+  "files": ["src", "LICENSE", "NOTICE"],
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:backend": "node scripts/build.mjs --backend",

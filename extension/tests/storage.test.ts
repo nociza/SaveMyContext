@@ -205,14 +205,31 @@ describe("storage", () => {
     const sync = createStorageArea();
     const local = createStorageArea();
     vi.stubGlobal("chrome", { storage: { sync, local } });
-    const { saveSettings, getSettings, initializeStorage } = await import("../src/shared/storage");
+    const { saveSettings, getSettings, initializeStorage, acceptCaptureConsent } = await import("../src/shared/storage");
     await saveSettings({ autoSyncHistory: true, triggerWords: ["custom"], backendToken: "private-secret" });
     await saveSettings({ capturePaused: true, workspaceUrl: "https://dashboard.example/memory" });
     await initializeStorage();
     expect(await getSettings()).toMatchObject({ capturePaused: true, workspaceUrl: "https://dashboard.example/memory", autoSyncHistory: true, triggerWords: ["custom"], backendToken: "private-secret" });
     expect(JSON.stringify(sync.state)).not.toContain("private-secret");
+    await acceptCaptureConsent((await getSettings()).backendUrl);
     await Promise.all([saveSettings({ capturePaused: false }), saveSettings({ workspaceUrl: "https://updated.example/memory" })]);
     expect(await getSettings()).toMatchObject({ capturePaused: false, workspaceUrl: "https://updated.example/memory" });
+  });
+
+  it("requires local destination-bound consent even when synced settings claim otherwise", async () => {
+    const sync = createStorageArea({ "savemycontext.settings": { capturePaused: false, captureConsentGranted: true } });
+    const local = createStorageArea();
+    vi.stubGlobal("chrome", { storage: { sync, local } });
+    const { getSettings, saveSettings, acceptCaptureConsent } = await import("../src/shared/storage");
+    expect(await getSettings()).toMatchObject({ capturePaused: true, captureConsentGranted: false });
+    await acceptCaptureConsent((await getSettings()).backendUrl);
+    expect(await getSettings()).toMatchObject({ capturePaused: false, captureConsentGranted: true });
+    expect(JSON.stringify(sync.state)).not.toContain("acceptedAt");
+    await saveSettings({ backendUrl: "https://other.example", capturePaused: false, captureConsentGranted: true });
+    expect(await getSettings()).toMatchObject({ capturePaused: true, captureConsentGranted: false });
+    await expect(acceptCaptureConsent("http://127.0.0.1:18888")).rejects.toThrow("Destination changed");
+    await acceptCaptureConsent("https://other.example");
+    expect((await getSettings()).capturePaused).toBe(false);
   });
 
   it("creates and caches an installation id in local storage", async () => {

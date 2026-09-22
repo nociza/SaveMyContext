@@ -38,5 +38,5 @@ Browser adapters use your existing provider session; provider websites can chang
 Errors are surfaced rather than treated as successful captures. Agent context
 handoffs use the CLI/skill instead of pretending every provider has a browser adapter.
 
-The public repository has no selected license yet. Its availability on GitHub is
-not a claim that it already has an open-source license.
+SaveMyContext is open source under the [Apache License 2.0](https://github.com/nociza/SaveMyContext/blob/main/LICENSE).
+Read the [privacy policy](privacy.md) before enabling capture.

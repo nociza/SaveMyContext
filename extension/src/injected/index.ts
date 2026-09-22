@@ -12,6 +12,7 @@ import type {
 } from "../shared/types";
 import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
 import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
+import { authorizedHistoryFetch, setHistoryCaptureEnabled } from "./capture-permission";
 
 import { buildProviderDriftAlert, createProviderDriftError, isProviderDriftError } from "./drift";
 import { maybeUpdateGeminiRuntimeContext, runGeminiHistorySync } from "./gemini-history";
@@ -24,8 +25,14 @@ import {
 } from "./history-shared";
 
 const OBSERVER_FLAG = "__SAVEMYCONTEXT_NETWORK_OBSERVER__";
+let captureEnabled = false;
 function handleControlPayload(payload: MainWorldControlPayload): void {
-  if (payload.type === "START_HISTORY_SYNC") void runHistorySync(payload);
+  if (payload.type === "SET_CAPTURE_ENABLED") {
+    captureEnabled = payload.enabled === true;
+    setHistoryCaptureEnabled(captureEnabled);
+    if (!captureEnabled) pendingBridgeMessages.length = 0;
+  }
+  if (payload.type === "START_HISTORY_SYNC" && captureEnabled) void runHistorySync(payload);
 }
 const INTERESTING_PATH =
   /backend-api|conversation|conversations|BardFrontendService|StreamGenerate|batchexecute|app-chat|grok|chat/i;
@@ -145,6 +152,7 @@ function attachBridgePort(port: MessagePort): void {
 }
 
 function postCapture(capture: Omit<CapturedNetworkEvent, "source">): void {
+  if (!captureEnabled) return;
   const payload = {
     ...capture,
     source: "savemycontext-network-observer"
@@ -247,14 +255,16 @@ function patchFetch(): void {
   window.fetch = async function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const request = input instanceof Request ? input : new Request(input, init);
     const url = request.url;
-    if (!shouldCapture(url)) {
+    if (!captureEnabled || !shouldCapture(url)) {
       return nativeFetch(input, init);
     }
 
     const pageUrl = location.href;
     const requestBodyPromise = readFetchRequestBody(input, init);
     const response = await nativeFetch(input, init);
+    if (!captureEnabled) return response;
     observeResponse(response, (text) => { void requestBodyPromise.then((requestBody) => {
+      if (!captureEnabled) return;
       maybeUpdateGeminiRuntimeContext(url, requestBody);
       postCapture({
         providerHint: providerHintFromUrl(url),
@@ -301,14 +311,15 @@ function patchXHR(): void {
   ): void {
     const url = this.__savemycontextUrl;
     const method = this.__savemycontextMethod ?? "GET";
-    const requestBodyPromise = serializeBody(body);
     const pageUrl = location.href;
 
-    if (url && shouldCapture(url)) {
+    if (captureEnabled && url && shouldCapture(url)) {
+      const requestBodyPromise = serializeBody(body);
       this.addEventListener(
         "loadend",
         () => {
           void requestBodyPromise.then((requestBody) => {
+            if (!captureEnabled) return;
             maybeUpdateGeminiRuntimeContext(url, requestBody);
 
             const text = this.responseType === "" || this.responseType === "text" ? this.responseText : "";
@@ -347,7 +358,7 @@ async function fetchJsonWithText(
   text: string;
   json: unknown;
 }> {
-  const response = await nativeFetch(url, { ...init, signal: AbortSignal.timeout(30_000), redirect: "error" });
+  const response = await authorizedHistoryFetch(url, init);
   const text = await readBoundedResponse(response, undefined, 30_000);
   return {
     response,
@@ -416,7 +427,7 @@ async function collectChatGPTHistoryCandidates(
     listUrl.searchParams.set("limit", String(CHATGPT_HISTORY_PAGE_LIMIT));
     listUrl.searchParams.set("order", "updated");
 
-    const listResult = await chatGPTReader(nativeFetch, headers)(listUrl.toString());
+    const listResult = await chatGPTReader(authorizedHistoryFetch, headers)(listUrl.toString());
     if (!listResult.response.ok) {
       throw new Error(`ChatGPT list request failed with ${listResult.response.status}.`);
     }
@@ -532,7 +543,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
         refreshSessionIds
       );
 
-      const read = chatGPTReader(nativeFetch, headers);
+      const read = chatGPTReader(authorizedHistoryFetch, headers);
       const accountScope = asRecord(sessionJson.user)?.id;
       let projectFailure: unknown;
       const projectChats = await discoverChatGPTProjects(read, typeof accountScope === "string" ? accountScope : undefined).catch((error) => {

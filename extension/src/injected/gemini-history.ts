@@ -20,7 +20,7 @@ const GEMINI_CONTEXT_WAIT_TIMEOUT_MS = 10_000;
 const GEMINI_CONTEXT_WAIT_POLL_MS = 200;
 const GEMINI_ACCOUNT_DISCOVERY_MAX_INDEX = 10;
 const GEMINI_ACCOUNT_DISCOVERY_MISS_LIMIT = 2;
-const nativeFetch = window.fetch.bind(window);
+import { authorizedHistoryFetch as nativeFetch } from "./capture-permission";
 
 interface GeminiRuntimeContext {
   at?: string;

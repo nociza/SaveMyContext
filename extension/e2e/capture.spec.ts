@@ -42,3 +42,43 @@ test("DOM fallback preserves turn order/formatting and IndexedDB survives reopen
     await browser.close();
   }
 });
+
+test("version-1 queues migrate without data loss and concurrent writers share a persistent key", async ({ page }) => {
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: "<h1>Isolated queue fixture</h1>" }));
+  await page.goto("https://fixture.example/");
+  await page.evaluate(async () => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("smc-capture-outbox", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("captures", { keyPath: "id" });
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction("captures", "readwrite");
+      tx.objectStore("captures").put({ id: "legacy", backendUrl: "https://old.example", payload: { messages: ["legacy private text"] }, createdAt: 1, bytes: 10 });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  const migrated = await page.evaluate(async () => {
+    const Store = (window as any).CaptureTest.IndexedCaptureStore;
+    const left = new Store(), right = new Store();
+    await Promise.all([left.put({ id: "left", payload: {}, createdAt: 2 }), right.put({ id: "right", payload: {}, createdAt: 3 })]);
+    return new Store().list();
+  });
+  expect(migrated.map((item: any) => item.id)).toEqual(["legacy", "left", "right"]);
+  expect(migrated[0].payload.messages).toEqual(["legacy private text"]);
+  const records = await page.evaluate(async () => new Promise<any[]>((resolve, reject) => {
+    const request = indexedDB.open("smc-capture-outbox", 2);
+    request.onsuccess = () => {
+      const db = request.result, tx = db.transaction("captures"), get = tx.objectStore("captures").getAll();
+      tx.oncomplete = () => { db.close(); resolve(get.result); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  expect(records.every(record => record.ciphertext && !record.payload && !record.backendUrl)).toBe(true);
+  await page.reload();
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  expect(await page.evaluate(async () => (await new (window as any).CaptureTest.IndexedCaptureStore().list()).length)).toBe(3);
+  expect(await page.evaluate(async () => {
+    const store = new (window as any).CaptureTest.IndexedCaptureStore();
+    await store.clear(); return store.count();
+  })).toBe(0);
+});

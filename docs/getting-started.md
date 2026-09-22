@@ -53,6 +53,11 @@ Remote backends request only their required host permission when you connect.
 
 ## 4. Capture and import
 
+Open the extension popup, review the destination and privacy disclosure, then choose
+**Agree and enable capture**. This consent is local to this browser profile and
+backend address, including for upgrades from older versions. Changing the backend
+requires consent again. Configure provider/account filters in Settings first if needed.
+
 Visit a supported AI conversation while signed in. Supported response traffic
 is captured as you work. To import older conversations, open the popup from that
 provider tab and choose **Import history**, then confirm.

@@ -66,6 +66,7 @@ import {
 import { buildIngestPayload, mergeMessageFingerprints, mergeSeenMessageIds } from "./diff";
 import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
 import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
+import { acceptCaptureConsent } from "../shared/storage";
 import {
   buildProviderRefreshAlarmPlan,
   providerFromRefreshAlarmName,
@@ -1322,14 +1323,28 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
-  if (["GET_DELIVERY_STATUS", "SET_CAPTURE_PAUSED", "IMPORT_ACTIVE_HISTORY"].includes(message.type)) {
+  if (["GET_DELIVERY_STATUS", "SET_CAPTURE_PAUSED", "IMPORT_ACTIVE_HISTORY", "ACCEPT_CAPTURE_CONSENT", "CLEAR_CAPTURE_QUEUE"].includes(message.type)) {
     // These controls belong to extension pages, never the provider page bridge.
     if (!_sender.url?.startsWith(chrome.runtime.getURL(""))) {
       sendResponse({ ok: false, error: "Extension page required" }); return false;
     }
     void (async () => {
       if (message.type === "GET_DELIVERY_STATUS") return { pending: await captureOutbox.count() };
+      if (message.type === "ACCEPT_CAPTURE_CONSENT") {
+        await acceptCaptureConsent(message.backendUrl);
+        void flushCaptureOutbox();
+        return { ok: true };
+      }
+      if (message.type === "CLEAR_CAPTURE_QUEUE") {
+        await saveSettings({ capturePaused: true });
+        await enqueueTask(async () => {
+          await captureDrain;
+          await captureOutbox.clear();
+        });
+        return { ok: true };
+      }
       if (message.type === "SET_CAPTURE_PAUSED") {
+        if (!message.paused && !(await getSettings()).captureConsentGranted) return { ok: false, error: "Review and enable capture first" };
         await saveSettings({ capturePaused: Boolean(message.paused) });
         if (!message.paused) void flushCaptureOutbox();
         return { ok: true, paused: Boolean(message.paused) };
@@ -1373,11 +1388,15 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 
   if (message.type === "GET_SETTINGS") {
-    void getSettings().then(sendResponse);
+    void getSettings().then(settings => sendResponse(_sender.url?.startsWith(chrome.runtime.getURL(""))
+      ? settings : { ...settings, backendToken: "" }));
     return true;
   }
 
   if (message.type === "SAVE_SETTINGS") {
+    if (!_sender.url?.startsWith(chrome.runtime.getURL(""))) {
+      sendResponse({ ok: false, error: "Extension page required" }); return false;
+    }
     void enqueueTask(() => handleSaveSettings(message.payload))
       .then(sendResponse)
       .catch((error) => {
@@ -1391,6 +1410,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
   }
 
   if (message.type === "SAVE_CONNECTION_BUNDLE") {
+    if (!_sender.url?.startsWith(chrome.runtime.getURL(""))) {
+      sendResponse({ ok: false, error: "Extension page required" }); return false;
+    }
     void enqueueTask(() => handleSaveConnectionBundle(message.payload))
       .then(sendResponse)
       .catch((error) => {

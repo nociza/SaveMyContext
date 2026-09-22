@@ -62,7 +62,8 @@ The standard extension token should include:
 ingest + read
 ```
 
-If you want to change the storage path from the extension, the token also needs `admin`.
+Editing tasks and notes in the workspace also needs `workspace:write`. The capture
+companion no longer exposes backend filesystem or administrative controls.
 
 ## Creating a token
 
@@ -133,6 +134,12 @@ This keeps misconfigured URLs and weak tokens from silently failing later during
 
 ## Practical recommendations
 
+- Encrypt the browser profile's disk and the backend's database/export/log volumes.
+  SQLite itself is not application-encrypted. Encrypt backups separately.
+- The extension's offline queue uses AES-256-GCM with a non-exportable local key;
+  this does not protect against a compromised device or an authorized backend operator.
+- Capture requires local consent for each configured backend destination. Review
+  [privacy, retention and deletion](privacy.md) before enabling it.
 - Use a dedicated app token for the extension.
 - Do not reuse the admin account password in the extension.
 - Keep remote backends behind TLS.
