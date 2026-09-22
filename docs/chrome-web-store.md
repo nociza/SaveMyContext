@@ -10,18 +10,19 @@ to the publisher. Do not put private backend credentials into this repository.
 
 ## Current submission record
 
-As of September 22, 2026, version 0.4.2 is uploaded as a **Draft**, not submitted
-or published. The listing text, category (Productivity → Tools), language, icon,
-two screenshots and small promotional tile were saved and verified after opening
-the draft again. The purpose, permission explanations, privacy URL, no-remote-code
-answer, six directly evidenced data categories (identifiers, authentication,
-communications, web history, activity and website content), and three approved
-Limited Use certifications were saved with Google's "Item saved" confirmation.
-Disclosure of health/financial/location content incidentally present in saved
-text is awaiting a publisher choice. Unlisted was selected and Save draft clicked,
-but its persistence must still be verified. Reviewer instructions were entered
-but saving has not been confirmed because browser controls stopped responding
-again. Do not assume attempted changes persisted; this item is not submitted.
+As of September 22, 2026, Google's publisher dashboard confirms **Pending review**
+for version 0.4.2. This is submitted, **not yet approved or published**. Distribution
+was verified as **Unlisted** and **Free of charge**. The 482-character reviewer
+instructions below were verified as persisted after reopening their page.
+
+The listing includes the description, category (Productivity → Tools), English
+language, icon, two screenshots and small promotional tile. The submitted privacy
+form declares no remote executable code and six directly evidenced categories:
+identifiers, authentication, communications, web history, activity and website
+content. The three publisher-approved Limited Use certifications are checked.
+Health, financial and location categories are not separately selected; the
+privacy policy and reviewer notes explain that these can occur incidentally in
+saved chat/page text, without dedicated collection features.
 
 - Chrome item ID: `nmenckaggbchlanbhgbnlgodepgkeoaj`.
 - Package source: `623cd834b8990a0449f4b5c119f77a17030a6539`.
@@ -30,10 +31,10 @@ again. Do not assume attempted changes persisted; this item is not submitted.
 - [Release CI](https://github.com/nociza/SaveMyContext/actions/runs/35696490004):
   all jobs passed, including browser end-to-end and shared-workspace tests.
 
-Continue editing this existing item; do not upload a duplicate new item. The
-publisher has approved the three Limited Use certifications and unlisted beta
-submission. Any additional account agreement or identity declaration still
-requires the publisher's review.
+Keep this existing item; do not upload a duplicate or cancel its review merely
+to recheck status. Wait for Google's review result before claiming availability.
+Any additional account agreement or identity declaration requires the publisher's
+review.
 
 ## Listing fields
 
@@ -196,8 +197,8 @@ records, and requires renewed local consent even on same-ID upgrades.
 ## Submission checklist
 
 - [ ] Publisher signed in; registration/2-step verification/trader declaration complete.
-- [ ] Tests pass; ZIP/hash and images inspected; public privacy URL accessible.
-- [ ] Review privacy fields against the current dashboard definitions.
-- [ ] Enter listing, permission justifications and reviewer instructions.
-- [ ] Select Unlisted, submit for review, record the item ID and status.
+- [x] Tests pass; ZIP/hash and images inspected; public privacy URL accessible.
+- [x] Review privacy fields against the current dashboard definitions.
+- [x] Enter listing, permission justifications and reviewer instructions.
+- [x] Select Unlisted, submit for review, record the item ID and status.
 - [ ] Do not call it published until the dashboard confirms publication.
