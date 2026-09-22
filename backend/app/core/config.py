@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     basic_memory_project: str = Field(default="savemycontext", validation_alias=env_alias("BASIC_MEMORY_PROJECT"))
     basic_memory_sync: bool = Field(default=True, validation_alias=env_alias("BASIC_MEMORY_SYNC"))
     workspace_enabled: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_ENABLED"))
+    workspace_ui_enabled: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_UI_ENABLED"))
     workspace_worker: bool = Field(default=True, validation_alias=env_alias("WORKSPACE_WORKER"))
     workspace_token_dir: Path | None = Field(default=None, validation_alias=env_alias("WORKSPACE_TOKEN_DIR"))
     workspace_external_processing: bool = Field(default=False, validation_alias=env_alias("WORKSPACE_EXTERNAL_PROCESSING"))

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SaveMyContext",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Capture AI conversations into your private workspace. Durable delivery, explicit history import, and ChatGPT Projects support.",
   "permissions": [
     "storage",

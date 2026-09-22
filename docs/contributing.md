@@ -8,15 +8,30 @@ The `docs/` folder is intentionally user-facing. If you contribute to SaveMyCont
 
 ## Before you open a pull request
 
-Understand the two main parts of the project:
+Understand the product boundaries:
 
-- `backend/`: FastAPI service, SQLite ledger, shared workspace, optional processing, and agent client
+- `backend/`: FastAPI service, SQLite ledger, optional processing, agent client, and generated convenience UI
+- `frontend/`: independent static app and dashboard embedding package; the sole UI source of truth
 - `extension/`: lightweight capture, reliable delivery, optional quick search, settings, and workspace launcher
 
 There is no selected project license yet. Resolve licensing before treating this
 as a generally reusable open-source release; public visibility alone is insufficient.
 
 ## Local setup
+
+Frontend (Node 22+, no dependencies to install):
+
+```sh
+cd frontend
+npm test
+npm run build
+npm run build:backend
+npm run check:backend
+```
+
+Commit the generated backend distribution together with frontend changes. Never
+edit the generated copy instead of its source. Browser tests exercise independent
+hosting, token isolation, dashboard embedding, and the extension consumer.
 
 Backend:
 

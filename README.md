@@ -24,6 +24,28 @@ The same responsive web component runs at the backend's `/workspace`, inside the
 extension, or behind a private dashboard proxy. Workspace mode has no second task
 database, browser inference worker, or writable Markdown task ledger.
 
+## Separate interface, same core
+
+[`frontend/`](frontend/README.md) is an independent, framework-free interface package.
+It builds with Node alone—no Python backend or extension build is required:
+
+```sh
+cd frontend
+npm test
+npm run build
+```
+
+Deploy `frontend/dist/` as a standalone static site and configure its API address
+in `assets/config.json`. Or import `mountWorkspace` from `@savemycontext/ui/embed`
+to embed the same UI in a dashboard. Authentication stays with the host/API; no
+token belongs in the public config. Cross-origin deployments must explicitly
+allow the frontend origin on the backend.
+
+The backend can run API-only with `SAVEMYCONTEXT_WORKSPACE_UI_ENABLED=false`.
+Its default `/workspace` remains a convenience distribution generated from the
+same frontend source, included in the Python wheel. The extension consumes the
+frontend package directly. [Build, embedding, and deployment instructions](frontend/README.md).
+
 ## Run from source
 
 Python 3.12+, uv, Node.js, and pnpm are required for development.

@@ -71,4 +71,11 @@ The old dashboard, pile, note, and prompt URLs redirect to the shared workspace.
 The extension no longer runs AI prompts in provider tabs or changes backend
 storage paths. No database migration or deletion is required for this update.
 
+## Independent web interface
+
+The bundled `/workspace` is optional. Build `frontend/` with `npm run build` to
+host the UI separately, configure its API URL, or embed it in your own dashboard.
+The extension's Workspace URL can point to any of these deployments. See
+[Standalone and Embedded Interface](frontend.md).
+
 [Using SaveMyContext](using-save-my-context.md) · [Troubleshooting](troubleshooting.md)

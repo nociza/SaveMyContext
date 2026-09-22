@@ -10,6 +10,10 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8787
 ```
 
 Open `/workspace`. Configure protected per-client tokens before remote access.
+The bundled UI is generated from `frontend/src/`; do not edit the vendored
+`app/workspace/web/` copies. Python installs do not need Node. Set
+`SAVEMYCONTEXT_WORKSPACE_UI_ENABLED=false` for an API-only service and deploy the
+standalone frontend independently. See [frontend setup](../frontend/README.md).
 The `smc` service/configuration CLI remains available; `smc-workspace` is the
 agent-facing API client. See the repository README and workspace design for
 extension setup, optional Jev processing, migration, backups, and compatibility.

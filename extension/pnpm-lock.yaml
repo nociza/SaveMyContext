@@ -15,6 +15,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@savemycontext/ui':
+        specifier: link:../frontend
+        version: link:../frontend
     devDependencies:
       '@playwright/test':
         specifier: ^1.57.0

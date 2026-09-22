@@ -15,6 +15,15 @@ capture, authoritative state, and deployment infrastructure separate.
 | CLI / skill | Explicit agent reads and writes using scoped credentials | Direct SQLite access or automatic execution of captured instructions |
 | Deployment repository | Hosts, secrets references, reverse proxy, backups, monitoring, rollout | Product behavior duplicated for one installation |
 
+The shared workspace source lives in `frontend/src/`. Its independent Node-only
+build emits a static application and an ESM embedding entry point. The extension
+imports the local `@savemycontext/ui` package, not backend files. Python wheels
+vendor generated assets for convenient `/workspace` hosting; CI rejects drift.
+`SAVEMYCONTEXT_WORKSPACE_UI_ENABLED=false` disables those static routes without
+disabling the API. Separate hosts configure a public API URL and an exact CORS
+origin; bearer credentials remain in tab memory. See the
+[frontend guide](frontend.md) for deployment and embedding contracts.
+
 ## Delivery and recovery
 
 Normalized captures are staged in extension-origin IndexedDB before delivery.

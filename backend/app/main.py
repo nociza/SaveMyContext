@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import asyncio
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 from app.api.routes_openai import router as openai_router
 from app.api.router import api_router
@@ -18,6 +15,7 @@ from app.middleware.request_size import RequestSizeLimitMiddleware
 from app.services.git_versioning import GitVersioningService
 from app.services.todo import TodoListConflictError, TodoListService
 from app.workspace.api import compat_router
+from app.workspace.frontend import mount_workspace_ui
 from app.workspace.store import Conflict
 from app.workspace.worker import run_worker
 from app.workspace.knowledge import run_sync
@@ -175,15 +173,8 @@ async def service_health():
     }
 
 
-WEB_ROOT = Path(__file__).parent / "workspace" / "web"
-app.mount(
-    "/workspace-assets",
-    StaticFiles(directory=WEB_ROOT, check_dir=False),
-    name="workspace-assets",
+mount_workspace_ui(
+    app,
+    enabled=settings.workspace_ui_enabled,
+    api_base=f"{settings.api_v1_prefix}/workspace",
 )
-
-
-@app.get("/")
-@app.get("/workspace")
-async def workspace_page():
-    return FileResponse(WEB_ROOT / "index.html")

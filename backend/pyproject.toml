@@ -64,7 +64,7 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-"app.workspace" = ["web/*.html", "web/*.js", "web/*.css"]
+"app.workspace" = ["web/*.html", "web/*.js", "web/*.css", "web/*.json", "web/BUILD.txt"]
 
 [tool.uv]
 package = true

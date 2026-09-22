@@ -12,6 +12,9 @@ manage tasks, and organize projects.
 [Get started](getting-started.md) · [Using the extension](using-save-my-context.md) ·
 [Architecture](architecture.md) · [Contributing](contributing.md)
 
+The interface can also be [built and hosted independently or embedded](frontend.md),
+without the extension or any particular dashboard.
+
 ## A small extension, one workspace
 
 - Automatic capture of supported conversation responses in ChatGPT, Gemini, and Grok.
