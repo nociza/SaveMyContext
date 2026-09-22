@@ -25,6 +25,24 @@ def apply_schema_migrations(sync_connection) -> None:
     false_default = "FALSE" if is_postgresql else "0"
     true_default = "TRUE" if is_postgresql else "1"
 
+    for table in ("sync_events", "chat_messages"):
+        if table in table_names and "evidence_ref" not in {
+            column["name"] for column in inspector.get_columns(table)
+        }:
+            sync_connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN evidence_ref VARCHAR(64)")
+    if sync_connection.dialect.name == "sqlite":
+        for table, column in (("sync_events", "raw_capture"), ("chat_messages", "raw_payload")):
+            if table in table_names:
+                # A writer may have loaded the row before archiving. Its ORM
+                # snapshot cannot know the new reference; invalidate it in SQL.
+                sync_connection.exec_driver_sql(
+                    f"CREATE TRIGGER IF NOT EXISTS {table}_invalidate_evidence "
+                    f"AFTER UPDATE OF {column} ON {table} "
+                    f"WHEN NEW.{column} IS NOT NULL AND NEW.{column} != 'null' "
+                    "AND NEW.evidence_ref IS NOT NULL BEGIN "
+                    f"UPDATE {table} SET evidence_ref=NULL WHERE id=NEW.id; END"
+                )
+
     if "chat_sessions" in table_names:
         chat_columns = {column["name"] for column in inspector.get_columns("chat_sessions")}
         if "todo_summary" not in chat_columns:

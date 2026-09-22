@@ -22,6 +22,7 @@ class MessageRead(BaseModel):
     sequence_index: int
     occurred_at: datetime | None
     raw_payload: dict[str, Any] | list[Any] | None
+    evidence_ref: str | None = None
     created_at: datetime
 
 

@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import lazyload, selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import ChatMessage, ChatSession, SyncEvent
 from app.models.base import utcnow
@@ -22,6 +23,7 @@ from app.services.piles import CATEGORY_TO_BUILT_IN_SLUG
 from app.services.processing import ManualPileAssignmentConflictError, SessionProcessor
 from app.services.processing_worker import uses_extension_browser_processing
 from app.core.config import get_settings
+from app.evidence.worker import enforce_queue_limit
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,7 @@ class IngestService:
                         payload=evidence, quality=quality,
                     ))
                     try:
+                        await enforce_queue_limit(self.db)
                         await self.db.commit()
                     except IntegrityError:
                         await self.db.rollback()
@@ -102,6 +105,7 @@ class IngestService:
                 await self._force_pending_flags(session.id, projection=True)
             # Source evidence is the durable boundary. A projection failure
             # after this point must never erase an accepted capture.
+            await enforce_queue_limit(self.db)
             await self.db.commit()
             if get_settings().workspace_enabled:
                 return await self._load_session(session_id), 0
@@ -207,12 +211,14 @@ class IngestService:
             source = await enqueue_session(self.db, session)
             from app.workspace.provider_projects import apply_provider_project
             await apply_provider_project(self.db, source, payload, session.account_key or "chatgpt:default")
+            await enforce_queue_limit(self.db)
             await self.db.commit()
             return session, new_message_count
 
         # Commit canonical source state before invoking any provider, file,
         # projection, or Git work. The future durable-outbox pipeline should
         # replace this synchronous second phase, but capture is already safe.
+        await enforce_queue_limit(self.db)
         await self.db.commit()
         # Re-read under a row lock after the source commit. This is the
         # cross-process serialization boundary for synchronous phase two:
@@ -327,6 +333,10 @@ class IngestService:
     def processing_is_current(cls, session: ChatSession) -> bool:
         return not session.processing_pending
 
+    @staticmethod
+    def _raw_message_hash(message: ChatMessage) -> str | None:
+        return message.evidence_ref or raw_capture_hash(message.raw_payload)
+
     async def _ingest_incremental(
         self, session_id: str, payload: IngestDiffRequest, *, allow_updates: bool = False
     ) -> tuple[int, bool]:
@@ -339,11 +349,16 @@ class IngestService:
             existing = existing_messages.get(message.external_message_id)
             if existing is not None:
                 if allow_updates:
-                    for name in ("parent_external_message_id", "role", "content", "occurred_at", "raw_payload"):
+                    for name in ("parent_external_message_id", "role", "content", "occurred_at"):
                         value = getattr(message, name)
                         if getattr(existing, name) != value:
                             setattr(existing, name, value)
                             changed = True
+                    if self._raw_message_hash(existing) != raw_capture_hash(message.raw_payload):
+                        existing.raw_payload = message.raw_payload
+                        existing.evidence_ref = None
+                        flag_modified(existing, "evidence_ref")
+                        changed = True
                 continue
             self.db.add(
                 ChatMessage(
@@ -392,7 +407,7 @@ class IngestService:
                     message.content,
                     target_sequence_index,
                     message.occurred_at,
-                    message.raw_payload,
+                    raw_capture_hash(message.raw_payload),
                 )
                 current_values = (
                     existing.parent_external_message_id,
@@ -400,7 +415,7 @@ class IngestService:
                     existing.content,
                     existing.sequence_index,
                     existing.occurred_at,
-                    existing.raw_payload,
+                    self._raw_message_hash(existing),
                 )
                 changed = changed or current_values != next_values
                 existing.parent_external_message_id = message.parent_external_message_id
@@ -408,7 +423,10 @@ class IngestService:
                 existing.content = message.content
                 existing.sequence_index = target_sequence_index
                 existing.occurred_at = message.occurred_at
-                existing.raw_payload = message.raw_payload
+                if self._raw_message_hash(existing) != raw_capture_hash(message.raw_payload):
+                    existing.raw_payload = message.raw_payload
+                    existing.evidence_ref = None
+                    flag_modified(existing, "evidence_ref")
                 continue
 
             target_sequence_index = sequence_index if delete_missing else next_append_index
@@ -608,7 +626,7 @@ class IngestService:
                 "content": message.content,
                 "sequence_index": message.sequence_index,
                 "occurred_at": cls._datetime_for_revision(message.occurred_at),
-                "raw_payload": message.raw_payload,
+                "raw_payload_hash": cls._raw_message_hash(message),
             }
             for message in sorted(
                 session.messages,
@@ -620,7 +638,7 @@ class IngestService:
                 "id": event.id,
                 "message_count": event.message_count,
                 "capture_hash": event.capture_hash,
-                "raw_capture": event.raw_capture,
+                "raw_capture_hash": event.evidence_ref or raw_capture_hash(event.raw_capture),
                 "created_at": cls._datetime_for_revision(event.created_at),
             }
             for event in sorted(

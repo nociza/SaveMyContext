@@ -21,7 +21,7 @@ from app.workspace.quality import assess
 from app.workspace.store import digest
 
 
-def preview(path: Path, parser: Path) -> dict:
+def preview(path: Path, parser: Path, evidence_config: Path | None = None) -> dict:
     with path.open("rb") as stream:
         before = hashlib.file_digest(stream, "sha256").hexdigest()
     with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as db:
@@ -30,10 +30,19 @@ def preview(path: Path, parser: Path) -> dict:
             raise ValueError("Archive integrity check failed")
         sessions = list(db.execute("SELECT id,provider FROM chat_sessions ORDER BY id"))
         captures = defaultdict(list)
+        from app.evidence.store import Archive, EvidenceUnavailable, resolve
+        archive = Archive(evidence_config) if evidence_config else None
+        cache = {}
+        has_refs = "evidence_ref" in {row[1] for row in db.execute("PRAGMA table_info(sync_events)")}
         for row in db.execute(
-            "SELECT session_id,raw_capture FROM sync_events ORDER BY created_at"
+            "SELECT session_id,raw_capture," + ("evidence_ref" if has_refs else "NULL AS evidence_ref")
+            + " FROM sync_events ORDER BY created_at"
         ):
             raw = json.loads(row["raw_capture"]) if row["raw_capture"] else None
+            if raw is None and row["evidence_ref"]:
+                if archive is None:
+                    raise EvidenceUnavailable()
+                raw = resolve(db, archive, row["evidence_ref"], cache)
             if isinstance(raw, dict):
                 captures[row["session_id"]].append(raw)
         request = "\n".join(
@@ -122,8 +131,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot", type=Path)
     parser.add_argument("--parser", required=True, type=Path)
+    parser.add_argument("--evidence-config", type=Path)
     args = parser.parse_args()
-    print(json.dumps(preview(args.snapshot, args.parser), indent=2))
+    print(json.dumps(preview(args.snapshot, args.parser, args.evidence_config), indent=2))
 
 
 if __name__ == "__main__":

@@ -47,6 +47,10 @@ def env_alias(name: str, *extra_names: str) -> AliasChoices:
 
 
 class Settings(BaseSettings):
+    evidence_config: Path | None = Field(default=None, validation_alias=env_alias("EVIDENCE_CONFIG"))
+    evidence_worker: bool = Field(default=True, validation_alias=env_alias("EVIDENCE_WORKER"))
+    evidence_queue_bytes: int = Field(default=256 * 1024 * 1024, ge=1024,
+                                      validation_alias=env_alias("EVIDENCE_QUEUE_BYTES"))
     basic_memory_url: str | None = Field(default=None, validation_alias=env_alias("BASIC_MEMORY_URL"))
     basic_memory_project: str = Field(default="savemycontext", validation_alias=env_alias("BASIC_MEMORY_PROJECT"))
     basic_memory_sync: bool = Field(default=True, validation_alias=env_alias("BASIC_MEMORY_SYNC"))

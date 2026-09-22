@@ -51,6 +51,8 @@ class ContextMigrationService:
         session = await self._load_session(session_id)
         if session is None:
             return None
+        from app.evidence.resolve import hydrate_session
+        await hydrate_session(session)
         return self.build_bundle(session)
 
     def build_bundle(self, session: ChatSession) -> ContextMigrationBundle:

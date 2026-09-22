@@ -40,5 +40,6 @@ class SyncEvent(TimestampMixin, Base):
     message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     raw_capture: Mapped[dict[str, Any] | list[Any] | None] = mapped_column(JSON)
     capture_hash: Mapped[str | None] = mapped_column(String(64))
+    evidence_ref: Mapped[str | None] = mapped_column(String(64))
 
     session = relationship("ChatSession", back_populates="sync_events")

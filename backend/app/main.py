@@ -21,6 +21,9 @@ from app.workspace.api import compat_router
 from app.workspace.store import Conflict
 from app.workspace.worker import run_worker
 from app.workspace.knowledge import run_sync
+from app.evidence.store import EvidenceUnavailable
+from app.evidence.worker import EvidenceQueueFull, run_archive
+from app.evidence.api import router as evidence_router
 
 try:
     import uvloop
@@ -64,11 +67,15 @@ async def lifespan(app: FastAPI):
         if settings.workspace_enabled and settings.basic_memory_url and settings.basic_memory_sync
         else None
     )
+    if settings.evidence_config and not settings.workspace_enabled:
+        raise RuntimeError("Cold evidence requires workspace mode")
+    archive_worker = (asyncio.create_task(run_archive(stop))
+                      if settings.evidence_config and settings.evidence_worker else None)
     try:
         yield
     finally:
         stop.set()
-        for task in (worker, knowledge_worker):
+        for task in (worker, knowledge_worker, archive_worker):
             if task:
                 task.cancel()
                 try:
@@ -81,6 +88,12 @@ app = FastAPI(
     title=settings.app_name,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(EvidenceUnavailable)
+@app.exception_handler(EvidenceQueueFull)
+async def evidence_unavailable(_request: Request, exc):
+    return JSONResponse({"detail": str(exc)}, status_code=503, headers={"Retry-After": "60"})
 
 app.add_middleware(
     RequestSizeLimitMiddleware, max_body_bytes=settings.max_request_body_bytes
@@ -133,6 +146,7 @@ async def security_headers(request, call_next):
 
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+app.include_router(evidence_router, prefix=settings.api_v1_prefix)
 app.include_router(openai_router, prefix="/v1")
 app.include_router(compat_router)
 

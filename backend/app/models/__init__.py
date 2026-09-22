@@ -1,4 +1,5 @@
 from app.models.api_token import APIToken
+from app.evidence.models import EvidenceObject
 from app.models.connection_grant import ConnectionGrant
 from app.models.enums import BUILT_IN_PILE_KINDS, MessageRole, PileKind, ProviderName, BuiltInPileSlug
 from app.models.idea_project import IdeaProject
@@ -14,6 +15,7 @@ from app.workspace import models as workspace_models  # noqa: F401 - registers a
 
 __all__ = [
     "APIToken",
+    "EvidenceObject",
     "BUILT_IN_PILE_KINDS",
     "ChatMessage",
     "ChatSession",

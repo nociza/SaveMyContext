@@ -298,7 +298,7 @@ class MarkdownExporter:
         ]
 
         sync_events = sorted(self._loaded_relationship_items(session, "sync_events"), key=lambda item: datetime_sort_key(item.created_at))
-        raw_sync_events = [event for event in sync_events if event.raw_capture is not None]
+        raw_sync_events = [event for event in sync_events if event.raw_capture is not None or event.evidence_ref]
         if raw_sync_events:
             for index, event in enumerate(raw_sync_events, start=1):
                 lines.extend(self._render_sync_event_source(index, event))
@@ -1021,7 +1021,10 @@ class MarkdownExporter:
         lines.append(f"- Captured At: {datetime_isoformat(event.created_at) or 'n/a'}")
         lines.append(f"- Message Count: {event.message_count}")
         lines.append("")
-        lines.extend(self._fenced_block("json", self._json_dump(event.raw_capture)))
+        if event.raw_capture is None and event.evidence_ref:
+            lines.append(f"Archived evidence: `{event.evidence_ref}`. Retrieve through a full context export.")
+        else:
+            lines.extend(self._fenced_block("json", self._json_dump(event.raw_capture)))
         lines.append("")
         return lines
 
@@ -1036,7 +1039,8 @@ class MarkdownExporter:
         lines.append("")
         lines.extend(["#### Raw Payload", ""])
         if message.raw_payload is None:
-            lines.append("No raw payload was stored for this message.")
+            lines.append(f"Archived evidence: `{message.evidence_ref}`. Retrieve through a full context export."
+                         if message.evidence_ref else "No raw payload was stored for this message.")
             lines.append("")
             return lines
         lines.extend(self._fenced_block("json", self._json_dump(message.raw_payload)))

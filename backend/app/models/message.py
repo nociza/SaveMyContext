@@ -35,6 +35,6 @@ class ChatMessage(TimestampMixin, Base):
     sequence_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     raw_payload: Mapped[dict[str, Any] | list[Any] | None] = mapped_column(JSON)
+    evidence_ref: Mapped[str | None] = mapped_column(String(64))
 
     session = relationship("ChatSession", back_populates="messages")
-
