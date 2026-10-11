@@ -4,7 +4,30 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 const require = createRequire(import.meta.url);
 const esbuild = createRequire(realpathSync(require.resolve("vite/package.json")))("esbuild");
-const bundle = await esbuild.build({ stdin: { contents: readFileSync("src/injected/index.ts", "utf8") + '\nexport {handleControlPayload};', resolveDir: resolve("src/injected"), loader: "ts" }, bundle: true, write: false, format: "iife", globalName: "HookTest" });
+const bundle = await esbuild.build({ stdin: { contents: readFileSync("src/injected/index.ts", "utf8") + '\nexport {handleControlPayload, attachBridgePort};', resolveDir: resolve("src/injected"), loader: "ts" }, bundle: true, write: false, format: "iife", globalName: "HookTest" });
+
+test("bridge sends exact response and request text without duplicate JSON trees", async ({ page }) => {
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: "Synthetic memory fixture" }));
+  await page.goto("https://chatgpt.com/c/synthetic");
+  await page.evaluate(() => { window.fetch = async () => new Response('{ "messages": [{"content":"🌱\\n    code()"}], "evidence": true }'); });
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  const result = await page.evaluate(async () => {
+    const channel = new MessageChannel();
+    const captured = new Promise<any>(resolve => { channel.port1.onmessage = event => { if (event.data.type === "NETWORK_CAPTURE") resolve(event.data.payload); }; });
+    channel.port1.start();
+    (window as any).HookTest.attachBridgePort(channel.port2);
+    (window as any).HookTest.handleControlPayload({ type: "SET_CAPTURE_ENABLED", enabled: true });
+    const requestText = '{ "messages": ["question"] }';
+    const response = await fetch("/backend-api/conversation", { method: "POST", body: requestText });
+    const original = await response.text(), event = await captured;
+    channel.port1.close();
+    return { original, event, requestText };
+  });
+  expect(result.event.response.text).toBe(result.original);
+  expect(result.event.requestBody).toEqual({ text: result.requestText });
+  expect(result.event.response).not.toHaveProperty("json");
+  expect(JSON.parse(result.event.response.text).evidence).toBe(true);
+});
 
 test("fetch hook preserves the native promise and dispatches before parsing captured request bodies", async ({ page }) => {
   await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: "Synthetic hot path" }));

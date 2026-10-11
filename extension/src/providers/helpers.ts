@@ -30,7 +30,10 @@ export function extractStructuredCandidates(value?: unknown): unknown[] {
   const candidates: unknown[] = [];
   const direct = safeJsonParse(text);
   if (direct !== null) {
-    candidates.push(direct);
+    // A complete JSON document is already the full evidence. Parsing its lines
+    // again duplicates single-line documents and invents nested fragments for
+    // pretty-printed JSON. Line framing is only for SSE/NDJSON/batchexecute.
+    return [direct];
   }
 
   for (const line of text.split(/\r?\n/)) {

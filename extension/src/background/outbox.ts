@@ -38,11 +38,17 @@ export interface CaptureStore {
   remove(id: string): Promise<void>;
 }
 
-export async function enqueueCapture(store: CaptureStore, backendUrl: string, payload: BackendIngestPayload): Promise<void> {
+async function captureIdentity(backendUrl: string, payload: BackendIngestPayload): Promise<{ id: string; bytes: number }> {
   const encoded = new TextEncoder().encode(JSON.stringify([backendUrl, payload]));
   const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", encoded)),
     (byte) => byte.toString(16).padStart(2, "0")).join("");
-  await store.put({ id, backendUrl, payload, createdAt: Date.now(), bytes: encoded.byteLength });
+  return { id, bytes: encoded.byteLength };
+}
+
+export async function enqueueCapture(store: CaptureStore, backendUrl: string, payload: BackendIngestPayload): Promise<void> {
+  // End the hashing scope before encryption allocates another serialized copy.
+  const identity = await captureIdentity(backendUrl, payload);
+  await store.put({ ...identity, backendUrl, payload, createdAt: Date.now() });
 }
 
 /** Ack callback must succeed before removal; crash/restart safely replays the same capture. */

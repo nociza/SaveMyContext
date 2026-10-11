@@ -203,8 +203,7 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
   if (typeof body === "string") {
     if (body.length > MAX_CAPTURE_BYTES) return undefined;
     return {
-      text: body,
-      json: safeJsonParse(body)
+      text: body
     };
   }
 
@@ -224,8 +223,7 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
       json[key] = [...(json[key] ?? []), nextValue];
     });
     return {
-      text: JSON.stringify(json),
-      json
+      text: JSON.stringify(json)
     };
   }
 
@@ -281,7 +279,7 @@ function patchFetch(): void {
           method: init?.method ?? (input instanceof Request ? input.method : "GET"),
           url, capturedAt: new Date().toISOString(), requestBody,
           response: { status: response.status, ok: response.ok,
-            contentType: response.headers.get("content-type") ?? undefined, text, json: safeJsonParse(text) }
+            contentType: response.headers.get("content-type") ?? undefined, text }
         });
       }).catch(() => undefined); }, () => postToExtension({ type: "CAPTURE_WARNING" }));
     }).catch(() => undefined); // Observation must never create an unhandled rejection.
@@ -337,8 +335,7 @@ function patchXHR(): void {
                 status: this.status,
                 ok: this.status >= 200 && this.status < 300,
                 contentType: this.getResponseHeader("content-type") ?? undefined,
-                text,
-                json: safeJsonParse(text)
+                text
               }
             });
           });
@@ -476,6 +473,10 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
             );
           }
 
+          // Keep exact provider text, not a second parsed tree throughout the
+          // bridge, runtime messaging, durable outbox and backend upload.
+          detailResult.json = undefined;
+
           await postCaptureDurably({
             historyFingerprints: Object.fromEntries([ordinary.items.get(conversationId), projectChats.get(conversationId)]
               .filter(item => item?.fingerprint).map(item => [item!.key, item!.fingerprint])),
@@ -494,8 +495,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
               status: detailResult.response.status,
               ok: detailResult.response.ok,
               contentType: detailResult.response.headers.get("content-type") ?? undefined,
-              text: detailResult.text,
-              json: detailResult.json
+              text: detailResult.text
             }
           });
           syncedConversationCount += 1;

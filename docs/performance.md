@@ -5,7 +5,8 @@ title: Extension reliability and performance
 # Extension reliability and performance
 
 Version 0.4.4 repairs capture and history synchronization before optimizing browser
-work. The October 10, 2026 experiments reduced large-backlog queue work substantially
+work. Version 0.4.5 also reduces retained capture memory and releases closed search
+results. The October 10, 2026 experiments reduced large-backlog queue work substantially
 without removing durable acknowledgements, destination isolation, queue limits, or
 browser-local encryption. These are reproducible synthetic measurements, not a claim
 that every browser workload has reached its theoretical minimum.
@@ -97,6 +98,55 @@ repeatable end-to-end gains, not just a faster isolated timer.
 The [raw queue measurements](performance/2026-10-10-queue.json) include intermediate
 experiments and alternating confirmation runs. They contain no real conversation data.
 
+## Capture memory
+
+Version 0.4.5 carries provider response text without also carrying a parsed copy of
+the same JSON through messaging, storage, and upload. Exact response text is retained;
+Gemini and Grok history payloads still include their provider evidence. Legacy
+JSON-bearing captures remain readable. Complete JSON documents are parsed once,
+with line framing reserved for SSE, NDJSON, and batchexecute responses.
+
+The hashing buffer becomes eligible for collection before encryption starts. Closed
+quick-search panels release result objects and DOM nodes, cancel pending debounce
+work, and invalidate late results. Hidden suggestions also invalidate pending lookups.
+Hover and keyboard selection update existing cards instead of reallocating snippets
+and replacing their buttons during interaction.
+
+For four simultaneous synthetic responses of approximately 6 MiB each:
+
+| Measurement | Version 0.4.4 | Version 0.4.5 |
+| --- | ---: | ---: |
+| Retained JS heap after capture | about 49 MiB | about 25 MiB |
+| Retained JS heap after parsing | about 73 MiB | about 49 MiB |
+| Serialized capture messages | about 48 MiB | about 24 MiB |
+
+Heap checkpoints explicitly collect garbage. They measure live retained data, not
+all temporary allocations. Sampled peaks include JS heap and backing storage; they
+remain variable, especially during encryption and delivery. Large captures can still
+temporarily use hundreds of MiB. These retained-memory reductions are not a promise
+of a corresponding reduction in total browser RAM or a hard peak-memory limit.
+
+The optimized stress run performs 20 capture/parse/persist/drain cycles at each of
+two sizes (2 and 6 MiB per response): 160 conversations, with message counts and
+evidence preservation checked throughout. After warm-up, the post-drain JS heap
+plus backing storage settles around 1.5 MiB rather than growing with each cycle.
+This is a short churn test, not a multi-day leak certification.
+
+The memory harness uses a temporary disk-backed Chromium profile for IndexedDB.
+Off-the-record storage can remain in RAM and distort storage-churn measurements.
+Traffic is intercepted; no real chat history or backend is used. Provider hooks,
+parser, hashing, encryption, and queue operations run in a combined renderer fixture,
+not the installed extension's separate page/content/service-worker processes.
+Process RSS is reported separately and can double-count shared pages.
+
+The 12-tab idle comparison adds approximately 0.83 MiB of JS heap/backing storage
+per tab for the scripts, essentially unchanged by this release. It excludes the
+extension service worker and real provider application overhead. The focus of these
+changes is active capture and stale-result retention, not an asserted idle-RAM gain.
+
+[Raw memory measurements](performance/2026-10-10-memory.json) record individual
+cycles, per-stage peaks, idle comparisons, and browser-process RSS.
+
 ## Reproduction
 
 Run from `extension/` with dependencies and Playwright Chromium installed:
@@ -111,13 +161,17 @@ node scripts/benchmark-capture.mjs
 node scripts/benchmark-capture.mjs --single-read
 node scripts/benchmark-browser.mjs --revision=4ab9da3
 node scripts/benchmark-browser.mjs
+node scripts/benchmark-memory.mjs --revision=fe3812e --rounds=20
+node scripts/benchmark-memory.mjs --rounds=20
 ```
 
 Do not run other benchmark or test suites concurrently with timing measurements.
 Repeat fresh contexts and alternate variants to check for cache or scheduling bias.
 
-The final functional gate passed TypeScript checks, 155 extension unit tests, 292
-backend tests, and all 29 browser/workspace integration tests. Workspace tests must
+The 0.4.4 functional gate passed TypeScript checks, 155 extension unit tests, 292
+backend tests, and all 29 browser/workspace integration tests. Version 0.4.5 passes
+161 extension unit tests and 32 browser/workspace tests, including parser-equivalence,
+exact-text bridge, and UI-retention regressions. Workspace tests must
 use an explicitly supplied disposable server; they create test captures and tasks.
 The integration suite includes a remote edit to the same newest ChatGPT conversation,
 overlapping project/ordinary history, unchanged-history skipping, offline retention,

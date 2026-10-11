@@ -358,11 +358,11 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
       insert.addEventListener("mousedown", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void commitResult(index);
       });
       insert.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        void commitResult(index);
       });
       insert.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") {
@@ -377,14 +377,21 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
       actions.append(source, insert);
       card.append(head, snippet, actions);
       card.addEventListener("mouseenter", () => {
-        selectedIndex = index;
-        renderResults();
+        selectResult(index);
       });
       card.addEventListener("click", () => {
-        selectedIndex = index;
-        renderResults();
+        selectResult(index);
       });
       root.append(card);
+    });
+  }
+
+  function selectResult(index: number): void {
+    selectedIndex = index;
+    // Keep cards and their buttons stable during pointer/keyboard interaction;
+    // rebuilding on hover allocates every snippet and can detach a clicked button.
+    resultsRoot?.querySelectorAll<HTMLElement>(".result").forEach((card, i) => {
+      card.classList.toggle("selected", i === index);
     });
   }
 
@@ -525,16 +532,14 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (results.length) {
-        selectedIndex = (selectedIndex + 1) % results.length;
-        renderResults();
+        selectResult((selectedIndex + 1) % results.length);
       }
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       if (results.length) {
-        selectedIndex = (selectedIndex - 1 + results.length) % results.length;
-        renderResults();
+        selectResult((selectedIndex - 1 + results.length) % results.length);
       }
       return;
     }
@@ -668,6 +673,15 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
 
   function close(): void {
     isOpen = false;
+    // Hidden DOM still retains snippets and click-handler closures. Release the
+    // results and invalidate in-flight searches, retaining only the query.
+    requestSequence += 1;
+    if (debounceHandle !== null) window.clearTimeout(debounceHandle);
+    debounceHandle = null;
+    results = [];
+    resultsRoot?.replaceChildren();
+    isLoading = false;
+    errorMessage = "";
     if (host) {
       host.hidden = true;
     }
@@ -675,6 +689,7 @@ export function createQuickSearchPalette(sendMessage: SearchRequester): QuickSea
     if (target) {
       target.focus();
     }
+    capturedTarget = null;
   }
 
   document.addEventListener("focusin", captureEditableTarget, true);

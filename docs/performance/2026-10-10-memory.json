@@ -1,0 +1,4865 @@
+{
+  "baselineRevision": "fe3812e",
+  "release": "0.4.5",
+  "method": "Isolated disk-backed Chromium profile; synthetic traffic fully intercepted; four simultaneous responses; GC at checkpoints; ~10ms sampled peaks include JS heap and backing storage. Combined page-world harness, not full installed-extension RAM. RSS sum can double-count shared pages. No real conversations or backend requests.",
+  "baseline": [
+    {
+      "kind": "environment",
+      "revision": "fe3812e",
+      "browser": "147.0.7727.15",
+      "node": "v24.6.0",
+      "cpu": "Apple M1 Max",
+      "notes": "Main-world fixture combines extension worlds in one renderer; no real backend. RSS sums include shared pages more than once. Peaks sampled at ~10ms; not a hard RAM cap or multi-day leak test."
+    },
+    {
+      "kind": "idle-scripts",
+      "scriptsEnabled": false,
+      "tabs": 12,
+      "heapMiB": 6.036,
+      "processRssSumMiB": 1035.48,
+      "processes": 15,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 73.56
+        },
+        {
+          "type": "GPU",
+          "miB": 89.64
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.39
+        },
+        {
+          "type": "renderer",
+          "miB": 66.25
+        },
+        {
+          "type": "renderer",
+          "miB": 69.47
+        },
+        {
+          "type": "renderer",
+          "miB": 71.11
+        },
+        {
+          "type": "renderer",
+          "miB": 70.95
+        },
+        {
+          "type": "renderer",
+          "miB": 70.92
+        },
+        {
+          "type": "renderer",
+          "miB": 71.11
+        },
+        {
+          "type": "renderer",
+          "miB": 71.17
+        },
+        {
+          "type": "renderer",
+          "miB": 71.61
+        },
+        {
+          "type": "renderer",
+          "miB": 71.05
+        },
+        {
+          "type": "renderer",
+          "miB": 71.13
+        },
+        {
+          "type": "renderer",
+          "miB": 70.92
+        },
+        {
+          "type": "renderer",
+          "miB": 71.2
+        }
+      ]
+    },
+    {
+      "kind": "idle-scripts",
+      "scriptsEnabled": true,
+      "tabs": 12,
+      "heapMiB": 15.958,
+      "processRssSumMiB": 1170.94,
+      "processes": 15,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 80.23
+        },
+        {
+          "type": "GPU",
+          "miB": 90.13
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 28.08
+        },
+        {
+          "type": "renderer",
+          "miB": 80.94
+        },
+        {
+          "type": "renderer",
+          "miB": 80.92
+        },
+        {
+          "type": "renderer",
+          "miB": 80.94
+        },
+        {
+          "type": "renderer",
+          "miB": 81.17
+        },
+        {
+          "type": "renderer",
+          "miB": 80.84
+        },
+        {
+          "type": "renderer",
+          "miB": 80.88
+        },
+        {
+          "type": "renderer",
+          "miB": 80.94
+        },
+        {
+          "type": "renderer",
+          "miB": 81.09
+        },
+        {
+          "type": "renderer",
+          "miB": 81.08
+        },
+        {
+          "type": "renderer",
+          "miB": 81.02
+        },
+        {
+          "type": "renderer",
+          "miB": 81.14
+        },
+        {
+          "type": "renderer",
+          "miB": 81.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 0,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.231,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 25.319,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.316,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.328,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 109.941,
+      "stagePeakMiB": {
+        "capture": 37.979,
+        "parse": 60.81,
+        "persist": 105.71,
+        "drain": 109.941
+      },
+      "elapsedMs": 602,
+      "processRssSumMiB": 258.55,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27
+        },
+        {
+          "type": "renderer",
+          "miB": 103.41
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 1,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.364,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.408,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.353,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.351,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 109.579,
+      "stagePeakMiB": {
+        "capture": 38.182,
+        "parse": 60.824,
+        "persist": 105.718,
+        "drain": 109.579
+      },
+      "elapsedMs": 482,
+      "processRssSumMiB": 261.69,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.28
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 105.94
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 2,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.401,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.429,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.389,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.401,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 113.797,
+      "stagePeakMiB": {
+        "capture": 38.282,
+        "parse": 60.902,
+        "persist": 113.797,
+        "drain": 109.62
+      },
+      "elapsedMs": 469,
+      "processRssSumMiB": 263.03,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.34
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 107.22
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 3,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.44,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.456,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.402,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.402,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 109.626,
+      "stagePeakMiB": {
+        "capture": 43.506,
+        "parse": 75.625,
+        "persist": 105.796,
+        "drain": 109.626
+      },
+      "elapsedMs": 480,
+      "processRssSumMiB": 265.47,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.39
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 109.61
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 4,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.438,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.461,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.407,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.407,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.769,
+      "stagePeakMiB": {
+        "capture": 43.565,
+        "parse": 75.621,
+        "persist": 105.769,
+        "drain": 85.595
+      },
+      "elapsedMs": 446,
+      "processRssSumMiB": 265.98,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.47
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 110.05
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 5,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.439,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.461,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.406,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.406,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.798,
+      "stagePeakMiB": {
+        "capture": 27.58,
+        "parse": 67.169,
+        "persist": 105.798,
+        "drain": 85.595
+      },
+      "elapsedMs": 455,
+      "processRssSumMiB": 266.7,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.52
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 110.72
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 6,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.439,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.461,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.407,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.406,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.768,
+      "stagePeakMiB": {
+        "capture": 27.576,
+        "parse": 67.17,
+        "persist": 105.768,
+        "drain": 85.595
+      },
+      "elapsedMs": 412,
+      "processRssSumMiB": 267.02,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.61
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 110.94
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 7,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.439,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.461,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.407,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.406,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.799,
+      "stagePeakMiB": {
+        "capture": 27.577,
+        "parse": 67.231,
+        "persist": 105.799,
+        "drain": 85.595
+      },
+      "elapsedMs": 434,
+      "processRssSumMiB": 267.16,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.7
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 110.98
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 8,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.439,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.461,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.407,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.406,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.799,
+      "stagePeakMiB": {
+        "capture": 27.514,
+        "parse": 67.17,
+        "persist": 105.799,
+        "drain": 85.595
+      },
+      "elapsedMs": 437,
+      "processRssSumMiB": 267.25,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.77
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.33
+        },
+        {
+          "type": "renderer",
+          "miB": 111.02
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 9,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.439,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.467,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.413,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.412,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.774,
+      "stagePeakMiB": {
+        "capture": 27.514,
+        "parse": 67.176,
+        "persist": 105.774,
+        "drain": 85.601
+      },
+      "elapsedMs": 408,
+      "processRssSumMiB": 267.45,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.84
+        },
+        {
+          "type": "GPU",
+          "miB": 52.14
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.38
+        },
+        {
+          "type": "renderer",
+          "miB": 111.09
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 10,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.445,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.469,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.414,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.807,
+      "stagePeakMiB": {
+        "capture": 27.583,
+        "parse": 67.178,
+        "persist": 105.807,
+        "drain": 85.603
+      },
+      "elapsedMs": 404,
+      "processRssSumMiB": 267.77,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 77.2
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 111.11
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 11,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.447,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.469,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.807,
+      "stagePeakMiB": {
+        "capture": 27.522,
+        "parse": 67.178,
+        "persist": 105.807,
+        "drain": 85.604
+      },
+      "elapsedMs": 443,
+      "processRssSumMiB": 268.53,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 77.25
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 111.83
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 12,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.808,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.178,
+        "persist": 105.808,
+        "drain": 85.604
+      },
+      "elapsedMs": 404,
+      "processRssSumMiB": 268.11,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.83
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 111.83
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 13,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.777,
+      "stagePeakMiB": {
+        "capture": 27.586,
+        "parse": 67.178,
+        "persist": 105.777,
+        "drain": 85.604
+      },
+      "elapsedMs": 402,
+      "processRssSumMiB": 268.02,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 76.72
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 111.84
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 14,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.808,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.178,
+        "persist": 105.808,
+        "drain": 85.604
+      },
+      "elapsedMs": 412,
+      "processRssSumMiB": 267.56,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 75.52
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 112.59
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 15,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 129.818,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.179,
+        "persist": 129.818,
+        "drain": 85.604
+      },
+      "elapsedMs": 423,
+      "processRssSumMiB": 267.63,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 75.56
+        },
+        {
+          "type": "GPU",
+          "miB": 52.09
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.36
+        },
+        {
+          "type": "renderer",
+          "miB": 112.61
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 16,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.808,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.178,
+        "persist": 105.808,
+        "drain": 85.604
+      },
+      "elapsedMs": 450,
+      "processRssSumMiB": 264.69,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 74.14
+        },
+        {
+          "type": "GPU",
+          "miB": 50.81
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.11
+        },
+        {
+          "type": "renderer",
+          "miB": 112.63
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 17,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 129.849,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.178,
+        "persist": 129.849,
+        "drain": 85.604
+      },
+      "elapsedMs": 434,
+      "processRssSumMiB": 262.19,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 73.94
+        },
+        {
+          "type": "GPU",
+          "miB": 50.36
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.27
+        },
+        {
+          "type": "renderer",
+          "miB": 112.63
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 18,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.808,
+      "stagePeakMiB": {
+        "capture": 27.523,
+        "parse": 67.114,
+        "persist": 105.808,
+        "drain": 85.604
+      },
+      "elapsedMs": 402,
+      "processRssSumMiB": 262.27,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 74
+        },
+        {
+          "type": "GPU",
+          "miB": 50.36
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.27
+        },
+        {
+          "type": "renderer",
+          "miB": 112.64
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 19,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 17.448,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 25.47,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.416,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 16.026,
+      "sampledPeakMiB": 105.808,
+      "stagePeakMiB": {
+        "capture": 27.586,
+        "parse": 67.179,
+        "persist": 105.808,
+        "drain": 85.604
+      },
+      "elapsedMs": 451,
+      "processRssSumMiB": 262.7,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 74.06
+        },
+        {
+          "type": "GPU",
+          "miB": 50.36
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.27
+        },
+        {
+          "type": "renderer",
+          "miB": 113.02
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 0,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.237,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 73.323,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.295,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.3,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 217.625,
+      "stagePeakMiB": {
+        "capture": 111.533,
+        "parse": 172.18,
+        "persist": 217.625,
+        "drain": 217.562
+      },
+      "elapsedMs": 1236,
+      "processRssSumMiB": 261.75,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 72.55
+        },
+        {
+          "type": "GPU",
+          "miB": 44.97
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.17
+        },
+        {
+          "type": "renderer",
+          "miB": 119.06
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 1,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.34,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.374,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.315,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.316,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 217.661,
+      "stagePeakMiB": {
+        "capture": 141.426,
+        "parse": 172.227,
+        "persist": 217.661,
+        "drain": 217.579
+      },
+      "elapsedMs": 1207,
+      "processRssSumMiB": 228,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.08
+        },
+        {
+          "type": "GPU",
+          "miB": 42.13
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 89.7
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 2,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.357,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.389,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.345,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.344,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 217.692,
+      "stagePeakMiB": {
+        "capture": 103.108,
+        "parse": 172.272,
+        "persist": 217.692,
+        "drain": 217.637
+      },
+      "elapsedMs": 1182,
+      "processRssSumMiB": 249.48,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.11
+        },
+        {
+          "type": "GPU",
+          "miB": 42.13
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 111.16
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 3,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.384,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.409,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.35,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.342,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.677,
+      "stagePeakMiB": {
+        "capture": 91.563,
+        "parse": 207.901,
+        "persist": 241.677,
+        "drain": 217.635
+      },
+      "elapsedMs": 1197,
+      "processRssSumMiB": 265.86,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.09
+        },
+        {
+          "type": "GPU",
+          "miB": 42.13
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 127.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 4,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.382,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.413,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.355,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.712,
+      "stagePeakMiB": {
+        "capture": 91.561,
+        "parse": 201.687,
+        "persist": 241.712,
+        "drain": 217.64
+      },
+      "elapsedMs": 1163,
+      "processRssSumMiB": 269.23,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.2
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 130.83
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 5,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.392,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.418,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.359,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.686,
+      "stagePeakMiB": {
+        "capture": 101.565,
+        "parse": 207.897,
+        "persist": 241.686,
+        "drain": 217.644
+      },
+      "elapsedMs": 1169,
+      "processRssSumMiB": 269.61,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.25
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 131.16
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 6,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.392,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.419,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.686,
+      "stagePeakMiB": {
+        "capture": 91.571,
+        "parse": 207.929,
+        "persist": 241.686,
+        "drain": 217.613
+      },
+      "elapsedMs": 1178,
+      "processRssSumMiB": 268.67,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.3
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 130.17
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 7,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.392,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.419,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.717,
+      "stagePeakMiB": {
+        "capture": 91.571,
+        "parse": 207.898,
+        "persist": 241.717,
+        "drain": 217.613
+      },
+      "elapsedMs": 1144,
+      "processRssSumMiB": 270.72,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.34
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 132.17
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 8,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.392,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.419,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.717,
+      "stagePeakMiB": {
+        "capture": 91.614,
+        "parse": 207.897,
+        "persist": 241.717,
+        "drain": 217.613
+      },
+      "elapsedMs": 1076,
+      "processRssSumMiB": 271.42,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.47
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 132.75
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 9,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.392,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.425,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.359,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.723,
+      "stagePeakMiB": {
+        "capture": 97.627,
+        "parse": 207.904,
+        "persist": 241.723,
+        "drain": 217.62
+      },
+      "elapsedMs": 1066,
+      "processRssSumMiB": 272.03,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.52
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 133.31
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 10,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.399,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.425,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.359,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.693,
+      "stagePeakMiB": {
+        "capture": 91.577,
+        "parse": 207.903,
+        "persist": 241.693,
+        "drain": 217.62
+      },
+      "elapsedMs": 1071,
+      "processRssSumMiB": 272.27,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.55
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 133.52
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 11,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.399,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.425,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.723,
+      "stagePeakMiB": {
+        "capture": 77.675,
+        "parse": 193.887,
+        "persist": 241.723,
+        "drain": 217.621
+      },
+      "elapsedMs": 1070,
+      "processRssSumMiB": 272.5,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.59
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 133.7
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 12,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.694,
+      "stagePeakMiB": {
+        "capture": 91.578,
+        "parse": 207.904,
+        "persist": 241.694,
+        "drain": 217.652
+      },
+      "elapsedMs": 1089,
+      "processRssSumMiB": 273.41,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.64
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 134.56
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 13,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.693,
+      "stagePeakMiB": {
+        "capture": 91.578,
+        "parse": 207.904,
+        "persist": 241.693,
+        "drain": 217.652
+      },
+      "elapsedMs": 1099,
+      "processRssSumMiB": 271.13,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.72
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 132.2
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 14,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.693,
+      "stagePeakMiB": {
+        "capture": 109.58,
+        "parse": 207.904,
+        "persist": 241.693,
+        "drain": 217.621
+      },
+      "elapsedMs": 1089,
+      "processRssSumMiB": 254.67,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.77
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 115.7
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 15,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.694,
+      "stagePeakMiB": {
+        "capture": 91.578,
+        "parse": 207.905,
+        "persist": 241.694,
+        "drain": 217.621
+      },
+      "elapsedMs": 1086,
+      "processRssSumMiB": 271.83,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.81
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 132.81
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 16,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.724,
+      "stagePeakMiB": {
+        "capture": 91.578,
+        "parse": 201.697,
+        "persist": 241.724,
+        "drain": 217.621
+      },
+      "elapsedMs": 1144,
+      "processRssSumMiB": 263.17,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.86
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.09
+        },
+        {
+          "type": "renderer",
+          "miB": 124.11
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 17,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.724,
+      "stagePeakMiB": {
+        "capture": 75.673,
+        "parse": 207.904,
+        "persist": 241.724,
+        "drain": 217.621
+      },
+      "elapsedMs": 1111,
+      "processRssSumMiB": 267.02,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.89
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.14
+        },
+        {
+          "type": "renderer",
+          "miB": 127.88
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 18,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.693,
+      "stagePeakMiB": {
+        "capture": 101.668,
+        "parse": 193.887,
+        "persist": 241.693,
+        "drain": 217.652
+      },
+      "elapsedMs": 1167,
+      "processRssSumMiB": 268.17,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 71.94
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.14
+        },
+        {
+          "type": "renderer",
+          "miB": 128.98
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 19,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 49.4,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 73.426,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.367,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.36,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 48.026,
+      "sampledPeakMiB": 241.724,
+      "stagePeakMiB": {
+        "capture": 91.578,
+        "parse": 207.905,
+        "persist": 241.724,
+        "drain": 217.621
+      },
+      "elapsedMs": 1081,
+      "processRssSumMiB": 269.83,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 72
+        },
+        {
+          "type": "GPU",
+          "miB": 42.11
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.14
+        },
+        {
+          "type": "renderer",
+          "miB": 130.58
+        }
+      ]
+    }
+  ],
+  "optimized": [
+    {
+      "kind": "environment",
+      "revision": "working-tree",
+      "browser": "147.0.7727.15",
+      "node": "v24.6.0",
+      "cpu": "Apple M1 Max",
+      "notes": "Main-world fixture combines extension worlds in one renderer; no real backend. RSS sums include shared pages more than once. Peaks sampled at ~10ms; not a hard RAM cap or multi-day leak test."
+    },
+    {
+      "kind": "idle-scripts",
+      "scriptsEnabled": false,
+      "tabs": 12,
+      "heapMiB": 6.036,
+      "processRssSumMiB": 984.7,
+      "processes": 15,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 73.53
+        },
+        {
+          "type": "GPU",
+          "miB": 75.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 26.27
+        },
+        {
+          "type": "renderer",
+          "miB": 64.83
+        },
+        {
+          "type": "renderer",
+          "miB": 65.08
+        },
+        {
+          "type": "renderer",
+          "miB": 64.81
+        },
+        {
+          "type": "renderer",
+          "miB": 65.48
+        },
+        {
+          "type": "renderer",
+          "miB": 65.52
+        },
+        {
+          "type": "renderer",
+          "miB": 65.44
+        },
+        {
+          "type": "renderer",
+          "miB": 64.42
+        },
+        {
+          "type": "renderer",
+          "miB": 67.81
+        },
+        {
+          "type": "renderer",
+          "miB": 71.52
+        },
+        {
+          "type": "renderer",
+          "miB": 71.14
+        },
+        {
+          "type": "renderer",
+          "miB": 71.23
+        },
+        {
+          "type": "renderer",
+          "miB": 71.8
+        }
+      ]
+    },
+    {
+      "kind": "idle-scripts",
+      "scriptsEnabled": true,
+      "tabs": 12,
+      "heapMiB": 15.962,
+      "processRssSumMiB": 1127.42,
+      "processes": 15,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 80.2
+        },
+        {
+          "type": "GPU",
+          "miB": 86.45
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 28.06
+        },
+        {
+          "type": "renderer",
+          "miB": 70.73
+        },
+        {
+          "type": "renderer",
+          "miB": 70.97
+        },
+        {
+          "type": "renderer",
+          "miB": 71.84
+        },
+        {
+          "type": "renderer",
+          "miB": 72.86
+        },
+        {
+          "type": "renderer",
+          "miB": 76.25
+        },
+        {
+          "type": "renderer",
+          "miB": 81.94
+        },
+        {
+          "type": "renderer",
+          "miB": 81.61
+        },
+        {
+          "type": "renderer",
+          "miB": 81
+        },
+        {
+          "type": "renderer",
+          "miB": 81.13
+        },
+        {
+          "type": "renderer",
+          "miB": 81.22
+        },
+        {
+          "type": "renderer",
+          "miB": 81.58
+        },
+        {
+          "type": "renderer",
+          "miB": 81.58
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 0,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.208,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 17.288,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.315,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.32,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 82.268,
+      "stagePeakMiB": {
+        "capture": 34.732,
+        "parse": 39.06,
+        "persist": 71.651,
+        "drain": 82.268
+      },
+      "elapsedMs": 431,
+      "processRssSumMiB": 259.08,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 81.3
+        },
+        {
+          "type": "GPU",
+          "miB": 48.67
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.91
+        },
+        {
+          "type": "renderer",
+          "miB": 101.2
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 1,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.334,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.376,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.344,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.34,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 76.277,
+      "stagePeakMiB": {
+        "capture": 37.614,
+        "parse": 39.142,
+        "persist": 71.68,
+        "drain": 76.277
+      },
+      "elapsedMs": 370,
+      "processRssSumMiB": 262.58,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 81.38
+        },
+        {
+          "type": "GPU",
+          "miB": 48.67
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.91
+        },
+        {
+          "type": "renderer",
+          "miB": 104.63
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 2,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.366,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.395,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.382,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.388,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 76.26,
+      "stagePeakMiB": {
+        "capture": 37.678,
+        "parse": 39.156,
+        "persist": 71.716,
+        "drain": 76.26
+      },
+      "elapsedMs": 351,
+      "processRssSumMiB": 264.25,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 81.42
+        },
+        {
+          "type": "GPU",
+          "miB": 48.67
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.91
+        },
+        {
+          "type": "renderer",
+          "miB": 106.25
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 3,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.403,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.434,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.402,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.402,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 77.716,
+      "stagePeakMiB": {
+        "capture": 37.648,
+        "parse": 39.195,
+        "persist": 77.716,
+        "drain": 76.337
+      },
+      "elapsedMs": 367,
+      "processRssSumMiB": 265.58,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 81.45
+        },
+        {
+          "type": "GPU",
+          "miB": 48.67
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.91
+        },
+        {
+          "type": "renderer",
+          "miB": 107.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 4,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.416,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.442,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.411,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.411,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 77.755,
+      "stagePeakMiB": {
+        "capture": 37.661,
+        "parse": 39.2,
+        "persist": 77.755,
+        "drain": 76.345
+      },
+      "elapsedMs": 359,
+      "processRssSumMiB": 265.09,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 80.55
+        },
+        {
+          "type": "GPU",
+          "miB": 48.67
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.97
+        },
+        {
+          "type": "renderer",
+          "miB": 107.91
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 5,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.424,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.444,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.413,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.412,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.737,
+      "stagePeakMiB": {
+        "capture": 27.598,
+        "parse": 51.749,
+        "persist": 83.737,
+        "drain": 76.348
+      },
+      "elapsedMs": 363,
+      "processRssSumMiB": 265.08,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 80.05
+        },
+        {
+          "type": "GPU",
+          "miB": 48.55
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 27.94
+        },
+        {
+          "type": "renderer",
+          "miB": 108.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 6,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.421,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.444,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.413,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.412,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.737,
+      "stagePeakMiB": {
+        "capture": 27.6,
+        "parse": 51.749,
+        "persist": 83.737,
+        "drain": 76.285
+      },
+      "elapsedMs": 470,
+      "processRssSumMiB": 225.58,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 72.86
+        },
+        {
+          "type": "GPU",
+          "miB": 41.8
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.75
+        },
+        {
+          "type": "renderer",
+          "miB": 85.17
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 7,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.421,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.446,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.415,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.414,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.77,
+      "stagePeakMiB": {
+        "capture": 19.587,
+        "parse": 51.752,
+        "persist": 83.77,
+        "drain": 51.568
+      },
+      "elapsedMs": 459,
+      "processRssSumMiB": 231.7,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 70.17
+        },
+        {
+          "type": "GPU",
+          "miB": 39.95
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.89
+        },
+        {
+          "type": "renderer",
+          "miB": 97.69
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 8,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.423,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.44,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.408,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.408,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.733,
+      "stagePeakMiB": {
+        "capture": 27.664,
+        "parse": 51.757,
+        "persist": 83.733,
+        "drain": 76.281
+      },
+      "elapsedMs": 420,
+      "processRssSumMiB": 221.41,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 68.59
+        },
+        {
+          "type": "GPU",
+          "miB": 39.13
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.44
+        },
+        {
+          "type": "renderer",
+          "miB": 90.25
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 9,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.417,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.45,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.419,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.418,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.743,
+      "stagePeakMiB": {
+        "capture": 17.579,
+        "parse": 51.69,
+        "persist": 83.743,
+        "drain": 76.353
+      },
+      "elapsedMs": 368,
+      "processRssSumMiB": 227.98,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.47
+        },
+        {
+          "type": "GPU",
+          "miB": 38.97
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.39
+        },
+        {
+          "type": "renderer",
+          "miB": 98.16
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 10,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.427,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.452,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.42,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.419,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.745,
+      "stagePeakMiB": {
+        "capture": 27.606,
+        "parse": 51.692,
+        "persist": 83.745,
+        "drain": 76.355
+      },
+      "elapsedMs": 362,
+      "processRssSumMiB": 228.67,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.09
+        },
+        {
+          "type": "GPU",
+          "miB": 38.92
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.33
+        },
+        {
+          "type": "renderer",
+          "miB": 99.33
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 11,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.429,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.452,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.42,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.42,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.775,
+      "stagePeakMiB": {
+        "capture": 27.668,
+        "parse": 51.692,
+        "persist": 83.775,
+        "drain": 76.294
+      },
+      "elapsedMs": 332,
+      "processRssSumMiB": 230.58,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 68.5
+        },
+        {
+          "type": "GPU",
+          "miB": 39.34
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.31
+        },
+        {
+          "type": "renderer",
+          "miB": 99.42
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 12,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.43,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.453,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.42,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.776,
+      "stagePeakMiB": {
+        "capture": 27.669,
+        "parse": 51.694,
+        "persist": 83.776,
+        "drain": 76.356
+      },
+      "elapsedMs": 382,
+      "processRssSumMiB": 226.3,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 68.5
+        },
+        {
+          "type": "GPU",
+          "miB": 39.34
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.14
+        },
+        {
+          "type": "renderer",
+          "miB": 95.31
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 13,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.43,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.453,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.42,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.746,
+      "stagePeakMiB": {
+        "capture": 25.606,
+        "parse": 51.693,
+        "persist": 83.746,
+        "drain": 76.419
+      },
+      "elapsedMs": 350,
+      "processRssSumMiB": 229.36,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 68.59
+        },
+        {
+          "type": "GPU",
+          "miB": 39.31
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.14
+        },
+        {
+          "type": "renderer",
+          "miB": 98.31
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 14,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.43,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.453,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.778,
+      "stagePeakMiB": {
+        "capture": 27.608,
+        "parse": 51.693,
+        "persist": 83.778,
+        "drain": 76.356
+      },
+      "elapsedMs": 351,
+      "processRssSumMiB": 232.2,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 68.3
+        },
+        {
+          "type": "GPU",
+          "miB": 39.27
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.11
+        },
+        {
+          "type": "renderer",
+          "miB": 101.53
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 15,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.43,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.453,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.421,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.746,
+      "stagePeakMiB": {
+        "capture": 25.606,
+        "parse": 51.693,
+        "persist": 83.746,
+        "drain": 76.356
+      },
+      "elapsedMs": 406,
+      "processRssSumMiB": 220.61,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.66
+        },
+        {
+          "type": "GPU",
+          "miB": 36.97
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 92.91
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 16,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.43,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.459,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.428,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.427,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.783,
+      "stagePeakMiB": {
+        "capture": 25.606,
+        "parse": 51.7,
+        "persist": 83.783,
+        "drain": 76.299
+      },
+      "elapsedMs": 550,
+      "processRssSumMiB": 213.48,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.19
+        },
+        {
+          "type": "GPU",
+          "miB": 36.3
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 86.92
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 17,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.441,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.456,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.424,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.424,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.779,
+      "stagePeakMiB": {
+        "capture": 17.66,
+        "parse": 51.699,
+        "persist": 83.779,
+        "drain": 76.296
+      },
+      "elapsedMs": 472,
+      "processRssSumMiB": 231,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.05
+        },
+        {
+          "type": "GPU",
+          "miB": 36.3
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 104.58
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 18,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.437,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.459,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.428,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.428,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.783,
+      "stagePeakMiB": {
+        "capture": 23.603,
+        "parse": 51.699,
+        "persist": 83.783,
+        "drain": 76.424
+      },
+      "elapsedMs": 516,
+      "processRssSumMiB": 213.41,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.7
+        },
+        {
+          "type": "GPU",
+          "miB": 36.3
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 87.33
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 2,
+      "concurrentResponses": 4,
+      "round": 19,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 9.436,
+          "backingMiB": 0.136
+        },
+        "parsed": {
+          "jsMiB": 17.459,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.428,
+          "backingMiB": 0.136
+        },
+        "afterDrain": {
+          "jsMiB": 1.427,
+          "backingMiB": 0.136
+        }
+      },
+      "wireMiB": 8.015,
+      "sampledPeakMiB": 83.752,
+      "stagePeakMiB": {
+        "capture": 27.615,
+        "parse": 51.7,
+        "persist": 83.752,
+        "drain": 76.425
+      },
+      "elapsedMs": 392,
+      "processRssSumMiB": 222.17,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.27
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 97
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 0,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.214,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.289,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.291,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.288,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 181.566,
+      "stagePeakMiB": {
+        "capture": 77.34,
+        "parse": 81.932,
+        "persist": 175.617,
+        "drain": 181.566
+      },
+      "elapsedMs": 1220,
+      "processRssSumMiB": 259.3,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 75.78
+        },
+        {
+          "type": "GPU",
+          "miB": 44.36
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.64
+        },
+        {
+          "type": "renderer",
+          "miB": 113.52
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 1,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.306,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.334,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.306,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.301,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 181.579,
+      "stagePeakMiB": {
+        "capture": 91.543,
+        "parse": 81.945,
+        "persist": 175.592,
+        "drain": 181.579
+      },
+      "elapsedMs": 1119,
+      "processRssSumMiB": 229.41,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 73.14
+        },
+        {
+          "type": "GPU",
+          "miB": 43.41
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.56
+        },
+        {
+          "type": "renderer",
+          "miB": 87.3
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 2,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.32,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.353,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.334,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.33,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.636,
+      "stagePeakMiB": {
+        "capture": 115.523,
+        "parse": 82.001,
+        "persist": 175.649,
+        "drain": 235.636
+      },
+      "elapsedMs": 1216,
+      "processRssSumMiB": 225.03,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 72.5
+        },
+        {
+          "type": "GPU",
+          "miB": 43.41
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 25.58
+        },
+        {
+          "type": "renderer",
+          "miB": 83.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 3,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.347,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.385,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.349,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.34,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.647,
+      "stagePeakMiB": {
+        "capture": 123.672,
+        "parse": 108.073,
+        "persist": 175.638,
+        "drain": 235.647
+      },
+      "elapsedMs": 1036,
+      "processRssSumMiB": 213.86,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.09
+        },
+        {
+          "type": "GPU",
+          "miB": 38.88
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.09
+        },
+        {
+          "type": "renderer",
+          "miB": 85.8
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 4,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.358,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.39,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.354,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.35,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.651,
+      "stagePeakMiB": {
+        "capture": 117.712,
+        "parse": 108.078,
+        "persist": 157.662,
+        "drain": 235.651
+      },
+      "elapsedMs": 915,
+      "processRssSumMiB": 246.25,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.3
+        },
+        {
+          "type": "GPU",
+          "miB": 39.3
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.09
+        },
+        {
+          "type": "renderer",
+          "miB": 117.56
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 5,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.367,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.397,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.361,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.658,
+      "stagePeakMiB": {
+        "capture": 67.541,
+        "parse": 108.082,
+        "persist": 175.649,
+        "drain": 235.658
+      },
+      "elapsedMs": 1047,
+      "processRssSumMiB": 217.39,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.69
+        },
+        {
+          "type": "GPU",
+          "miB": 36.27
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.09
+        },
+        {
+          "type": "renderer",
+          "miB": 91.34
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 6,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.37,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.397,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.361,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.658,
+      "stagePeakMiB": {
+        "capture": 65.356,
+        "parse": 108.087,
+        "persist": 175.648,
+        "drain": 235.658
+      },
+      "elapsedMs": 957,
+      "processRssSumMiB": 218.61,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.66
+        },
+        {
+          "type": "GPU",
+          "miB": 36.27
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.09
+        },
+        {
+          "type": "renderer",
+          "miB": 92.59
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 7,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.37,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.397,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.362,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.352,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.658,
+      "stagePeakMiB": {
+        "capture": 65.418,
+        "parse": 111.764,
+        "persist": 175.649,
+        "drain": 235.658
+      },
+      "elapsedMs": 1295,
+      "processRssSumMiB": 209.7,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.8
+        },
+        {
+          "type": "GPU",
+          "miB": 36.27
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 83.56
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 8,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.37,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.391,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.355,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.346,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.652,
+      "stagePeakMiB": {
+        "capture": 55.535,
+        "parse": 111.769,
+        "persist": 175.671,
+        "drain": 235.652
+      },
+      "elapsedMs": 1128,
+      "processRssSumMiB": 241.7,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.7
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 116.09
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 9,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.363,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.401,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.365,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.356,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.662,
+      "stagePeakMiB": {
+        "capture": 117.593,
+        "parse": 108.083,
+        "persist": 175.683,
+        "drain": 235.662
+      },
+      "elapsedMs": 1006,
+      "processRssSumMiB": 212.83,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.83
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 87.09
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 10,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.374,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.401,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.365,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.356,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.662,
+      "stagePeakMiB": {
+        "capture": 73.488,
+        "parse": 111.768,
+        "persist": 175.652,
+        "drain": 235.662
+      },
+      "elapsedMs": 1077,
+      "processRssSumMiB": 237.08,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.67
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 111.5
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 11,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.374,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.401,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.365,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.357,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.663,
+      "stagePeakMiB": {
+        "capture": 57.227,
+        "parse": 108.083,
+        "persist": 175.653,
+        "drain": 235.663
+      },
+      "elapsedMs": 985,
+      "processRssSumMiB": 218.97,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.81
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 93.25
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 12,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.375,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.402,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.357,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.663,
+      "stagePeakMiB": {
+        "capture": 65.544,
+        "parse": 111.769,
+        "persist": 175.685,
+        "drain": 235.663
+      },
+      "elapsedMs": 1126,
+      "processRssSumMiB": 214.36,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 66.97
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 88.48
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 13,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.375,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.402,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.357,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.663,
+      "stagePeakMiB": {
+        "capture": 63.546,
+        "parse": 111.769,
+        "persist": 175.683,
+        "drain": 235.663
+      },
+      "elapsedMs": 1084,
+      "processRssSumMiB": 217.17,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.44
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 90.83
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 14,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.374,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.402,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.357,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 175.649,
+      "stagePeakMiB": {
+        "capture": 106.629,
+        "parse": 111.769,
+        "persist": 175.649,
+        "drain": 163.623
+      },
+      "elapsedMs": 1354,
+      "processRssSumMiB": 218.16,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.17
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.08
+        },
+        {
+          "type": "renderer",
+          "miB": 92.08
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 15,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.375,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.402,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.366,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.357,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.663,
+      "stagePeakMiB": {
+        "capture": 121.697,
+        "parse": 108.09,
+        "persist": 175.654,
+        "drain": 235.663
+      },
+      "elapsedMs": 1176,
+      "processRssSumMiB": 238.47,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.58
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.72
+        },
+        {
+          "type": "renderer",
+          "miB": 111.34
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 16,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.375,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.408,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.373,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.364,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 175.661,
+      "stagePeakMiB": {
+        "capture": 55.541,
+        "parse": 111.775,
+        "persist": 175.661,
+        "drain": 163.628
+      },
+      "elapsedMs": 1024,
+      "processRssSumMiB": 224.88,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.63
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.72
+        },
+        {
+          "type": "renderer",
+          "miB": 97.7
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 17,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.381,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.408,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.373,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.364,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 235.67,
+      "stagePeakMiB": {
+        "capture": 119.641,
+        "parse": 108.063,
+        "persist": 175.661,
+        "drain": 235.67
+      },
+      "elapsedMs": 1059,
+      "processRssSumMiB": 212.42,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.25
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.72
+        },
+        {
+          "type": "renderer",
+          "miB": 85.63
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 18,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.381,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.408,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.373,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.364,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 175.691,
+      "stagePeakMiB": {
+        "capture": 73.372,
+        "parse": 108.095,
+        "persist": 175.691,
+        "drain": 163.628
+      },
+      "elapsedMs": 1164,
+      "processRssSumMiB": 211.23,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.73
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.13
+        },
+        {
+          "type": "renderer",
+          "miB": 84.55
+        }
+      ]
+    },
+    {
+      "kind": "capture-memory",
+      "responseMiB": 6,
+      "concurrentResponses": 4,
+      "round": 19,
+      "idle": {
+        "jsMiB": 1.109,
+        "backingMiB": 0.135
+      },
+      "checkpoints": {
+        "captured": {
+          "jsMiB": 25.381,
+          "backingMiB": 0.135
+        },
+        "parsed": {
+          "jsMiB": 49.408,
+          "backingMiB": 0.136
+        },
+        "persisted": {
+          "jsMiB": 1.373,
+          "backingMiB": 0.135
+        },
+        "afterDrain": {
+          "jsMiB": 1.364,
+          "backingMiB": 0.135
+        }
+      },
+      "wireMiB": 24.015,
+      "sampledPeakMiB": 181.641,
+      "stagePeakMiB": {
+        "capture": 71.185,
+        "parse": 111.776,
+        "persist": 175.689,
+        "drain": 181.641
+      },
+      "elapsedMs": 1393,
+      "processRssSumMiB": 211.27,
+      "processes": 4,
+      "rssByProcess": [
+        {
+          "type": "browser",
+          "miB": 67.69
+        },
+        {
+          "type": "GPU",
+          "miB": 35.83
+        },
+        {
+          "type": "network.mojom.NetworkService",
+          "miB": 23.13
+        },
+        {
+          "type": "renderer",
+          "miB": 84.63
+        }
+      ]
+    }
+  ]
+}

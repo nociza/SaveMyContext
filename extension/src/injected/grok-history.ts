@@ -385,14 +385,12 @@ async function fetchGrokConversationResponsesViaNodes(conversationId: string): P
 async function fetchGrokConversationCapture(entry: GrokConversationEntry): Promise<{
   requestBody: {
     text: string;
-    json: unknown;
   };
   response: {
     status: number;
     ok: boolean;
     contentType?: string;
     text: string;
-    json: unknown;
   };
   url: string;
 }> {
@@ -427,15 +425,13 @@ async function fetchGrokConversationCapture(entry: GrokConversationEntry): Promi
 
   return {
     requestBody: {
-      text: JSON.stringify(requestJson),
-      json: requestJson
+      text: JSON.stringify(requestJson)
     },
     response: {
       status: 200,
       ok: true,
       contentType: "application/json",
-      text: JSON.stringify(responseJson),
-      json: responseJson
+      text: JSON.stringify(responseJson)
     },
     url
   };

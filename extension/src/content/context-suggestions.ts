@@ -487,7 +487,11 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
   }
 
   function hide(): void {
+    requestSequence += 1;
+    if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+    refreshTimer = null;
     suggestions = [];
+    resultsRoot?.replaceChildren();
     panelOpen = false;
     loading = false;
     lastContextSignature = "";
@@ -630,12 +634,14 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
     }
 
     const draftText = readEditableText(target).slice(0, 1_200);
+    const requestId = ++requestSequence;
     const contextResponse = await sendMessage<ActiveChatContextResponse>({
       type: "GET_ACTIVE_CHAT_CONTEXT",
       payload: {
         pageUrl: window.location.href
       }
     });
+    if (requestId !== requestSequence) return;
 
     const context = {
       provider,
@@ -657,14 +663,12 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
       capturedAt: contextResponse.snapshot?.capturedAt ?? "",
       externalSessionId: contextResponse.snapshot?.externalSessionId ?? ""
     });
-    if (!force && contextSignature === lastContextSignature) {
+    if (!force && !loading && contextSignature === lastContextSignature) {
       render();
       return;
     }
 
     lastContextSignature = contextSignature;
-    requestSequence += 1;
-    const requestId = requestSequence;
     loading = true;
     render();
 
