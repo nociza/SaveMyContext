@@ -199,6 +199,10 @@ cd ../extension && pnpm test && pnpm typecheck && pnpm build
 Browser test against a **disposable** running backend:
 `SMC_WORKSPACE_TEST_URL=http://127.0.0.1:18888 pnpm exec playwright test e2e/workspace.spec.ts`.
 
+Reproducible synthetic browser benchmarks: `pnpm benchmark:capture` and
+`pnpm benchmark:browser` in `extension/`. See the [performance and recovery guide](docs/performance.md)
+for baseline comparisons, functional gates, and browser-storage upgrade precautions.
+
 See [architecture](docs/architecture.md), [workspace design](docs/workspace-design.md),
 and [contributing](docs/contributing.md). The public project contains the extension,
 core API, shared workspace, and agent client. Installation-specific infrastructure,

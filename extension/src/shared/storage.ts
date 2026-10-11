@@ -1,3 +1,5 @@
+import { SyncStateStore } from "./sync-state-store";
+const sessionStates = new SyncStateStore();
 import {
   DEFAULT_PAGE_SURFACE_SCOPE,
   normalizePageSurfaceScope
@@ -19,7 +21,6 @@ import type {
 const SETTINGS_KEY = "savemycontext.settings";
 const SECRET_SETTINGS_KEY = "savemycontext.settings.secrets";
 const SETTINGS_CACHE_KEY = "savemycontext.settings.cache";
-const SYNC_STATE_KEY = "savemycontext.sync-state";
 const STATUS_KEY = "savemycontext.status";
 const HISTORY_SYNC_KEY = "savemycontext.history-sync";
 const INSTALLATION_ID_KEY = "savemycontext.installation-id";
@@ -274,31 +275,11 @@ export async function getInstallationId(): Promise<string> {
   return next;
 }
 
-export async function getSessionSyncState(sessionKey: string): Promise<SessionSyncState> {
-  const allStates = await getAllSessionSyncStates();
-  return allStates[sessionKey] ?? { seenMessageIds: [] };
-}
-
-export async function getAllSessionSyncStates(): Promise<Record<string, SessionSyncState>> {
-  const stored = await chrome.storage.local.get(SYNC_STATE_KEY);
-  return (stored[SYNC_STATE_KEY] ?? {}) as Record<string, SessionSyncState>;
-}
-
-export async function saveSessionSyncState(sessionKey: string, state: SessionSyncState): Promise<void> {
-  await lockedStorage(SYNC_STATE_KEY, async () => {
-    const allStates = await getAllSessionSyncStates();
-    allStates[sessionKey] = state;
-    await chrome.storage.local.set({ [SYNC_STATE_KEY]: allStates });
-  });
-}
-
-export async function getProviderSessionSyncStates(
-  provider: ProviderName
-): Promise<Record<string, SessionSyncState>> {
-  const prefix = `${provider}:`;
-  const allStates = await getAllSessionSyncStates();
-  return Object.fromEntries(Object.entries(allStates).filter(([sessionKey]) => sessionKey.startsWith(prefix)));
-}
+export const getSessionSyncState = (key: string) => sessionStates.get(key);
+export const getAllSessionSyncStates = () => sessionStates.all();
+export const saveSessionSyncState = (key: string, state: SessionSyncState) => sessionStates.set(key, state);
+/** Provider enumeration intentionally omits per-message fingerprints and IDs. */
+export const getProviderSessionSyncStates = (provider: ProviderName) => sessionStates.all(provider);
 
 export async function getStatus(): Promise<SyncStatus> {
   const stored = await chrome.storage.local.get(STATUS_KEY);

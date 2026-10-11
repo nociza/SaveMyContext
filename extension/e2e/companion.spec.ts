@@ -42,6 +42,13 @@ test("capture companion pauses offline, retains its queue, and launches one work
     });
     const defaults = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "GET_SETTINGS" }));
     expect(defaults.autoSyncHistory).toBe(false);
+    await expect.poll(() => worker.evaluate(async () => (await chrome.alarms.getAll()).filter(a => a.name === "smc-capture-outbox-v1").length)).toBe(0);
+    await worker.evaluate(async () => {
+      const status = (await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"] as object;
+      await chrome.storage.local.set({ "savemycontext.status": { ...status, lastError: "Capture outbox unavailable; delivery will retry." } });
+    });
+    await expect.poll(() => worker.evaluate(async () => ((await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"] as { lastError?: string | null }).lastError)).toBeNull();
+    await expect(popup.locator("#capture-warning")).toBeHidden();
     await popup.locator("#pause").click();
     await expect(popup.locator("#pause")).toHaveText("Resume capture");
     await popup.reload();
@@ -51,15 +58,23 @@ test("capture companion pauses offline, retains its queue, and launches one work
     }));
     expect(rejected).toEqual({ ok: false, error: "Capture paused" });
     await popup.evaluate(async () => {
-      // Seed only synthetic queued evidence on an isolated extension origin.
+      // Seed a valid v3 encrypted row; never bypass its atomic metadata totals.
+      const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const item = { id: "retained", backendUrl: "https://previous.example", payload: { raw_capture: {} }, createdAt: 1, bytes: 1 };
+      const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(item.id) }, key, new TextEncoder().encode(JSON.stringify(item)));
+      const destination = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(item.backendUrl))), b => b.toString(16).padStart(2, "0")).join("");
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open("smc-capture-outbox", 2);
+        const request = indexedDB.open("smc-capture-outbox", 3);
         request.onupgradeneeded = () => request.result.createObjectStore("captures", { keyPath: "id" });
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const tx = db.transaction("captures", "readwrite");
-          tx.objectStore("captures").put({ id: "retained", backendUrl: "https://previous.example", payload: {}, createdAt: 1, bytes: 1 });
+          const tx = db.transaction(["captures", "metadata", "keys"], "readwrite");
+          tx.objectStore("captures").put({ id: item.id, version: 1, iv, ciphertext });
+          tx.objectStore("metadata").put({ id: item.id, createdAt: 1, bytes: 1, runId: "", destination });
+          tx.objectStore("keys").put(key, "aes-gcm-v1");
+          tx.objectStore("keys").put({ count: 1, bytes: 1 }, "queue-totals-v3");
           tx.oncomplete = () => { db.close(); resolve(); };
           tx.onerror = () => { db.close(); reject(tx.error); };
         };
@@ -68,7 +83,7 @@ test("capture companion pauses offline, retains its queue, and launches one work
     await popup.reload();
     await expect(popup.locator("#pending")).toHaveText("1 waiting to send");
     const storedQueue = await popup.evaluate(async () => new Promise<any[]>((resolve, reject) => {
-      const request = indexedDB.open("smc-capture-outbox", 2);
+      const request = indexedDB.open("smc-capture-outbox", 3);
       request.onsuccess = () => {
         const db = request.result, tx = db.transaction("captures"), get = tx.objectStore("captures").getAll();
         tx.oncomplete = () => { db.close(); resolve(get.result); };

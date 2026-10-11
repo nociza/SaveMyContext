@@ -11,7 +11,7 @@ import { authorizedHistoryFetch as nativeFetch } from "./capture-permission";
 
 interface GrokHistoryHooks {
   runId: string;
-  postCapture: (capture: Omit<CapturedNetworkEvent, "source">) => void;
+  postCapture: (capture: Omit<CapturedNetworkEvent, "source">) => void | Promise<void>;
   postStatus: (update: HistorySyncUpdate) => void;
 }
 
@@ -498,7 +498,7 @@ export async function runGrokHistorySync(
     await runWithConcurrency(pendingEntries, GROK_HISTORY_DETAIL_CONCURRENCY, async (entry) => {
       try {
         const capture = await fetchGrokConversationCapture(entry);
-        hooks.postCapture({
+        await hooks.postCapture({
           providerHint: "grok",
           captureMode: "full_snapshot",
           historySyncRunId: hooks.runId,

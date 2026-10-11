@@ -23,6 +23,7 @@ export interface ProviderProject {
 }
 
 export interface CapturedNetworkEvent {
+  historyFingerprints?: Record<string, string>;
   source: "savemycontext-network-observer";
   providerHint?: ProviderName;
   captureMode?: CaptureMode;
@@ -69,6 +70,7 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  historyFingerprints?: Record<string, string>;
   projectFingerprint?: string;
   historyItemKey?: string;
   historyFingerprint?: string;
@@ -90,6 +92,7 @@ export interface ProviderDriftAlert {
 }
 
 export interface ProviderHistorySyncState {
+  lastSuccessfulAt?: string;
   inProgress?: boolean;
   lastStartedAt?: string;
   lastCompletedAt?: string;
@@ -905,9 +908,10 @@ export type MainWorldControlPayload = HistorySyncControlPayload | { type: "SET_C
 export type BridgeToPageMessage = {
   type: "CONTROL";
   payload: MainWorldControlPayload;
-};
+} | { type: "CAPTURE_RECEIPT"; requestId: string; ok: boolean };
 
 export type BridgeToExtensionMessage =
+  | { type: "CAPTURE_WARNING" }
   | { type: "BRIDGE_READY" }
   | { type: "NETWORK_CAPTURE"; payload: CapturedNetworkEvent }
   | { type: "HISTORY_SYNC_STATUS"; payload: HistorySyncUpdate };
@@ -1067,6 +1071,7 @@ export interface SourceCaptureResponse {
 }
 
 export type RuntimeMessage =
+  | { type: "CAPTURE_WARNING" }
   | { type: "GET_DELIVERY_STATUS" }
   | { type: "SET_CAPTURE_PAUSED"; paused: boolean }
   | { type: "ACCEPT_CAPTURE_CONSENT"; backendUrl: string }

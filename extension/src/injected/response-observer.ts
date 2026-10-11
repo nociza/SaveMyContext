@@ -27,10 +27,11 @@ export async function readBoundedResponse(response: Response, maxBytes = MAX_CAP
   }
 }
 
-export function observeResponse(response: Response, accept: (text: string) => void): void {
+export function observeResponse(response: Response, accept: (text: string) => void, failed: () => void = () => {}): void {
   try {
-    void readBoundedResponse(response.clone()).then(accept).catch(() => undefined);
+    void readBoundedResponse(response.clone()).then(accept).catch(failed);
   } catch {
-    // Observer failure must not change provider behavior.
+    // Observer failure must not change provider behavior, but must be visible.
+    failed();
   }
 }

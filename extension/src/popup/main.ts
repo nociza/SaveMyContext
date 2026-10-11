@@ -31,7 +31,7 @@ async function refresh() {
     const [configuration, status, delivery, tabs] = await Promise.all([
       chrome.runtime.sendMessage({ type: "GET_SETTINGS" }) as Promise<ExtensionSettings>,
       chrome.runtime.sendMessage({ type: "GET_STATUS" }) as Promise<SyncStatus>,
-      chrome.runtime.sendMessage({ type: "GET_DELIVERY_STATUS" }) as Promise<{ pending: number }>,
+      chrome.runtime.sendMessage({ type: "GET_DELIVERY_STATUS" }) as Promise<{ pending?: number; error?: string }>,
       chrome.tabs.query({ active: true, currentWindow: true }),
     ]);
     settings = configuration;
@@ -51,7 +51,8 @@ async function refresh() {
     text("last-error", status.lastError || status.backendValidationError || "None");
     text("capture-warning", status.lastError || "");
     element("capture-warning").hidden = !status.lastError;
-    text("pending", delivery.pending ? `${delivery.pending} waiting to send` : "No pending captures");
+    const queueKnown = typeof delivery?.pending === "number" && Number.isFinite(delivery.pending);
+    text("pending", !queueKnown ? "Queue unavailable — captures may still be waiting" : delivery.pending ? `${delivery.pending} waiting to send` : "No pending captures");
     text("history-sync", status.historySyncInProgress
       ? `Importing · ${status.historySyncProcessedCount || 0}${status.historySyncTotalCount == null ? "" : ` / ${status.historySyncTotalCount}`} conversations`
       : `${status.historySyncLastResult || "Not imported"}${status.historySyncLastConversationCount === undefined ? "" : ` · ${status.historySyncLastConversationCount} conversations`}`);
@@ -61,7 +62,7 @@ async function refresh() {
     available = {
       "open-dashboard": true, "pause": view.canPause,
       "enable-capture": !settings.captureConsentGranted && Boolean(settings.backendUrl),
-      "clear-queue": delivery.pending > 0, "save-page": view.canSave, "import-history": view.canImport,
+      "clear-queue": queueKnown && delivery.pending! > 0, "save-page": view.canSave && queueKnown, "import-history": view.canImport && queueKnown,
     };
   } catch {
     available = {};
@@ -135,6 +136,7 @@ for (const id of ["settings", "setup-connection"]) {
   });
 }
 chrome.storage.onChanged.addListener((changes, area) => {
-  if ((area === "local" || area === "sync") && Object.keys(changes).some(key => key.startsWith("savemycontext."))) void refresh();
+  const visibleKeys = ["savemycontext.status", "savemycontext.settings", "savemycontext.settings.cache", "savemycontext.capture-consent"];
+  if ((area === "local" || area === "sync") && visibleKeys.some(key => key in changes)) void refresh();
 });
 void refresh();

@@ -9,6 +9,7 @@ import type { BackendIngestPayload, CapturedNetworkEvent } from "../src/shared/t
 class MemoryStore implements CaptureStore {
   rows = new Map<string, PendingCapture>();
   async list() { return [...this.rows.values()].sort((a, b) => a.createdAt - b.createdAt); }
+  async *iterate() { yield* await this.list(); }
   async put(item: PendingCapture) { this.rows.set(item.id, item); }
   async remove(id: string) { this.rows.delete(id); }
 }
@@ -25,6 +26,13 @@ const payload: BackendIngestPayload = {
 };
 
 describe("durable capture delivery", () => {
+  it("retains policy-deferred captures without blocking other eligible captures", async () => {
+    const store = new MemoryStore();
+    await store.put({ id: "blocked", backendUrl: "https://original", payload, bytes: 1, createdAt: 1 });
+    await store.put({ id: "allowed", backendUrl: "https://original", payload, bytes: 1, createdAt: 2 });
+    expect(await drainCaptures(store, "https://original", async item => item.id !== "blocked")).toBe(1);
+    expect((await store.list()).map(row => row.id)).toEqual(["blocked"]);
+  });
   it("checks trigger words against original context, not an answer-only delta", () => {
     const capture = { ...payload, messages: [{ external_message_id: "a", role: "assistant" as const, content: "An edited answer" }],
       raw_capture: { ...event, response: { ...event.response, json: { messages: [

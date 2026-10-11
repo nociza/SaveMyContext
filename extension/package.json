@@ -1,6 +1,6 @@
 {
   "name": "savemycontext-extension",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -16,6 +16,8 @@
     "store:assets": "node scripts/store-assets.mjs",
     "build:capture-preview": "node scripts/build-capture-preview.mjs",
     "test": "vitest run tests",
+    "benchmark:capture": "node scripts/benchmark-capture.mjs",
+    "benchmark:browser": "node scripts/benchmark-browser.mjs",
     "test:e2e": "pnpm build && playwright test"
   },
   "pnpm": {

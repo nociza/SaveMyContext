@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { getStatus, setStatus, saveSessionSyncState, getAllSessionSyncStates,
+import { getStatus, setStatus,
   saveProviderHistorySyncState, getProviderHistorySyncState } from "../src/shared/storage";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -21,8 +21,7 @@ it("concurrent progress, backend validation and capture acknowledgements never e
   ]);
   expect(await getStatus()).toMatchObject({ lastSessionKey: "chatgpt:project-chat", lastSuccessAt: "now",
     historySyncLastResult: "success", backendVersion: "test", historySyncProcessedCount: 19 });
-  await Promise.all(Array.from({ length: 20 }, (_, i) => saveSessionSyncState(`chatgpt:${i}`, { seenMessageIds: [`m${i}`] })));
-  expect(Object.keys(await getAllSessionSyncStates())).toHaveLength(20);
+  // Per-conversation concurrency/migration runs against native IndexedDB in e2e/capture.spec.ts.
   await Promise.all([
     saveProviderHistorySyncState("chatgpt", { lastTopSessionId: "one" }),
     saveProviderHistorySyncState("gemini", { lastTopSessionId: "two" })

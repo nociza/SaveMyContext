@@ -23,7 +23,7 @@ const test = base.extend<{ ui: Page }>({
         const state = {
           origin, settings: { ...defaults, captureConsentGranted: true, capturePaused: false },
           status: { backendValidatedAt: "2026-09-22T10:00:00Z", lastSuccessAt: "2026-09-22T10:30:00Z" } as Record<string, unknown>,
-          pending: 0, url: "https://chatgpt.com/c/fixture", failRead: false, permissionGranted: true,
+          pending: 0, queueError: false, url: "https://chatgpt.com/c/fixture", failRead: false, permissionGranted: true,
           calls: [] as string[], delayed: [] as string[],
           waiting: {} as Record<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>,
           emit: () => {},
@@ -47,7 +47,7 @@ const test = base.extend<{ ui: Page }>({
           switch (message.type) {
             case "GET_SETTINGS": return { ...state.settings };
             case "GET_STATUS": return { ...state.status };
-            case "GET_DELIVERY_STATUS": return { pending: state.pending };
+            case "GET_DELIVERY_STATUS": return state.queueError ? { ok: false, error: "Outbox unavailable" } : { pending: state.pending };
             case "SAVE_SETTINGS": state.settings = { ...state.settings, ...message.payload }; return { ok: true };
             case "SET_CAPTURE_PAUSED": state.settings.capturePaused = message.paused; return { ok: true, paused: message.paused };
             case "ACCEPT_CAPTURE_CONSENT": state.settings.captureConsentGranted = true; state.settings.capturePaused = false; return { ok: true };
@@ -82,6 +82,17 @@ test("popup retains action locks through storage updates and recovers from error
   await ui.evaluate(() => { (window as any).__smcUi.delayed = []; });
   await ui.locator("#save-page").click();
   await expect(ui.locator("#action-status")).toHaveText("Page saved.");
+});
+
+test("an unavailable queue is never presented as empty or safe to import into", async ({ ui }) => {
+  await ui.evaluate(() => { const s = (window as any).__smcUi; s.queueError = true; s.emit(); });
+  await expect(ui.locator("#pending")).toContainText("Queue unavailable");
+  await expect(ui.locator("#import-history")).toBeDisabled();
+  await expect(ui.locator("#clear-queue")).toBeDisabled();
+  await expect(ui.locator("#pause")).toBeEnabled();
+  await ui.evaluate(() => { const s = (window as any).__smcUi; s.queueError = false; s.pending = 3; s.emit(); });
+  await expect(ui.locator("#pending")).toHaveText("3 waiting to send");
+  await expect(ui.locator("#import-history")).toBeEnabled();
 });
 
 test("consent, cancellations, unsupported tabs, and status failures are explicit", async ({ ui }) => {

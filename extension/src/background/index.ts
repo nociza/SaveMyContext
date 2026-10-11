@@ -1,3 +1,5 @@
+import { ensureDeliveryRetry, scheduleDeliveryRetry, withDeliveryAlarm } from "./delivery-retry";
+import { waitForTabComplete } from "./tab-ready";
 import { providerRegistry } from "../providers/registry";
 import { parseConnectionString } from "../shared/connection";
 import {
@@ -90,7 +92,6 @@ const TAB_MESSAGE_RETRY_MS = 4_000;
 const TAB_MESSAGE_RETRY_INTERVAL_MS = 150;
 const PROVIDER_TAB_READY_TIMEOUT_MS = 10_000;
 const PROVIDER_TAB_READY_INTERVAL_MS = 250;
-const PROVIDER_REFRESH_TAB_LOAD_TIMEOUT_MS = 30_000;
 const CONTENT_SCRIPT_FILE = "assets/content.js";
 const PAGE_SURFACE_SCRIPT_ID = "savemycontext-page-surfaces-all-pages";
 const PAGE_SURFACE_CLEANUP_FLAG = "data-savemycontext-page-surfaces-cleanup";
@@ -523,67 +524,16 @@ async function findReusableProviderTab(
   return matchingTabs[0]?.id ?? null;
 }
 
-async function waitForTabComplete(tabId: number): Promise<void> {
-  const current = await chrome.tabs.get(tabId);
-  if (current.status === "complete") {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const listener = (updatedTabId: number, changeInfo: { status?: string }) => {
-      if (updatedTabId !== tabId || changeInfo.status !== "complete") {
-        return;
-      }
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-  });
-}
-
 async function findProviderRefreshTab(provider: ProviderName): Promise<number | null> {
   const tabs = await chrome.tabs.query({});
   const matchingTabs = tabs.filter((tab) => typeof tab.id === "number" && tabMatchesProviderUrl(tab.url, provider));
   return matchingTabs.find((tab) => !tab.active)?.id ?? matchingTabs[0]?.id ?? null;
 }
 
-async function reloadTabAndWaitForComplete(tabId: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const cleanup = (): void => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      globalThis.clearTimeout(timeout);
-    };
-    const finish = (error?: unknown): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
-    };
-    const listener = (updatedTabId: number, changeInfo: { status?: string }) => {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        finish();
-      }
-    };
-    const timeout = globalThis.setTimeout(() => {
-      finish(new Error("Timed out waiting for the provider refresh tab to load."));
-    }, PROVIDER_REFRESH_TAB_LOAD_TIMEOUT_MS);
-
-    chrome.tabs.onUpdated.addListener(listener);
-    void chrome.tabs.reload(tabId).catch(finish);
-  });
-}
-
 async function ensureProviderRefreshTab(provider: ProviderName): Promise<chrome.tabs.Tab & { id: number }> {
   const existingTabId = await findProviderRefreshTab(provider);
   if (typeof existingTabId === "number") {
-    await reloadTabAndWaitForComplete(existingTabId);
+    await waitForTabComplete(existingTabId);
     const tab = await chrome.tabs.get(existingTabId);
     if (typeof tab.id === "number") {
       return tab as chrome.tabs.Tab & { id: number };
@@ -1243,7 +1193,6 @@ async function handleScheduledProviderRefresh(provider: ProviderName): Promise<v
 
 chrome.runtime.onInstalled.addListener(() => {
   void initializeStorage().then(async () => {
-    await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
     void flushCaptureOutbox();
     await syncProviderRefreshAlarms();
     try {
@@ -1257,7 +1206,6 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(() => {
   void initializeStorage().then(async () => {
-    await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
     void flushCaptureOutbox();
     await syncProviderRefreshAlarms();
     try {
@@ -1323,13 +1271,28 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
+  if (message.type === "CAPTURE_WARNING") {
+    void setExtensionStatus({ lastError: "A conversation response could not be captured completely (size, timeout, or stream error). Import history to retry; the provider response was not interrupted." })
+      .then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (["GET_DELIVERY_STATUS", "SET_CAPTURE_PAUSED", "IMPORT_ACTIVE_HISTORY", "ACCEPT_CAPTURE_CONSENT", "CLEAR_CAPTURE_QUEUE"].includes(message.type)) {
     // These controls belong to extension pages, never the provider page bridge.
     if (!_sender.url?.startsWith(chrome.runtime.getURL(""))) {
       sendResponse({ ok: false, error: "Extension page required" }); return false;
     }
     void (async () => {
-      if (message.type === "GET_DELIVERY_STATUS") return { pending: await captureOutbox.count() };
+      if (message.type === "GET_DELIVERY_STATUS") {
+        const pending = await captureOutbox.count();
+        const status = await getStatus();
+        // The old worker persisted this generic warning indefinitely, even after
+        // recovery. Clear only that exact warning, and only for a verified empty
+        // queue; a readable count is not proof that nonempty ciphertext is healthy.
+        if (pending === 0 && status.lastError === "Capture outbox unavailable; delivery will retry.") {
+          await setExtensionStatus({ lastError: null });
+        }
+        return { pending };
+      }
       if (message.type === "ACCEPT_CAPTURE_CONSENT") {
         await acceptCaptureConsent(message.backendUrl);
         void flushCaptureOutbox();
@@ -1341,19 +1304,20 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
           await captureDrain;
           await captureOutbox.clear();
         });
+        void flushCaptureOutbox();
         return { ok: true };
       }
       if (message.type === "SET_CAPTURE_PAUSED") {
         if (!message.paused && !(await getSettings()).captureConsentGranted) return { ok: false, error: "Review and enable capture first" };
         await saveSettings({ capturePaused: Boolean(message.paused) });
-        if (!message.paused) void flushCaptureOutbox();
+        void flushCaptureOutbox();
         return { ok: true, paused: Boolean(message.paused) };
       }
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const provider = tab?.url ? detectProviderFromUrl(tab.url) : null;
       if (!provider || !supportsProactiveHistorySync(provider)) return { triggered: false, reason: "Open a supported provider first" };
       return enqueueTask(() => handlePageVisit({ provider, pageUrl: tab.url! }, tab.id, true));
-    })().then(sendResponse).catch(() => sendResponse({ ok: false, error: "Could not complete the extension action" }));
+    })().then(sendResponse).catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Could not complete the extension action" }));
     return true;
   }
   if (message.type === "NETWORK_CAPTURE") {
@@ -1361,6 +1325,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       .then(() => sendResponse({ ok: true }))
       .catch((error) => {
         console.error("SaveMyContext capture failed", error);
+        void setExtensionStatus({ lastError: `Capture was not saved: ${error instanceof Error ? error.message : "local persistence failed"}` });
         sendResponse({
           ok: false,
           error: error instanceof Error ? error.message : String(error)
@@ -1570,6 +1535,10 @@ async function handlePageVisit(
     return { triggered: false, reason: "already-in-progress" };
   }
 
+  if (!explicit && currentState.lastSuccessfulAt &&
+      Date.now() - Date.parse(currentState.lastSuccessfulAt) < (settings.scheduledProviderRefreshIntervalMinutes ?? 60) * 60_000) {
+    return { triggered: false, reason: "recently-synced" };
+  }
   const activeWatermarks = activeHistoryWatermarks(payload.provider, currentState, backendStatus.providerDriftAlert);
   const hasExistingHistoryWatermark = Boolean(activeWatermarks?.length);
   const syncedSessionIds = hasExistingHistoryWatermark
@@ -1608,9 +1577,9 @@ async function handlePageVisit(
         provider: payload.provider,
         syncedSessionIds,
         historyFingerprints: Object.fromEntries(Object.values(await getProviderSessionSyncStates(payload.provider))
-          .filter((s) => s.historyItemKey && s.historyFingerprint && s.lastSyncedAt &&
-            Date.now() - Date.parse(s.lastSyncedAt) < 24 * 60 * 60 * 1000)
-          .map((s) => [s.historyItemKey!, s.historyFingerprint!])),
+          .filter((s) => s.lastSyncedAt && Date.now() - Date.parse(s.lastSyncedAt) < 7 * 24 * 60 * 60 * 1000)
+          .flatMap((s) => s.historyFingerprints ? Object.entries(s.historyFingerprints)
+            : s.historyItemKey && s.historyFingerprint ? [[s.historyItemKey, s.historyFingerprint]] : [])),
         previousTopSessionId: previousTopSessionIds?.[0],
         previousTopSessionIds
       }
@@ -1688,13 +1657,11 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   if (update.phase === "completed") {
     await flushCaptureOutbox();
     // An earlier drain may have listed its batch before later captures arrived.
-    if ((await captureOutbox.list()).some((item) => item.payload.raw_capture.historySyncRunId === update.runId)) {
+    if ((await captureOutbox.pendingRuns()).has(update.runId ?? "")) {
       await flushCaptureOutbox();
     }
   }
-  const pendingRun = update.runId && (await captureOutbox.list()).some(
-    (item) => item.payload.raw_capture.historySyncRunId === update.runId
-  );
+  const pendingRun = update.runId && (await captureOutbox.pendingRuns()).has(update.runId);
   const runError = (update.runId ? historySyncRunErrors.get(update.runId) : undefined) ||
     (pendingRun ? "Delivery pending in durable outbox; history watermark was not advanced." : undefined);
   if (update.runId) {
@@ -1731,7 +1698,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       update.providerDriftAlert ?? clearRecoveredProviderDriftAlert(currentState.lastDriftAlert, update.provider);
     await saveProviderHistorySyncState(update.provider, {
       ...basePatch,
-      ...(shouldCommitHistoryWatermark(update, runError) ? watermarkPatch : {}),
+      ...(shouldCommitHistoryWatermark(update, runError) ? { ...watermarkPatch, lastSuccessfulAt: completedAt } : {}),
       inProgress: false,
       lastCompletedAt: completedAt,
       lastConversationCount: update.conversationCount ?? currentState.lastConversationCount,
@@ -1899,15 +1866,24 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
 
   const backendUrl = settings.backendUrl.replace(/\/$/, "");
   await enqueueCapture(captureOutbox, backendUrl, payload);
-  await chrome.alarms.create(OUTBOX_ALARM, { periodInMinutes: 1 });
+  await ensureDeliveryRetry();
   await setExtensionStatus({ pendingCaptureCount: await captureOutbox.count() });
   void flushCaptureOutbox();
 }
 
 function flushCaptureOutbox(): Promise<void> {
-  captureDrain ??= deliverCaptureOutbox().catch(async () => {
-    await setExtensionStatus({ lastError: "Capture outbox unavailable; delivery will retry." });
-  }).finally(() => { captureDrain = null; });
+  captureDrain ??= deliverCaptureOutbox().catch(async (error) => {
+    await setExtensionStatus({ lastError: error instanceof Error ? error.message : "Capture outbox unavailable; queued evidence was not removed." });
+  }).finally(async () => {
+    // Serialize alarm reads with enqueue's recovery alarm; stale empty counts must
+    // never clear the retry for a capture arriving at the end of a drain.
+    captureDrain = null;
+    await withDeliveryAlarm(async () => {
+      const settings = await getSettings();
+      const pending = settings.capturePaused ? 0 : await captureOutbox.count().catch(() => 1);
+      await scheduleDeliveryRetry(pending, Boolean(settings.capturePaused));
+    });
+  });
   return captureDrain;
 }
 
@@ -1915,6 +1891,7 @@ async function deliverCaptureOutbox(): Promise<void> {
   const settings = await getSettings();
   if (settings.capturePaused) return;
   const backendUrl = settings.backendUrl.replace(/\/$/, "");
+  let policyDeferred = false;
   try {
     await drainCaptures(captureOutbox, backendUrl, async ({ payload }) => {
       // Recheck between deliveries: pause, destination, token, and account filters
@@ -1934,7 +1911,8 @@ async function deliverCaptureOutbox(): Promise<void> {
       };
       if (!settings.enabledProviders[payload.provider] || !accountAllowedBySettings(settings, snapshot).allowed ||
           !indexingAllowsCapture(settings, payload)) {
-        throw new Error("Capture delivery paused by current provider/account settings; evidence retained locally.");
+        policyDeferred = true;
+        return false;
       }
       const response = await fetch(`${backendUrl}/api/v1/ingest/diff`, {
         method: "POST",
@@ -1954,6 +1932,7 @@ async function deliverCaptureOutbox(): Promise<void> {
           projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
           historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
           historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
+          historyFingerprints: payload.raw_capture.historyFingerprints ?? syncState.historyFingerprints,
           messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
           lastSyncedAt: new Date().toISOString(),
           indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed",
@@ -1969,12 +1948,11 @@ async function deliverCaptureOutbox(): Promise<void> {
         lastError: receipt.disposition === "quarantined" ? "Capture needs repair; original evidence preserved on backend." : null
       });
     });
+    if (policyDeferred) await setExtensionStatus({ lastError: "Some captures are waiting for their provider/account filters to be enabled; evidence retained locally." });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    for (const item of await captureOutbox.list()) {
-      if (item.payload.raw_capture.historySyncRunId) {
-        historySyncRunErrors.set(item.payload.raw_capture.historySyncRunId, "Delivery pending in durable outbox.");
-      }
+    for (const runId of await captureOutbox.pendingRuns()) {
+      historySyncRunErrors.set(runId, "Delivery pending in durable outbox.");
     }
     await setExtensionStatus({ backendUrl, lastError: message });
   }
@@ -2029,6 +2007,7 @@ async function handleSaveSettings(update: Partial<ExtensionSettings>): Promise<S
       backendMarkdownRoot: capabilities.storage.markdown_root ?? undefined,
       backendVaultRoot: capabilities.storage.vault_root ?? undefined,
     });
+    void flushCaptureOutbox();
     return {
       ok: true,
       settings: saved,
@@ -2072,3 +2051,14 @@ async function handleSaveConnectionBundle(payload: {
     redeemed
   };
 }
+
+// Chrome/Edge may lose alarms between worker/browser sessions. Reconcile once
+// per worker activation, without creating periodic work for an empty queue.
+void withDeliveryAlarm(async () => {
+  const settings = await getSettings();
+  if (settings.capturePaused || !(await captureOutbox.count())) {
+    await scheduleDeliveryRetry(0, Boolean(settings.capturePaused));
+  } else if (!(await chrome.alarms.get(OUTBOX_ALARM))) {
+    await chrome.alarms.create(OUTBOX_ALARM, { delayInMinutes: 1 });
+  }
+}).catch(() => undefined);

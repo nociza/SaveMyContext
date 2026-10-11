@@ -56,10 +56,16 @@ function enqueueRuntimeMessage(message: RuntimeMessage): void {
       try {
         const response = await chrome.runtime.sendMessage(message);
         if (response?.ok === false) throw new Error("Capture not acknowledged");
+        if (message.type === "NETWORK_CAPTURE") {
+          bridgePort?.postMessage({ type: "CAPTURE_RECEIPT", requestId: message.payload.requestId, ok: response?.ok === true });
+        }
         return;
       } catch {
         if (attempt >= RUNTIME_MESSAGE_RETRY_ATTEMPTS - 1) {
           console.warn("SaveMyContext could not persist a capture. Check extension status before leaving this page.");
+          if (message.type === "NETWORK_CAPTURE") {
+            bridgePort?.postMessage({ type: "CAPTURE_RECEIPT", requestId: message.payload.requestId, ok: false });
+          }
           return;
         }
         await sleep(RUNTIME_MESSAGE_RETRY_INTERVAL_MS);
@@ -81,6 +87,10 @@ function isMainWorldReady(): boolean {
 }
 
 function handleBridgeMessage(message: BridgeToExtensionMessage): void {
+  if (message.type === "CAPTURE_WARNING") {
+    if (captureEnabled) enqueueRuntimeMessage({ type: "CAPTURE_WARNING" });
+    return;
+  }
   if (message.type === "NETWORK_CAPTURE") {
     if (!captureEnabled) return;
     enqueueRuntimeMessage({

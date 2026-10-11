@@ -11,6 +11,8 @@ import type {
   ProviderName
 } from "../shared/types";
 import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
+import { discoverChatGPTHistory } from "./chatgpt-history";
+import { CaptureReceipts } from "./capture-receipts";
 import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
 import { authorizedHistoryFetch, setHistoryCaptureEnabled } from "./capture-permission";
 
@@ -26,18 +28,17 @@ import {
 
 const OBSERVER_FLAG = "__SAVEMYCONTEXT_NETWORK_OBSERVER__";
 let captureEnabled = false;
+const captureReceipts = new CaptureReceipts();
 function handleControlPayload(payload: MainWorldControlPayload): void {
   if (payload.type === "SET_CAPTURE_ENABLED") {
     captureEnabled = payload.enabled === true;
     setHistoryCaptureEnabled(captureEnabled);
-    if (!captureEnabled) pendingBridgeMessages.length = 0;
+    if (!captureEnabled) { pendingBridgeMessages.length = 0; captureReceipts.cancel(); }
   }
   if (payload.type === "START_HISTORY_SYNC" && captureEnabled) void runHistorySync(payload);
 }
 const INTERESTING_PATH =
   /backend-api|conversation|conversations|BardFrontendService|StreamGenerate|batchexecute|app-chat|grok|chat/i;
-const CHATGPT_HISTORY_PAGE_LIMIT = 100;
-const CHATGPT_HISTORY_MAX_OFFSET = 5_000;
 const CHATGPT_HISTORY_DETAIL_CONCURRENCY = 4;
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const nativeFetch = window.fetch.bind(window);
@@ -47,13 +48,6 @@ const pendingBridgeMessages: BridgeToExtensionMessage[] = [];
 interface TrackedXHR extends XMLHttpRequest {
   __savemycontextMethod?: string;
   __savemycontextUrl?: string;
-}
-
-interface HistoryCandidates {
-  topSessionId?: string;
-  pendingSessionIds: string[];
-  totalCount: number;
-  skippedCount: number;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -140,6 +134,10 @@ function postToExtension(message: BridgeToExtensionMessage): void {
 function attachBridgePort(port: MessagePort): void {
   bridgePort = port;
   bridgePort.onmessage = (event: MessageEvent<BridgeToPageMessage>) => {
+    if (event.data?.type === "CAPTURE_RECEIPT") {
+      captureReceipts.acknowledge(event.data.requestId, event.data.ok === true);
+      return;
+    }
     if (event.data?.type !== "CONTROL") {
       return;
     }
@@ -161,6 +159,11 @@ function postCapture(capture: Omit<CapturedNetworkEvent, "source">): void {
     type: "NETWORK_CAPTURE",
     payload
   });
+}
+
+async function postCaptureDurably(capture: Omit<CapturedNetworkEvent, "source">): Promise<void> {
+  if (!captureEnabled) throw new Error("Capture paused.");
+  await captureReceipts.wait(capture.requestId, () => postCapture(capture));
 }
 
 function postHistorySyncStatus(update: HistorySyncUpdate): void {
@@ -198,6 +201,7 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
   }
 
   if (typeof body === "string") {
+    if (body.length > MAX_CAPTURE_BYTES) return undefined;
     return {
       text: body,
       json: safeJsonParse(body)
@@ -209,6 +213,7 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
   }
 
   if (body instanceof Blob) {
+    if (body.size > MAX_CAPTURE_BYTES) return undefined;
     return serializeBody(await body.text());
   }
 
@@ -225,10 +230,12 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
   }
 
   if (body instanceof ArrayBuffer) {
+    if (body.byteLength > MAX_CAPTURE_BYTES) return undefined;
     return serializeBody(new TextDecoder().decode(new Uint8Array(body)));
   }
 
   if (ArrayBuffer.isView(body)) {
+    if (body.byteLength > MAX_CAPTURE_BYTES) return undefined;
     return serializeBody(new TextDecoder().decode(body));
   }
 
@@ -237,12 +244,13 @@ async function serializeBody(body: unknown): Promise<CapturedBody | undefined> {
 
 async function readFetchRequestBody(input: RequestInfo | URL, init?: RequestInit): Promise<CapturedBody | undefined> {
   if (init?.body) {
-    return serializeBody(init.body);
+    // Schedule parsing after native fetch has been dispatched.
+    return Promise.resolve().then(() => serializeBody(init.body));
   }
 
   if (input instanceof Request) {
     try {
-      return serializeBody(await input.clone().text());
+      return serializeBody(await readBoundedResponse(new Response(input.clone().body)));
     } catch {
       return undefined;
     }
@@ -252,39 +260,32 @@ async function readFetchRequestBody(input: RequestInfo | URL, init?: RequestInit
 }
 
 function patchFetch(): void {
-  window.fetch = async function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const request = input instanceof Request ? input : new Request(input, init);
-    const url = request.url;
-    if (!captureEnabled || !shouldCapture(url)) {
-      return nativeFetch(input, init);
-    }
+  window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    // Preserve the native promise and avoid constructing Requests on the hot path.
+    if (!captureEnabled) return nativeFetch(input, init);
+    const candidate = input instanceof Request ? input.url : String(input);
+    if (!shouldCapture(candidate)) return nativeFetch(input, init);
 
+    const url = new URL(candidate, location.href).href;
     const pageUrl = location.href;
-    const requestBodyPromise = readFetchRequestBody(input, init);
-    const response = await nativeFetch(input, init);
-    if (!captureEnabled) return response;
-    observeResponse(response, (text) => { void requestBodyPromise.then((requestBody) => {
+    const requestBodyPromise = readFetchRequestBody(input, init).catch(() => undefined);
+    const responsePromise = nativeFetch(input, init);
+    void responsePromise.then(response => {
       if (!captureEnabled) return;
-      maybeUpdateGeminiRuntimeContext(url, requestBody);
-      postCapture({
-        providerHint: providerHintFromUrl(url),
-        pageUrl,
-        requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        method: init?.method ?? request.method,
-        url,
-        capturedAt: new Date().toISOString(),
-        requestBody,
-        response: {
-          status: response.status,
-          ok: response.ok,
-          contentType: response.headers.get("content-type") ?? undefined,
-          text,
-          json: safeJsonParse(text)
-        }
-      });
-    }).catch(() => undefined); });
-
-    return response;
+      observeResponse(response, text => { void requestBodyPromise.then(requestBody => {
+        if (!captureEnabled) return;
+        maybeUpdateGeminiRuntimeContext(url, requestBody);
+        postCapture({
+          providerHint: providerHintFromUrl(url), pageUrl,
+          requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          method: init?.method ?? (input instanceof Request ? input.method : "GET"),
+          url, capturedAt: new Date().toISOString(), requestBody,
+          response: { status: response.status, ok: response.ok,
+            contentType: response.headers.get("content-type") ?? undefined, text, json: safeJsonParse(text) }
+        });
+      }).catch(() => undefined); }, () => postToExtension({ type: "CAPTURE_WARNING" }));
+    }).catch(() => undefined); // Observation must never create an unhandled rejection.
+    return responsePromise;
   };
 }
 
@@ -377,31 +378,6 @@ function buildChatGPTUrl(path: string): URL {
   return new URL(path, CHATGPT_ORIGIN);
 }
 
-function normalizeChatGPTConversationIds(payload: unknown, evidence?: string): string[] {
-  const record = asRecord(payload);
-  if (!record || !Array.isArray(record.items)) {
-    throw createProviderDriftError(
-      "chatgpt",
-      "ChatGPT history list no longer exposes the expected items array.",
-      evidence
-    );
-  }
-  if (record.items.some((item) => typeof asRecord(item)?.id !== "string")) {
-    throw createProviderDriftError("chatgpt", "ChatGPT history contains an invalid conversation identity.", evidence);
-  }
-
-  return [
-    ...new Set(
-      record.items
-        .map((item) => {
-          const itemRecord = asRecord(item);
-          return typeof itemRecord?.id === "string" ? itemRecord.id : null;
-        })
-        .filter((value): value is string => Boolean(value))
-    )
-  ];
-}
-
 function buildChatGPTHistoryPageUrl(conversationId: string): string {
   return buildChatGPTUrl(`/c/${conversationId}`).toString();
 }
@@ -409,76 +385,6 @@ function buildChatGPTHistoryPageUrl(conversationId: string): string {
 function hasChatGPTConversationPayload(payload: unknown): boolean {
   const record = asRecord(payload);
   return Boolean(record && (asRecord(record.mapping) || Array.isArray(record.messages) || asRecord(record.message)));
-}
-
-async function collectChatGPTHistoryCandidates(
-  headers: HeadersInit,
-  previousTopSessionId: string | undefined,
-  syncedSessionIds: Set<string>,
-  refreshSessionIds: Set<string>
-): Promise<HistoryCandidates> {
-  const discoveredIds: string[] = [];
-  let topSessionId: string | undefined;
-  let complete = false;
-
-  for (let offset = 0; offset < CHATGPT_HISTORY_MAX_OFFSET; offset += CHATGPT_HISTORY_PAGE_LIMIT) {
-    const listUrl = buildChatGPTUrl("/backend-api/conversations");
-    listUrl.searchParams.set("offset", String(offset));
-    listUrl.searchParams.set("limit", String(CHATGPT_HISTORY_PAGE_LIMIT));
-    listUrl.searchParams.set("order", "updated");
-
-    const listResult = await chatGPTReader(authorizedHistoryFetch, headers)(listUrl.toString());
-    if (!listResult.response.ok) {
-      throw new Error(`ChatGPT list request failed with ${listResult.response.status}.`);
-    }
-
-    const pageConversationIds = normalizeChatGPTConversationIds(listResult.json, `offset=${offset}`);
-    if (!pageConversationIds.length) {
-      complete = true;
-      break;
-    }
-
-    topSessionId ??= pageConversationIds[0];
-
-    if (previousTopSessionId) {
-      const stopIndex = pageConversationIds.indexOf(previousTopSessionId);
-      if (stopIndex >= 0) {
-        complete = true;
-        discoveredIds.push(...pageConversationIds.slice(0, stopIndex));
-        break;
-      }
-      discoveredIds.push(...pageConversationIds);
-    } else {
-      discoveredIds.push(...pageConversationIds);
-    }
-
-    if (pageConversationIds.length < CHATGPT_HISTORY_PAGE_LIMIT) {
-      complete = true;
-      break;
-    }
-  }
-
-  if (!complete) throw new Error("ChatGPT ordinary history reached the page limit; sync remains incomplete.");
-
-  const allConversationIds = dedupeIds(discoveredIds);
-  if (previousTopSessionId) {
-    return {
-      topSessionId,
-      pendingSessionIds: allConversationIds,
-      totalCount: allConversationIds.length,
-      skippedCount: 0
-    };
-  }
-
-  const pendingSessionIds = allConversationIds.filter(
-    (conversationId) => refreshSessionIds.has(conversationId) || !syncedSessionIds.has(conversationId)
-  );
-  return {
-    topSessionId,
-    pendingSessionIds,
-    totalCount: allConversationIds.length,
-    skippedCount: allConversationIds.length - pendingSessionIds.length
-  };
 }
 
 async function withHistorySyncGuard(
@@ -530,21 +436,14 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
         headers.Authorization = `Bearer ${accessToken}`;
       }
 
-      const previousTopSessionId =
-        typeof control?.previousTopSessionId === "string" && control.previousTopSessionId.trim()
-          ? control.previousTopSessionId.trim()
-          : undefined;
-      const syncedSessionIds = normalizeHistorySessionIds("chatgpt", control?.syncedSessionIds);
-      const refreshSessionIds = normalizeHistorySessionIds("chatgpt", control?.refreshSessionIds);
-      const { topSessionId, pendingSessionIds: normalPending, totalCount: normalTotal, skippedCount: normalSkipped } = await collectChatGPTHistoryCandidates(
-        headers,
-        previousTopSessionId,
-        syncedSessionIds,
-        refreshSessionIds
-      );
-
       const read = chatGPTReader(authorizedHistoryFetch, headers);
       const accountScope = asRecord(sessionJson.user)?.id;
+      const account = typeof accountScope === "string" ? accountScope : undefined;
+      const refreshSessionIds = normalizeHistorySessionIds("chatgpt", control?.refreshSessionIds);
+      const ordinary = await discoverChatGPTHistory(read, account, control?.historyFingerprints, refreshSessionIds);
+      const { topSessionId, pending: normalPending } = ordinary;
+      const normalTotal = ordinary.items.size;
+      const normalSkipped = normalTotal - normalPending.length;
       let projectFailure: unknown;
       const projectChats = await discoverChatGPTProjects(read, typeof accountScope === "string" ? accountScope : undefined).catch((error) => {
         projectFailure = error;
@@ -577,10 +476,12 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
             );
           }
 
-          postCapture({
+          await postCaptureDurably({
+            historyFingerprints: Object.fromEntries([ordinary.items.get(conversationId), projectChats.get(conversationId)]
+              .filter(item => item?.fingerprint).map(item => [item!.key, item!.fingerprint])),
             project: projectChats.get(conversationId)?.project,
-            historyItemKey: projectChats.get(conversationId)?.key,
-            historyFingerprint: projectChats.get(conversationId)?.fingerprint,
+            historyItemKey: projectChats.get(conversationId)?.key ?? ordinary.items.get(conversationId)?.key,
+            historyFingerprint: projectChats.get(conversationId)?.fingerprint ?? ordinary.items.get(conversationId)?.fingerprint,
             providerHint: "chatgpt",
             captureMode: "full_snapshot",
             historySyncRunId: runId,
@@ -660,7 +561,7 @@ async function runManagedGeminiHistorySync(control?: HistorySyncControlPayload):
   await withHistorySyncGuard("gemini", async (runId) => {
     await runGeminiHistorySync(control, {
       runId,
-      postCapture,
+      postCapture: postCaptureDurably,
       postStatus: postHistorySyncStatus
     });
   });
@@ -670,7 +571,7 @@ async function runManagedGrokHistorySync(control?: HistorySyncControlPayload): P
   await withHistorySyncGuard("grok", async (runId) => {
     await runGrokHistorySync(control, {
       runId,
-      postCapture,
+      postCapture: postCaptureDurably,
       postStatus: postHistorySyncStatus
     });
   });

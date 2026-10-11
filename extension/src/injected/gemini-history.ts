@@ -51,7 +51,7 @@ interface GeminiConversationEntry {
 
 interface GeminiHistoryHooks {
   runId: string;
-  postCapture: (capture: Omit<CapturedNetworkEvent, "source">) => void;
+  postCapture: (capture: Omit<CapturedNetworkEvent, "source">) => void | Promise<void>;
   postStatus: (update: HistorySyncUpdate) => void;
 }
 
@@ -1074,7 +1074,7 @@ export async function runGeminiHistorySync(
         }
 
         const capture = await fetchGeminiConversationCapture(accountContext, entry);
-        hooks.postCapture({
+        await hooks.postCapture({
           providerHint: "gemini",
           captureMode: "full_snapshot",
           historySyncRunId: hooks.runId,

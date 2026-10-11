@@ -304,12 +304,16 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
       const listApiUrl = "https://chatgpt.com/backend-api/conversations?offset=0&limit=100&order=updated";
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
+      let ordinaryItems: { id: string; update_time: number }[] = [];
+      let providerRevision = 1;
+      let detailReads = 0;
+      let assistantAnswer = "FastAPI uses uvloop to run the event loop with high-performance async I/O.";
 
       await context.route("**/backend-api/gizmos/**", async (route) => {
         const sidebar = route.request().url().includes("/sidebar");
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({
           items: sidebar ? [{ gizmo: { gizmo: { id: "g-p-e2e", display: { name: "E2E Project" } } } }]
-            : [{ id: sessionId, update_time: 1 }], cursor: null
+            : [{ id: sessionId, update_time: providerRevision }], cursor: null
         }) });
       });
 
@@ -318,7 +322,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            accessToken: "e2e-token"
+            accessToken: "e2e-token", user: { id: "synthetic-account" }
           })
         });
       });
@@ -328,13 +332,14 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            items: [],
-            total: 0
+            items: ordinaryItems,
+            total: ordinaryItems.length
           })
         });
       });
 
       await context.route(detailApiUrl, async (route) => {
+        detailReads++;
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -362,7 +367,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
                   id: "msg-assistant",
                   author: { role: "assistant" },
                   create_time: 1711842060,
-                  content: { parts: ["FastAPI uses uvloop to run the event loop with high-performance async I/O."] }
+                  content: { parts: [assistantAnswer] }
                 }
               }
             }
@@ -443,12 +448,45 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       expect((await projectsResponse.json()).items[0].provider_context.id).toBe("g-p-e2e");
 
       const ack = await serviceWorker.evaluate(async () => {
-        const all = await chrome.storage.local.get("savemycontext.sync-state");
-        return JSON.stringify(all);
+        return new Promise<string>((resolve, reject) => {
+          const open = indexedDB.open("smc-sync-state", 1);
+          open.onsuccess = () => {
+            const db = open.result, tx = db.transaction("states"), rows = tx.objectStore("states").getAll();
+            tx.oncomplete = () => { db.close(); resolve(JSON.stringify(rows.result)); };
+            tx.onerror = () => { db.close(); reject(tx.error); };
+          };
+          open.onerror = () => reject(open.error);
+        });
       });
       // The live extension bridge/outbox must carry project context, not just unit parsers.
       expect(ack).toContain("g-p-e2e");
       expect(ack).toContain("historyFingerprint");
+
+      const importAgain = async () => {
+        const before = await serviceWorker.evaluate(async () => ((await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"] as { historySyncLastCompletedAt?: string }).historySyncLastCompletedAt);
+        await page.bringToFront();
+        expect(await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }))).toMatchObject({ triggered: true });
+        await eventually.poll(() => serviceWorker.evaluate(async before => {
+          const status = (await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"] as { historySyncLastResult?: string; historySyncLastCompletedAt?: string };
+          return status.historySyncLastResult === "success" && status.historySyncLastCompletedAt !== before;
+        }, before)).toBe(true);
+      };
+      // A project chat can also appear in ordinary history. Acknowledge both
+      // fingerprints together so overlap does not cause perpetual downloads.
+      ordinaryItems = [{ id: sessionId, update_time: providerRevision }];
+      await importAgain();
+      const acknowledgedReads = detailReads;
+      await importAgain();
+      expect(detailReads).toBe(acknowledgedReads);
+      // Reproduce the audit bug: same newest ID, edited remotely. This must be
+      // downloaded again and reach the actual SQLite-backed API, not just a parser.
+      providerRevision = 2;
+      ordinaryItems = [{ id: sessionId, update_time: providerRevision }];
+      assistantAnswer = "Edited remotely: the newest conversation keeps its ID.";
+      await importAgain();
+      expect(detailReads).toBe(acknowledgedReads + 1);
+      const edited = await (await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`)).json();
+      expect(edited.messages.map((message: { content: string }) => message.content)).toContain(assistantAnswer);
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -1032,6 +1070,11 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       const readCountAfterInitialSync = observedReadRequests.length;
 
       await page.reload({ waitUntil: "domcontentloaded" });
+      // Automatic visits are throttled after success; an explicit import still
+      // bypasses that cooldown and exercises the provider's no-op reconciliation.
+      await page.bringToFront();
+      const manualRefresh = await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }));
+      expect(manualRefresh).toMatchObject({ triggered: true });
 
       await eventually
         .poll(
@@ -1598,6 +1641,11 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
       const responseCountAfterInitialSync = observedResponseConversationIds.length;
 
       await page.reload({ waitUntil: "domcontentloaded" });
+      // Automatic visits are throttled after success; an explicit import still
+      // bypasses that cooldown and exercises the provider's no-op reconciliation.
+      await page.bringToFront();
+      const manualRefresh = await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }));
+      expect(manualRefresh).toMatchObject({ triggered: true });
 
       await eventually
         .poll(

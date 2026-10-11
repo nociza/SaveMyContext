@@ -32,6 +32,11 @@ identities. Queue limits are bounded and errors are visible. Changing the backen
 does not redirect previously queued evidence to a new destination.
 
 The popup reads a queue count, not capture bodies or the conversation corpus.
+Small queue metadata supports atomic capacity checks and bounded ciphertext reads;
+history workers wait for local persistence acknowledgements. Empty queues do not
+schedule delivery wakeups. Conversation sync state lives in per-record IndexedDB,
+not a single browser-storage object. See [performance and recovery](performance.md)
+for the measured baseline, optimization experiments, and schema upgrade precautions.
 Pause and provider/account restrictions are rechecked between deliveries. An
 in-flight request can finish. No browser model worker runs.
 

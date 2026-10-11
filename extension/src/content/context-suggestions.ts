@@ -353,6 +353,13 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
   let loading = false;
   let lastContextSignature = "";
 
+  function syncRefreshTimer(): void {
+    if (refreshInterval !== null) { window.clearInterval(refreshInterval); refreshInterval = null; }
+    if (enabled && floatingButtonEnabled && contextProvider() && !document.hidden) {
+      refreshInterval = window.setInterval(() => { void refreshSuggestions(); }, REFRESH_INTERVAL_MS);
+    }
+  }
+
   async function refreshSettings(): Promise<void> {
     try {
       const settings = await sendMessage<
@@ -367,6 +374,7 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
       floatingButtonEnabled = false;
     }
 
+    syncRefreshTimer();
     if (!enabled || !floatingButtonEnabled || !contextProvider()) {
       hide();
       return;
@@ -768,15 +776,12 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
     }
   });
 
-  refreshInterval = window.setInterval(() => {
-    if (!panelOpen && !host?.hidden) {
-      void refreshSuggestions();
-      return;
-    }
-    if (enabled && floatingButtonEnabled && contextProvider()) {
-      void refreshSuggestions();
-    }
-  }, REFRESH_INTERVAL_MS);
+  document.addEventListener("visibilitychange", syncRefreshTimer);
+  window.addEventListener("pagehide", () => {
+    if (refreshInterval !== null) window.clearInterval(refreshInterval);
+    refreshInterval = null;
+  });
+  window.addEventListener("pageshow", syncRefreshTimer);
 
   void refreshSettings();
 
@@ -786,11 +791,7 @@ export function createContextSuggestionController(sendMessage: RuntimeRequester)
         window.clearTimeout(refreshTimer);
         refreshTimer = null;
       }
-      if (refreshInterval === null) {
-        refreshInterval = window.setInterval(() => {
-          void refreshSuggestions();
-        }, REFRESH_INTERVAL_MS);
-      }
+      syncRefreshTimer();
       hide();
       scheduleRefresh(true);
     }
