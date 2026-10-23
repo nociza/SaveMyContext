@@ -2,6 +2,24 @@ import type { ProviderName } from "../shared/types";
 
 export type { HistorySyncControlPayload } from "../shared/types";
 
+/** Hash one bounded list entry, including provider revision fields we do not
+ * interpret. Receipts are only committed after durable backend delivery. */
+export async function historyMetadataReceipt(provider: ProviderName, id: string, metadata: unknown): Promise<Record<string, string>> {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object") return Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)]));
+    return value;
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(stable(metadata)));
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), byte => byte.toString(16).padStart(2, "0")).join("");
+  return { [JSON.stringify([provider, "metadata-v1", id])]: digest };
+}
+
+export function hasHistoryReceipt(known: Record<string, string>, receipt: Record<string, string>): boolean {
+  return Object.entries(receipt).every(([key, value]) => known[key] === value);
+}
+
 export function normalizeHistorySessionIds(
   provider: ProviderName,
   sessionIds: string[] | undefined,

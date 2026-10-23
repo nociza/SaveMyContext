@@ -90,6 +90,15 @@ describe("ChatGPT Projects", () => {
     expect(await buildIngestPayload(snapshot, event, { ...state, projectFingerprint: JSON.stringify(p) })).toBeNull();
     expect((await buildIngestPayload({ ...snapshot, project: null }, event, { ...state, projectFingerprint: JSON.stringify(p) }))?.provider_project).toBeNull();
   });
+
+  it("invalidates project-only chat receipts on rename or archive without a timestamp change", async () => {
+    const discover = async (title: string, archived: boolean) => (await discoverChatGPTProjects(async path => ({ json: path.includes("sidebar")
+      ? { items: [gizmo()], cursor: null }
+      : { items: [{ id: "one", title, is_archived: archived, update_time: 1 }], cursor: null } }))).get("one")!.fingerprint;
+    const first = await discover("Old", false);
+    expect(await discover("New", false)).not.toBe(first);
+    expect(await discover("Old", true)).not.toBe(first);
+  });
   it("uses authoritative detail membership before list/URL and distinguishes unknown from removed", () => {
     expect(chatGPTProject(event, [{ gizmo_id: "g-p-def" }])).toEqual({ id: "g-p-def" });
     expect(chatGPTProject({ ...event, project: { id: "g-p-abc" } }, [{ gizmo_id: null }])).toBeNull();

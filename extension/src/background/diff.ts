@@ -36,11 +36,16 @@ export async function buildIngestPayload(
   const fingerprints = await mergeMessageFingerprints({}, snapshot.messages);
   const projectChanged = snapshot.project !== undefined &&
     JSON.stringify(snapshot.project) !== syncState.projectFingerprint;
+  const titleChanged = Boolean(snapshot.title) && snapshot.title !== syncState.lastTitle;
   const messages =
     syncMode === "full_snapshot" || projectChanged
       ? snapshot.messages
       : snapshot.messages.filter((message) =>
           syncState.messageFingerprints?.[message.id] !== fingerprints[message.id]);
+  // Resend the observed turns on a rename, using incremental semantics. The
+  // backend upserts identical IDs without creating a new content revision;
+  // a partial live capture must never erase older, unseen turns.
+  if (!messages.length && titleChanged) messages.push(...snapshot.messages);
   if (!messages.length) {
     return null;
   }

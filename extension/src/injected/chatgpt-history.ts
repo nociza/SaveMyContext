@@ -43,7 +43,7 @@ export async function* chatGPTHistoryPages(
         ? String(row.update_time) : typeof row.update_time === "string" && row.update_time.trim() ? row.update_time : "";
       const key = JSON.stringify(["chatgpt", account, "conversation", row.id]);
       // Missing account/timestamp must cause a safe refetch, never a false skip.
-      const fingerprint = account && stamp ? JSON.stringify([stamp, row.title ?? null]) : "";
+      const fingerprint = account && stamp ? JSON.stringify([stamp, row.title ?? null, archived]) : "";
       items.set(row.id, { id: row.id, key, fingerprint });
     }
     // Some offset endpoints ignore the offset after a schema change. Do not

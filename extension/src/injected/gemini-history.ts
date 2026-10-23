@@ -8,6 +8,8 @@ import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
 import { MAX_CAPTURE_BYTES, readBoundedResponse } from "./response-observer";
 import {
   countRetryableHistoryFailures,
+  historyMetadataReceipt,
+  hasHistoryReceipt,
   normalizeHistorySessionIds,
   runWithConcurrency
 } from "./history-shared";
@@ -41,6 +43,8 @@ interface GeminiAccountContext extends GeminiRuntimeContext {
 }
 
 interface GeminiConversationEntry {
+  metadata: unknown;
+  receipt?: Record<string, string>;
   conversationId: string;
   scopedSessionId: string;
   accountIndex: number;
@@ -676,6 +680,7 @@ function parseGeminiConversationEntry(context: GeminiAccountContext, value: unkn
 
   const title = typeof value[1] === "string" && value[1].trim() ? value[1].trim() : undefined;
   return {
+    metadata: value,
     conversationId,
     scopedSessionId,
     accountIndex: context.accountIndex,
@@ -716,8 +721,7 @@ function buildGeminiReadArgs(conversationId: string, pageToken: string | undefin
 
 async function* listGeminiConversationEntries(
   context: GeminiAccountContext,
-  pinned: boolean,
-  stopConversationId?: string
+  pinned: boolean
 ): AsyncGenerator<GeminiConversationEntry[]> {
   const sourcePath = buildGeminiAppSourcePath(context.basePrefix);
   const seenTokens = new Set<string>();
@@ -744,10 +748,6 @@ async function* listGeminiConversationEntries(
     }
     yield [...entries.values()];
 
-    if (stopConversationId && entries.has(stopConversationId)) {
-      break;
-    }
-
     const nextPageToken = readGeminiNextPageToken(result.payloads);
     if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Gemini pagination repeated a cursor; sync remains incomplete.");
     if (!nextPageToken) {
@@ -770,7 +770,7 @@ function pickGeminiWatermarkConversationId(entries: GeminiConversationEntry[]): 
 
 async function* collectGeminiHistoryCandidates(
   contexts: GeminiAccountContext[],
-  previousTopSessionIds: Set<string>,
+  known: Record<string, string>,
   syncedSessionIds: Set<string>,
   refreshSessionIds: Set<string>
 ): AsyncGenerator<{
@@ -779,24 +779,14 @@ async function* collectGeminiHistoryCandidates(
   totalCount: number;
   skippedCount: number;
 }> {
-  const previousTopByAccount = new Map<string, string>();
-  for (const sessionId of previousTopSessionIds) {
-    const parsed = parseGeminiScopedSessionId(sessionId);
-    if (parsed) {
-      previousTopByAccount.set(parsed.accountKey, sessionId);
-    }
-  }
-
   const topSessionIds: string[] = [];
 
   for (const context of contexts) {
-    const previousTopSessionId = previousTopByAccount.get(context.accountKey);
     const seen = new Set<string>();
     let fallbackTop: string | undefined;
     let regularTop: string | undefined;
-    let reachedWatermark = false;
     for (const pinned of [true, false]) {
-      for await (const entries of listGeminiConversationEntries(context, pinned, pinned ? undefined : previousTopSessionId)) {
+      for await (const entries of listGeminiConversationEntries(context, pinned)) {
         fallbackTop ??= pickGeminiWatermarkConversationId(entries);
         if (!pinned) regularTop ??= pickGeminiWatermarkConversationId(entries);
         const top = regularTop ?? fallbackTop;
@@ -804,11 +794,14 @@ async function* collectGeminiHistoryCandidates(
         const orderedEntries = entries.filter(entry => {
           if (seen.has(entry.scopedSessionId)) return false;
           seen.add(entry.scopedSessionId);
-          if (entry.scopedSessionId === previousTopSessionId) reachedWatermark = true;
-          return !reachedWatermark;
+          return true;
         });
-        const pendingEntries = orderedEntries.filter(entry => previousTopSessionId ||
-          refreshSessionIds.has(entry.scopedSessionId) || !syncedSessionIds.has(entry.scopedSessionId));
+        const pendingEntries: GeminiConversationEntry[] = [];
+        for (const entry of orderedEntries) {
+          entry.receipt = await historyMetadataReceipt("gemini", entry.scopedSessionId, entry.metadata);
+          if (refreshSessionIds.has(entry.scopedSessionId) ||
+              (!syncedSessionIds.has(entry.scopedSessionId) && !hasHistoryReceipt(known, entry.receipt))) pendingEntries.push(entry);
+        }
         yield { topSessionIds: tops, pendingEntries, totalCount: orderedEntries.length,
           skippedCount: orderedEntries.length - pendingEntries.length };
       }
@@ -1009,14 +1002,6 @@ export async function runGeminiHistorySync(
   try {
     const activeContext = await waitForGeminiRuntimeContext();
     const accountContexts = await discoverGeminiAccountContexts(activeContext);
-    const previousTopSessionIds = normalizeHistorySessionIds(
-      "gemini",
-      [
-        ...(control?.previousTopSessionIds ?? []),
-        ...(control?.previousTopSessionId ? [control.previousTopSessionId] : [])
-      ],
-      normalizeGeminiExternalSessionId
-    );
     const syncedSessionIds = normalizeHistorySessionIds(
       "gemini",
       control?.syncedSessionIds,
@@ -1036,7 +1021,7 @@ export async function runGeminiHistorySync(
     let syncedConversationCount = 0;
     let driftFailureCount = 0;
     let firstDriftFailure: ProviderDriftAlert | null = null;
-    for await (const batch of collectGeminiHistoryCandidates(accountContexts, previousTopSessionIds, syncedSessionIds, refreshSessionIds)) {
+    for await (const batch of collectGeminiHistoryCandidates(accountContexts, control?.historyFingerprints ?? {}, syncedSessionIds, refreshSessionIds)) {
       const { pendingEntries } = batch;
       topSessionIds = batch.topSessionIds;
       topSessionId = topSessionIds[0];
@@ -1058,6 +1043,7 @@ export async function runGeminiHistorySync(
             providerHint: "gemini",
             captureMode: "full_snapshot",
             historySyncRunId: hooks.runId,
+            historyFingerprints: entry.receipt,
             pageUrl: buildGeminiHistoryPageUrl(entry.conversationId, {
               basePrefix: entry.basePrefix,
               origin: location.origin

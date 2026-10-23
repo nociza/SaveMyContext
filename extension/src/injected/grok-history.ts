@@ -5,7 +5,7 @@ import type { HistorySyncControlPayload } from "./history-shared";
 import { CaptureHandoffError } from "./capture-receipts";
 import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
 import { readBoundedResponse } from "./response-observer";
-import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcurrency } from "./history-shared";
+import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcurrency, historyMetadataReceipt, hasHistoryReceipt } from "./history-shared";
 
 const GROK_HISTORY_PAGE_SIZE = 100;
 const GROK_HISTORY_DETAIL_CONCURRENCY = 4;
@@ -19,6 +19,8 @@ interface GrokHistoryHooks {
 }
 
 interface GrokConversationEntry {
+  metadata: unknown;
+  receipt?: Record<string, string>;
   conversationId: string;
   title?: string;
   starred?: boolean;
@@ -84,6 +86,7 @@ function parseGrokConversationEntry(value: unknown): GrokConversationEntry | nul
   }
 
   return {
+    metadata: record,
     conversationId,
     title: typeof record.title === "string" && record.title.trim() ? record.title.trim() : undefined,
     starred: Boolean(record.starred)
@@ -200,9 +203,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{
   return { response, json };
 }
 
-async function* listGrokConversationEntries(
-  previousTopSessionId?: string
-): AsyncGenerator<GrokConversationEntry[]> {
+async function* listGrokConversationEntries(): AsyncGenerator<GrokConversationEntry[]> {
   const seenIds = new Set<string>();
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
@@ -246,10 +247,6 @@ async function* listGrokConversationEntries(
     }
     yield entries;
 
-    if (previousTopSessionId && pageEntries.some((entry) => entry.conversationId === previousTopSessionId)) {
-      break;
-    }
-
     const nextPageToken =
       typeof record?.nextPageToken === "string" && record.nextPageToken.trim() ? record.nextPageToken.trim() : undefined;
     if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Grok pagination repeated a cursor; sync remains incomplete.");
@@ -268,7 +265,7 @@ function pickGrokWatermarkConversationId(entries: GrokConversationEntry[]): stri
 }
 
 async function* collectGrokHistoryCandidates(
-  previousTopSessionId: string | undefined,
+  known: Record<string, string>,
   syncedSessionIds: Set<string>,
   refreshSessionIds: Set<string>
 ): AsyncGenerator<{
@@ -278,24 +275,15 @@ async function* collectGrokHistoryCandidates(
   skippedCount: number;
 }> {
   let topSessionId: string | undefined;
-  for await (const orderedEntries of listGrokConversationEntries(previousTopSessionId)) {
+  for await (const orderedEntries of listGrokConversationEntries()) {
     topSessionId ??= pickGrokWatermarkConversationId(orderedEntries);
 
-    if (previousTopSessionId) {
-      const stopIndex = orderedEntries.findIndex((entry) => entry.conversationId === previousTopSessionId);
-      const pendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
-      yield {
-        topSessionId,
-        pendingEntries,
-        totalCount: pendingEntries.length,
-        skippedCount: 0
-      };
-      continue;
+    const pendingEntries: GrokConversationEntry[] = [];
+    for (const entry of orderedEntries) {
+      entry.receipt = await historyMetadataReceipt("grok", entry.conversationId, entry.metadata);
+      if (refreshSessionIds.has(entry.conversationId) ||
+          (!syncedSessionIds.has(entry.conversationId) && !hasHistoryReceipt(known, entry.receipt))) pendingEntries.push(entry);
     }
-
-    const pendingEntries = orderedEntries.filter((entry) => {
-      return refreshSessionIds.has(entry.conversationId) || !syncedSessionIds.has(entry.conversationId);
-    });
     yield {
       topSessionId,
       pendingEntries,
@@ -487,7 +475,6 @@ export async function runGrokHistorySync(
   try {
     assertGrokPageOrigin();
 
-    const previousTopSessionId = normalizeGrokConversationId(control?.previousTopSessionId) ?? undefined;
     const syncedSessionIds = normalizeHistorySessionIds("grok", control?.syncedSessionIds);
     const refreshSessionIds = normalizeHistorySessionIds("grok", control?.refreshSessionIds);
     let topSessionId: string | undefined;
@@ -498,7 +485,7 @@ export async function runGrokHistorySync(
     let syncedConversationCount = 0;
     let driftFailureCount = 0;
     let firstDriftFailure: ProviderDriftAlert | null = null;
-    for await (const batch of collectGrokHistoryCandidates(previousTopSessionId, syncedSessionIds, refreshSessionIds)) {
+    for await (const batch of collectGrokHistoryCandidates(control?.historyFingerprints ?? {}, syncedSessionIds, refreshSessionIds)) {
       const { pendingEntries } = batch;
       topSessionId ??= batch.topSessionId;
       totalCount += batch.totalCount;
@@ -514,6 +501,7 @@ export async function runGrokHistorySync(
             providerHint: "grok",
             captureMode: "full_snapshot",
             historySyncRunId: hooks.runId,
+            historyFingerprints: entry.receipt,
             pageUrl: buildGrokHistoryPageUrl(entry.conversationId),
             requestId: `history-grok-${entry.conversationId}-${Date.now()}`,
             method: "GET",

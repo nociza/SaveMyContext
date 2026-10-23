@@ -77,10 +77,22 @@ describe("diff helpers", () => {
   });
 
   it("resends edited IDs and upgrades legacy ID-only state", async () => {
-    const state = { seenMessageIds: ["m1", "m2"], messageFingerprints: await mergeMessageFingerprints({}, snapshot.messages) };
+    const state = { seenMessageIds: ["m1", "m2"], lastTitle: snapshot.title, messageFingerprints: await mergeMessageFingerprints({}, snapshot.messages) };
     expect(await buildIngestPayload(snapshot, rawCapture, state)).toBeNull();
     const edited = { ...snapshot, messages: [{ ...snapshot.messages[0]!, content: "Edited" }] };
     expect((await buildIngestPayload(edited, rawCapture, state))?.messages[0]?.content).toBe("Edited");
     expect((await buildIngestPayload(snapshot, rawCapture, { seenMessageIds: state.seenMessageIds }))?.messages).toHaveLength(2);
+  });
+
+  it("delivers a rename even with identical messages, without making a partial capture authoritative", async () => {
+    const state = { seenMessageIds: ["m1", "m2"], lastTitle: snapshot.title,
+      messageFingerprints: await mergeMessageFingerprints({}, snapshot.messages) };
+    const renamed = { ...snapshot, title: "Renamed historical chat", messages: snapshot.messages.slice(-1) };
+    const payload = await buildIngestPayload(renamed, rawCapture, state);
+    expect(payload?.title).toBe(renamed.title);
+    expect(payload?.sync_mode).toBe("incremental");
+    expect(payload?.messages).toHaveLength(1);
+    expect(await buildIngestPayload(renamed, rawCapture, { ...state, lastTitle: renamed.title })).toBeNull();
+    expect(await buildIngestPayload({ ...renamed, title: undefined }, rawCapture, state)).toBeNull();
   });
 });

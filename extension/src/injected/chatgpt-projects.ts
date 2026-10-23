@@ -142,7 +142,7 @@ export async function discoverChatGPTProjects(read: (path: string) => Promise<{ 
           project: p, key: `${accountScope}/${p.workspace_id ?? ""}/${p.id}/${item.id}`,
           // No timestamp means no reliable cache hit; refresh on every run.
           fingerprint: typeof item.update_time === "string" || typeof item.update_time === "number"
-            ? await fingerprint([projectDigest, item.update_time]) : ""
+            ? await fingerprint([projectDigest, item.update_time, item.title ?? null, item.is_archived ?? null]) : ""
         });
       }
     }

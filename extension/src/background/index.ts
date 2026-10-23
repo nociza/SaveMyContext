@@ -67,7 +67,7 @@ import {
   validateBackendConfiguration
 } from "./backend";
 import { buildIngestPayload, mergeMessageFingerprints, mergeSeenMessageIds } from "./diff";
-import { activeHistoryWatermarks, historyResumeFingerprints, shouldCommitHistoryWatermark } from "./history-watermark";
+import { historyResumeFingerprints, shouldCommitHistoryWatermark } from "./history-watermark";
 import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, hasPendingCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
 import { acceptCaptureConsent } from "../shared/storage";
 import {
@@ -1484,7 +1484,7 @@ function findMatchingProvider(event: CapturedNetworkEvent) {
   return null;
 }
 
-function extractExternalSessionIds(
+function extractPolicySkippedSessionIds(
   provider: ProviderName,
   sessionStates: Record<string, SessionSyncState>,
   settings: ExtensionSettings
@@ -1497,9 +1497,6 @@ function extractExternalSessionIds(
         return false;
       }
       const state = sessionStates[sessionKey];
-      if (state?.lastFullHistorySyncedAt) {
-        return true;
-      }
       return state?.indexingRuleDecision === "skipped" && state?.indexingRuleFingerprint === fingerprint;
     })
     .map((sessionKey) => sessionKey.slice(prefix.length))
@@ -1561,20 +1558,18 @@ async function handlePageVisit(
       Date.now() - Date.parse(currentState.lastSuccessfulAt) < (settings.scheduledProviderRefreshIntervalMinutes ?? 60) * 60_000) {
     return { triggered: false, reason: "recently-synced" };
   }
-  // Explicit import/recovery audits the complete index, including gaps left by
-  // older versions. Only fully acknowledged snapshots may skip detail reads.
-  const activeWatermarks = explicit ? undefined : activeHistoryWatermarks(payload.provider, currentState, backendStatus.providerDriftAlert);
-  const hasExistingHistoryWatermark = Boolean(activeWatermarks?.length);
+  // Every run audits metadata throughout the index: an old chat can change
+  // without changing the newest ID. Only current durable receipts skip bodies.
   const sessionStates = await getProviderSessionSyncStates(payload.provider);
-  const syncedSessionIds = hasExistingHistoryWatermark
-    ? undefined
-    : extractExternalSessionIds(payload.provider, sessionStates, settings);
-  const previousTopSessionIds = activeWatermarks;
+  const syncedSessionIds = extractPolicySkippedSessionIds(payload.provider, sessionStates, settings);
   const now = new Date().toISOString();
+  const reconciliationStartedAt = currentState.catchupPending && currentState.reconciliationStartedAt
+    ? currentState.reconciliationStartedAt : now;
   await saveProviderHistorySyncState(payload.provider, {
     ...currentState,
     inProgress: true,
     catchupPending: true,
+    reconciliationStartedAt,
     lastProgressAt: now,
     lastStartedAt: now,
     lastPageUrl: payload.pageUrl,
@@ -1604,9 +1599,7 @@ async function handlePageVisit(
       payload: {
         provider: payload.provider,
         syncedSessionIds,
-        historyFingerprints: historyResumeFingerprints(sessionStates, Boolean(currentState.catchupPending)),
-        previousTopSessionId: previousTopSessionIds?.[0],
-        previousTopSessionIds
+        historyFingerprints: historyResumeFingerprints(sessionStates, Date.parse(reconciliationStartedAt)),
       }
     } satisfies RuntimeMessage);
   } catch (error) {
@@ -1615,6 +1608,7 @@ async function handlePageVisit(
       ...currentState,
       inProgress: false,
       catchupPending: true,
+      reconciliationStartedAt,
       lastPageUrl: payload.pageUrl
     });
     const activeProviders = await getActiveHistorySyncProviders({ [payload.provider]: false });
@@ -1730,6 +1724,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       ...(shouldCommitHistoryWatermark(update, runError) ? { ...watermarkPatch, lastSuccessfulAt: completedAt } : {}),
       inProgress: false,
       catchupPending: !complete,
+      reconciliationStartedAt: complete ? undefined : currentState.reconciliationStartedAt,
       lastCompletedAt: completedAt,
       lastConversationCount: update.conversationCount ?? currentState.lastConversationCount,
       processedCount,
@@ -1961,6 +1956,7 @@ async function deliverCaptureOutbox(): Promise<void> {
           ...syncState,
           seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
           projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
+          lastTitle: payload.title || syncState.lastTitle,
           historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
           historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
           // A full history receipt describes current memberships. Retaining old

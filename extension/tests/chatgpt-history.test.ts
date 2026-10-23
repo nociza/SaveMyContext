@@ -64,3 +64,34 @@ it("does not trust missing timestamps or unknown account scope", async () => {
   const item = first.items.get("top")!;
   expect((await discoverChatGPTHistory(read, undefined, { [item.key]: item.fingerprint })).pending).toEqual(["top"]);
 });
+
+it("finds old-chat edits, title-only renames and archive/unarchive with an unchanged newest ID", async () => {
+  const rows = Array.from({ length: 201 }, (_, n) => ({ id: `c${n}`, update_time: 1, title: `Chat ${n}` }));
+  let archived = false;
+  const known: Record<string, string> = {};
+  const read = async (url: string) => {
+    const u = new URL(url), offset = Number(u.searchParams.get("offset"));
+    const source = u.searchParams.get("is_archived") === "true" ? (archived ? [rows[200]] : [])
+      : rows.filter(row => !archived || row.id !== "c200");
+    return { json: { items: source.slice(offset, offset + 100) } };
+  };
+  const scan = async () => {
+    const pending: string[] = [];
+    for (const archive of [false, true]) for await (const page of chatGPTHistoryPages(read, "account", known, new Set(), archive)) {
+      pending.push(...page.pending);
+      for (const item of page.items.values()) known[item.key] = item.fingerprint;
+    }
+    return pending;
+  };
+  expect(await scan()).toHaveLength(201);
+  expect(await scan()).toEqual([]);
+  rows[200]!.update_time++;
+  expect(await scan()).toEqual(["c200"]);
+  rows[200]!.title = "Renamed, no timestamp change";
+  expect(await scan()).toEqual(["c200"]);
+  archived = true;
+  expect(await scan()).toEqual(["c200"]);
+  expect(await scan()).toEqual([]);
+  archived = false;
+  expect(await scan()).toEqual(["c200"]);
+});

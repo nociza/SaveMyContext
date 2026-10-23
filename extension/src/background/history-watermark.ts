@@ -1,10 +1,11 @@
 import type { HistorySyncUpdate, ProviderDriftAlert, ProviderHistorySyncState, ProviderName, SessionSyncState } from "../shared/types";
 
-/** Do not expire a saved prefix during a long/offline first import: doing so
- * can repeatedly download the head and starve the oldest conversations. */
-export function historyResumeFingerprints(states: Record<string, SessionSyncState>, incomplete: boolean, now = Date.now()): Record<string, string> {
+/** Anchor expiry to the start of this reconciliation, not each retry. New
+ * receipts survive long imports; stale receipts cannot resurrect on resume.
+ * Live captures must not extend the age of a full-history verification. */
+export function historyResumeFingerprints(states: Record<string, SessionSyncState>, referenceTime = Date.now()): Record<string, string> {
   return Object.fromEntries(Object.values(states)
-    .filter(s => s.lastSyncedAt && (incomplete || now - Date.parse(s.lastSyncedAt) < 7 * 24 * 60 * 60 * 1000))
+    .filter(s => s.lastSyncedAt && referenceTime - Date.parse(s.lastFullHistorySyncedAt ?? s.lastSyncedAt) < 7 * 24 * 60 * 60 * 1000)
     .flatMap(s => s.historyFingerprints ? Object.entries(s.historyFingerprints)
       : s.historyItemKey && s.historyFingerprint ? [[s.historyItemKey, s.historyFingerprint]] : []));
 }

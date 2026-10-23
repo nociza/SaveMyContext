@@ -70,6 +70,8 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  /** Last durably delivered title; message fingerprints cannot detect renames. */
+  lastTitle?: string;
   /** A live/incremental capture is not proof that older turns were imported. */
   lastFullHistorySyncedAt?: string;
   historyFingerprints?: Record<string, string>;
@@ -96,6 +98,8 @@ export interface ProviderDriftAlert {
 export interface ProviderHistorySyncState {
   /** An authorized import has not yet completed; resume using durable receipts. */
   catchupPending?: boolean;
+  /** Fixed reconciliation clock: retries must not revive expired receipts. */
+  reconciliationStartedAt?: string;
   lastProgressAt?: string;
   retryAfter?: string;
   lastSuccessfulAt?: string;

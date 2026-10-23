@@ -18,8 +18,18 @@ describe("history sync watermark", () => {
       old: { seenMessageIds: [], lastSyncedAt: "2020-01-01", historyFingerprints: { old: "receipt" } },
       pending: { seenMessageIds: [], historyFingerprints: { pending: "not-a-receipt" } }
     };
-    expect(historyResumeFingerprints(states, true)).toEqual({ old: "receipt" });
-    expect(historyResumeFingerprints(states, false)).toEqual({});
+    expect(historyResumeFingerprints(states, Date.parse("2020-01-02"))).toEqual({ old: "receipt" });
+    expect(historyResumeFingerprints(states)).toEqual({});
+  });
+  it("does not revive stale receipts on catch-up retry or extend them with live captures", () => {
+    const start = Date.parse("2026-10-20");
+    const states = {
+      stale: { seenMessageIds: [], lastSyncedAt: "2026-10-21", lastFullHistorySyncedAt: "2026-10-01", historyFingerprints: { stale: "old" } },
+      accepted: { seenMessageIds: [], lastSyncedAt: "2026-10-22", lastFullHistorySyncedAt: "2026-10-22", historyFingerprints: { accepted: "new" } }
+    };
+    expect(historyResumeFingerprints(states, start)).toEqual({ accepted: "new" });
+    // Retry weeks later still uses the same reference clock, not wall time.
+    expect(historyResumeFingerprints(states, start)).toEqual({ accepted: "new" });
   });
   it("commits only clean completed runs", () => {
     expect(shouldCommitHistoryWatermark(update({ topSessionIds: ["u0__latest"] }))).toBe(true);

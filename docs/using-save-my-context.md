@@ -48,6 +48,31 @@ Explicit imports audit the whole index; saving a recent live message does not co
 as importing that conversation's older turns. Older extension receipts may be reread once.
 Provider rate-limit deadlines delay retries, including explicit retry clicks.
 
+### Returning to, renaming, or archiving an old chat
+
+Version 0.4.7 reconciles metadata across the whole paginated index for ChatGPT,
+Gemini, and Grok, even when the newest conversation ID is unchanged. A changed
+entry downloads only that conversation; unchanged entries reuse durable receipts.
+New turns and edits update the existing conversation. A title-only rename updates
+its title without duplicating messages or creating another AI-processing job.
+Live captures also preserve renames when they contain a title and transcript.
+Rename/archive actions that do not expose a transcript are reconciled on the next
+history run, not necessarily immediately when clicked.
+
+ChatGPT scans active and archived lists and detects both archive and unarchive
+transitions, including unchanged timestamps. Archiving at the provider does **not**
+delete saved history, archive the SMC source, or alter your tasks/publishing drafts.
+Missing list entries are never treated as deletion commands. Gemini/Grok changes
+can only be detected for entries their list endpoints expose; separate archived
+history traversal is currently implemented only for ChatGPT.
+
+Some provider metadata does not reliably describe transcript edits. Full-history
+receipts expire after seven days and are rechecked on the next eligible run; live
+captures do not extend that deadline. This is not a guarantee of immediate remote
+edit detection. The expiry clock is fixed at the start of an import so interruptions
+neither restart the already-accepted prefix nor revive stale receipts. Upgrading
+an older ID-only cache may require a one-time reimport.
+
 Deleted/temporary chats, unavailable accounts, attachment binaries, and provider data
 not exposed by the authenticated endpoints cannot be recovered by pagination. Claude
 does not yet have an automatic full-history adapter. Individual captures are limited

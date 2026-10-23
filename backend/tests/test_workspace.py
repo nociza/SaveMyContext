@@ -71,6 +71,52 @@ async def test_capture_replay_is_one_job_and_search_is_local(workspace):
         assert results[0]["id"] == "test:one"
 
 
+async def test_conversation_rename_and_provider_archive_preserve_history_and_ai_jobs(workspace):
+    from datetime import timedelta
+    from app.schemas.ingest import IngestDiffRequest
+    from app.services.ingest import IngestService
+    from app.workspace.models import Revision
+
+    start = datetime.now(timezone.utc) - timedelta(minutes=1)
+    original = {
+        "provider": "chatgpt", "external_session_id": "historical-chat",
+        "title": "Original title", "sync_mode": "full_snapshot",
+        "capture_completeness": "complete", "extraction_method": "structured",
+        "captured_at": start,
+        "messages": [
+            {"external_message_id": "u1", "role": "user", "content": "Keep this old question."},
+            {"external_message_id": "a1", "role": "assistant", "content": "Keep the old answer too."},
+        ],
+    }
+    async with workspace() as db:
+        service = IngestService(db)
+        session, _ = await service.ingest(IngestDiffRequest.model_validate(original))
+        identity = session.id
+        # Rename delivered as a partial incremental observation of the last turn.
+        renamed = {**original, "title": "Renamed historical chat", "sync_mode": "incremental",
+                   "capture_completeness": "partial", "messages": original["messages"][-1:]}
+        for step, archived in enumerate([False, True, False], start=1):
+            session, count = await service.ingest(IngestDiffRequest.model_validate({
+                **renamed, "captured_at": start + timedelta(seconds=step),
+                "raw_capture": {"response": {"json": {"is_archived": archived}}},
+            }))
+            assert session.id == identity and count == 0
+            assert len(session.messages) == 2
+            source = await db.get(Source, f"session:{identity}")
+            assert source.title == "Renamed historical chat"
+            assert not source.archived  # Provider archive is not an SMC archive command.
+            assert len((await db.scalars(select(Job))).all()) == 1
+            assert len((await db.scalars(select(Revision))).all()) == 1
+
+        session, count = await service.ingest(IngestDiffRequest.model_validate({
+            **renamed, "captured_at": start + timedelta(seconds=4),
+            "messages": [{"external_message_id": "u2", "role": "user", "content": "A new question months later."}],
+        }))
+        assert session.id == identity and count == 1
+        assert len(session.messages) == 3
+        assert len((await db.scalars(select(Revision))).all()) == 2
+
+
 async def test_worker_creates_suggestions_not_tasks_and_keeps_completed_state(
     workspace,
 ):

@@ -5,6 +5,7 @@ import { join,resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium,expect,test,type APIRequestContext,type Page } from "@playwright/test";
+import { historyMetadataReceipt } from "../src/injected/history-shared";
 
 async function enableCapture(options: Page): Promise<void> {
   const popup = await options.context().newPage();
@@ -304,7 +305,10 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
       const listApiUrl = "https://chatgpt.com/backend-api/conversations?**";
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
-      let ordinaryItems: { id: string; update_time: number }[] = [];
+      let ordinaryItems: { id: string; update_time: number; title?: string }[] = [];
+      let providerTitle = "E2E ChatGPT Sync";
+      let providerArchived = false;
+      let continued = false;
       let providerRevision = 1;
       let currentProjectId = "g-p-e2e";
       let providerUnavailable = false;
@@ -315,7 +319,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
         const sidebar = route.request().url().includes("/sidebar");
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({
           items: sidebar ? [{ gizmo: { gizmo: { id: currentProjectId, display: { name: "E2E Project" } } } }]
-            : [{ id: sessionId, update_time: providerRevision }], cursor: null
+            : [{ id: sessionId, update_time: providerRevision, title: providerTitle }], cursor: null
         }) });
       });
 
@@ -330,12 +334,13 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       });
 
       await context.route(listApiUrl, async (route) => {
+        const items = new URL(route.request().url()).searchParams.get("is_archived") === String(providerArchived) ? ordinaryItems : [];
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            items: ordinaryItems,
-            total: ordinaryItems.length
+            items,
+            total: items.length
           })
         });
       });
@@ -351,8 +356,13 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
           contentType: "application/json",
           body: JSON.stringify({
             conversation_id: sessionId,
-            title: "E2E ChatGPT Sync",
+            title: providerTitle,
+            is_archived: providerArchived,
             mapping: {
+              ...(continued ? { followup: { id: "followup", parent: "assistantNode", message: {
+                id: "msg-followup", author: { role: "user" }, create_time: 1711842090,
+                content: { parts: ["Returning to this historical chat months later."] }
+              } } } : {}),
               root: {
                 id: "root"
               },
@@ -502,6 +512,34 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       currentProjectId = "g-p-e2e";
       await importAgain();
       expect(detailReads).toBe(readsBeforeMoves + 2);
+
+      // Renaming project-only history without a revision timestamp must also
+      // propagate. Then move the same identity into/out of the archive index.
+      ordinaryItems = [];
+      providerTitle = "Renamed historical project chat";
+      await importAgain();
+      const renamed = await (await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`)).json();
+      expect(renamed.title).toBe(providerTitle);
+      expect(renamed.messages).toHaveLength(2);
+      ordinaryItems = [{ id: sessionId, update_time: providerRevision, title: providerTitle }];
+      await importAgain();
+      const beforeArchive = detailReads;
+      providerArchived = true;
+      await importAgain();
+      await importAgain(); // No repeated transcript downloads while archived.
+      expect(detailReads).toBe(beforeArchive + 1);
+      providerArchived = false;
+      await importAgain();
+      expect(detailReads).toBe(beforeArchive + 2);
+      continued = true;
+      providerRevision++;
+      ordinaryItems = [{ id: sessionId, update_time: providerRevision, title: providerTitle }];
+      await importAgain();
+      const resumed = await (await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`)).json();
+      expect(resumed.messages).toHaveLength(3);
+      expect(resumed.messages.map((m: { content: string }) => m.content)).toContain("Returning to this historical chat months later.");
+      const allSessions = await (await request.get(`${backendBaseUrl}/api/v1/sessions?provider=chatgpt`)).json();
+      expect(allSessions.filter((s: { external_session_id: string }) => s.external_session_id === sessionId)).toHaveLength(1);
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -713,6 +751,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
   const sessionId = "gemini-e2e-123456789";
   const secondSessionId = "gemini-e2e-987654321";
   const thirdSessionId = "gemini-e2e-333333333";
+  let historicalTitle = "Gemini E2E Sync 3";
   const skippedSessionId = "gemini-e2e-skipped-123456789";
   const accountOneSessionId = "gemini-e2e-u1-555555555";
   const skippedAccountOneSessionId = "gemini-e2e-u1-skipped-555555555";
@@ -777,7 +816,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate(({ skippedId, partialId }) => {
+      await serviceWorker.evaluate(({ skippedId, partialId, receipts }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
             [`gemini:u0__${partialId}`]: {
@@ -786,17 +825,22 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
             },
             [`gemini:u0__${skippedId}`]: {
               seenMessageIds: ["existing-message"],
-              lastFullHistorySyncedAt: "2026-04-01T11:50:00.000Z",
-              lastSyncedAt: "2026-04-01T11:50:00.000Z"
+              historyFingerprints: receipts[0],
+              lastFullHistorySyncedAt: new Date().toISOString(),
+              lastSyncedAt: new Date().toISOString()
             },
             [`gemini:u1__gemini-e2e-u1-skipped-555555555`]: {
               seenMessageIds: ["existing-message-u1"],
-              lastFullHistorySyncedAt: "2026-04-01T11:51:00.000Z",
-              lastSyncedAt: "2026-04-01T11:51:00.000Z"
+              historyFingerprints: receipts[1],
+              lastFullHistorySyncedAt: new Date().toISOString(),
+              lastSyncedAt: new Date().toISOString()
             }
           }
         });
-      }, { skippedId: skippedSessionId, partialId: sessionId });
+      }, { skippedId: skippedSessionId, partialId: sessionId, receipts: [
+        await historyMetadataReceipt("gemini", `u0__${skippedSessionId}`, buildGeminiConversationEntry(skippedSessionId, "Gemini Previously Synced")),
+        await historyMetadataReceipt("gemini", `u1__${skippedAccountOneSessionId}`, buildGeminiConversationEntry(skippedAccountOneSessionId, "Gemini Account 1 Previously Synced"))
+      ] });
 
       await context.route(/^https:\/\/gemini\.google\.com(?:\/u\/\d+)?\/app(?:\/.*)?$/, async (route) => {
         const pageUrl = new URL(route.request().url());
@@ -871,7 +915,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
                 "MaZiqc",
                 buildGeminiListPayload([
                   buildGeminiConversationEntry(skippedSessionId, "Gemini Previously Synced"),
-                  buildGeminiConversationEntry(thirdSessionId, "Gemini E2E Sync 3")
+                  buildGeminiConversationEntry(thirdSessionId, historicalTitle)
                 ])
               )
             });
@@ -1174,6 +1218,13 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
           { sourcePath: "/u/1/app/gemini-e2e-u1-555555555", conversationId: accountOneSessionId, pageToken: null }
         ])
       );
+      // The newest ID did not move. A rename on page two must still reach the
+      // same stored conversation, with exactly one detail read.
+      historicalTitle = "Renamed old Gemini chat";
+      await page.bringToFront();
+      expect(await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }))).toMatchObject({ triggered: true });
+      await eventually.poll(async () => (await (await request.get(`${backendBaseUrl}/api/v1/sessions/${thirdSession?.id}`)).json()).title).toBe(historicalTitle);
+      expect(observedReadRequests.slice(readCountAfterInitialSync).map(r => r.conversationId)).toEqual([thirdSessionId]);
     } finally {
       await context.close();
     }
@@ -1339,6 +1390,8 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
   const sessionId = "grok-e2e-123456789";
   const secondSessionId = "grok-e2e-987654321";
   const thirdSessionId = "grok-e2e-333333333";
+  let historicalTitle = "Grok E2E Sync 3";
+  let historicalAnswer = "Yes. The importer follows Grok next-page tokens to reach later conversations.";
   const skippedSessionId = "grok-e2e-skipped-123456789";
   const backendLogs: string[] = [];
   const observedListPageTokens: Array<string | null> = [];
@@ -1401,7 +1454,7 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate(({ skippedId, partialId }) => {
+      await serviceWorker.evaluate(({ skippedId, partialId, receipt }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
             [`grok:${partialId}`]: {
@@ -1410,12 +1463,14 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
             },
             [`grok:${skippedId}`]: {
               seenMessageIds: ["existing-message"],
-              lastFullHistorySyncedAt: "2026-04-01T11:50:00.000Z",
-              lastSyncedAt: "2026-04-01T11:50:00.000Z"
+              historyFingerprints: receipt,
+              lastFullHistorySyncedAt: new Date().toISOString(),
+              lastSyncedAt: new Date().toISOString()
             }
           }
         });
-      }, { skippedId: skippedSessionId, partialId: sessionId });
+      }, { skippedId: skippedSessionId, partialId: sessionId,
+        receipt: await historyMetadataReceipt("grok", skippedSessionId, { conversationId: skippedSessionId, title: "Grok Previously Synced", modifyTime: "2026-04-01T11:55:00.000Z" }) });
 
       await context.route(/^https:\/\/grok\.com(?:\/c\/.*)?$/, async (route) => {
         await route.fulfill({
@@ -1475,7 +1530,7 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
                 },
                 {
                   conversationId: thirdSessionId,
-                  title: "Grok E2E Sync 3",
+                  title: historicalTitle,
                   modifyTime: "2026-04-01T11:54:00.000Z"
                 }
               ]
@@ -1561,7 +1616,7 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
                 {
                   responseId: "grok-assistant-3",
                   sender: "ASSISTANT",
-                  message: "Yes. The importer follows Grok next-page tokens to reach later conversations.",
+                  message: historicalAnswer,
                   parentResponseId: "grok-user-3",
                   createTime: "2026-04-01T11:54:05.000Z"
                 }
@@ -1737,6 +1792,21 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
         new RegExp(`^grok:(${sessionId}|${secondSessionId}|${thirdSessionId})$`)
       );
       await expect(popup.locator("#history-sync")).toContainText("0 conversations");
+      historicalTitle = "Renamed old Grok chat";
+      historicalAnswer = "Edited on another device, with the same message and conversation IDs.";
+      await page.bringToFront();
+      expect(await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }))).toMatchObject({ triggered: true });
+      await eventually.poll(async () => {
+        const rows = await (await request.get(`${backendBaseUrl}/api/v1/sessions?provider=grok`)).json();
+        const old = rows.find((s: { external_session_id: string }) => s.external_session_id === thirdSessionId);
+        return old?.title;
+      }).toBe(historicalTitle);
+      const oldRows = await (await request.get(`${backendBaseUrl}/api/v1/sessions?provider=grok`)).json();
+      const old = oldRows.find((s: { external_session_id: string }) => s.external_session_id === thirdSessionId);
+      const updated = await (await request.get(`${backendBaseUrl}/api/v1/sessions/${old.id}`)).json();
+      expect(updated.messages).toHaveLength(2);
+      expect(updated.messages.map((m: { content: string }) => m.content)).toContain(historicalAnswer);
+      expect(observedResponseConversationIds.slice(responseCountAfterInitialSync)).toEqual([thirdSessionId]);
     } finally {
       await context.close();
     }

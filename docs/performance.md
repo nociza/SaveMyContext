@@ -20,7 +20,8 @@ that every browser workload has reached its theoretical minimum.
 - Fingerprints become reusable only after backend acknowledgement. A weekly safety
   refresh rechecks older acknowledgements; automatic visits respect the configured
   refresh interval. Explicit imports bypass that interval.
-  An unfinished catch-up retains older receipts so weekly expiry cannot starve its tail.
+  An unfinished catch-up anchors expiry to its original start time so weekly expiry
+  cannot starve its tail or revive previously expired receipts during a retry.
 - History download workers await local persistence before downloading more captures.
   A failed or timed-out handoff keeps the history run retryable.
 - Scheduled refresh never reloads an existing provider tab. Loading waits are bounded
@@ -39,6 +40,25 @@ that every browser workload has reached its theoretical minimum.
 Automatic provider support remains ChatGPT, Gemini, and Grok. This release does not
 add a Claude adapter, enable capture consent, enable external model processing, or
 change server/NAS backup configuration.
+
+## Historical conversation reconciliation (0.4.7)
+
+- All three history adapters traverse paginated metadata instead of stopping at
+  a previously newest conversation ID. Gemini/Grok persist SHA-256 receipts of
+  individual metadata rows, not raw index rows or transcripts in sync summaries.
+- ChatGPT fingerprints include archive scope; project-only fingerprints also
+  include title and exposed archive state. Renames without timestamp changes and
+  archive/unarchive transitions invalidate the relevant receipt.
+- Live rename-only captures use incremental upserts. Backend tests assert that
+  old messages survive, source identity stays stable, and unchanged content adds
+  no AI job/revision. Provider archiving is not a deletion or SMC archive command.
+- Weekly verification is based on full-history acknowledgement time, not recent
+  live activity. The fixed per-import reconciliation clock survives retries.
+- Metadata traffic is now proportional to the complete index on each eligible
+  run; transcript traffic remains limited to changed/expired/unacknowledged
+  entries. Existing refresh throttles, bounded workers, and backpressure apply.
+  Missing or unchanged provider revision metadata can delay remote edit detection
+  until the weekly safety recheck; this does not promise real-time synchronization.
 
 ## Large-history recovery (0.4.6)
 
