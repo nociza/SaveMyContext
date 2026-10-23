@@ -68,6 +68,7 @@ import {
 } from "./backend";
 import { buildIngestPayload, mergeMessageFingerprints, mergeSeenMessageIds } from "./diff";
 import { historyResumeFingerprints, shouldCommitHistoryWatermark } from "./history-watermark";
+import { isCurrentHistoryRun, mayAdvanceSyncState, SyncOperations } from "../shared/sync-scope";
 import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, hasPendingCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
 import { acceptCaptureConsent } from "../shared/storage";
 import {
@@ -78,6 +79,7 @@ import {
 import { bestEffortTabCleanup } from "./tab-cleanup";
 
 let queue = Promise.resolve();
+const historyOperations = new SyncOperations();
 const captureOutbox = new IndexedCaptureStore();
 let captureDrain: Promise<void> | null = null;
 const HISTORY_SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -1504,6 +1506,12 @@ function extractPolicySkippedSessionIds(
 }
 
 async function handlePageVisit(
+  payload: { provider: ProviderName; pageUrl: string }, tabId: number | undefined, explicit = false
+): Promise<{ triggered: boolean; reason?: string }> {
+  return historyOperations.run(payload.provider, () => handlePageVisitUnlocked(payload, tabId, explicit));
+}
+
+async function handlePageVisitUnlocked(
   payload: { provider: ProviderName; pageUrl: string },
   tabId: number | undefined,
   explicit = false
@@ -1537,7 +1545,9 @@ async function handlePageVisit(
     return { triggered: false, reason: "missing-tab-id" };
   }
 
-  const currentState = await getProviderHistorySyncState(payload.provider);
+  const destination = settings.backendUrl.replace(/\/$/, "");
+  const storedState = await getProviderHistorySyncState(payload.provider);
+  const currentState = storedState.destination === destination ? storedState : {};
   if (currentState.retryAfter && Date.parse(currentState.retryAfter) > Date.now()) {
     return { triggered: false, reason: "provider-cooldown" };
   }
@@ -1560,13 +1570,16 @@ async function handlePageVisit(
   }
   // Every run audits metadata throughout the index: an old chat can change
   // without changing the newest ID. Only current durable receipts skip bodies.
-  const sessionStates = await getProviderSessionSyncStates(payload.provider);
+  const sessionStates = await getProviderSessionSyncStates(payload.provider, destination);
   const syncedSessionIds = extractPolicySkippedSessionIds(payload.provider, sessionStates, settings);
   const now = new Date().toISOString();
+  const activeRunId = crypto.randomUUID();
   const reconciliationStartedAt = currentState.catchupPending && currentState.reconciliationStartedAt
     ? currentState.reconciliationStartedAt : now;
   await saveProviderHistorySyncState(payload.provider, {
     ...currentState,
+    destination,
+    activeRunId,
     inProgress: true,
     catchupPending: true,
     reconciliationStartedAt,
@@ -1598,6 +1611,7 @@ async function handlePageVisit(
       type: "TRIGGER_HISTORY_SYNC",
       payload: {
         provider: payload.provider,
+        runId: activeRunId,
         syncedSessionIds,
         historyFingerprints: historyResumeFingerprints(sessionStates, Date.parse(reconciliationStartedAt)),
       }
@@ -1627,11 +1641,17 @@ async function handlePageVisit(
 }
 
 async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok: true }> {
+  return historyOperations.run(update.provider, () => handleHistorySyncStatusUnlocked(update));
+}
+
+async function handleHistorySyncStatusUnlocked(update: HistorySyncUpdate): Promise<{ ok: true }> {
   if (update.phase === "started" && update.runId && update.processedCount === undefined) {
     historySyncRunErrors.delete(update.runId);
   }
 
   const currentState = await getProviderHistorySyncState(update.provider);
+  const destination = (await getSettings()).backendUrl.replace(/\/$/, "");
+  if (!isCurrentHistoryRun(currentState, update.runId, destination)) return { ok: true };
   const currentStatus = await getStatus();
   const existingTopSessionIds =
     currentState.lastTopSessionIds ??
@@ -1683,6 +1703,9 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       await flushCaptureOutbox();
     }
   }
+  // A slow drain may outlive the run or a destination change.
+  if (!isCurrentHistoryRun(await getProviderHistorySyncState(update.provider), update.runId,
+      (await getSettings()).backendUrl.replace(/\/$/, ""))) return { ok: true };
   const pendingRun = update.runId && (await captureOutbox.pendingRuns()).has(update.runId);
   const runError = (update.runId ? historySyncRunErrors.get(update.runId) : undefined) ||
     (pendingRun ? "Delivery pending in durable outbox; history watermark was not advanced." : undefined);
@@ -1695,6 +1718,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       await saveProviderHistorySyncState(update.provider, {
         ...basePatch,
         inProgress: false,
+        activeRunId: undefined,
         lastCompletedAt: completedAt
       });
       const activeProviders = await getActiveHistorySyncProviders({ [update.provider]: false });
@@ -1724,6 +1748,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       ...(shouldCommitHistoryWatermark(update, runError) ? { ...watermarkPatch, lastSuccessfulAt: completedAt } : {}),
       inProgress: false,
       catchupPending: !complete,
+      activeRunId: undefined,
       reconciliationStartedAt: complete ? undefined : currentState.reconciliationStartedAt,
       lastCompletedAt: completedAt,
       lastConversationCount: update.conversationCount ?? currentState.lastConversationCount,
@@ -1790,6 +1815,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   await saveProviderHistorySyncState(update.provider, {
     ...basePatch,
     inProgress: false,
+    activeRunId: undefined,
     lastCompletedAt: completedAt,
     processedCount,
     totalCount,
@@ -1824,6 +1850,10 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
   if (!scraper || !settings.enabledProviders[scraper.provider]) {
     return;
   }
+  const destination = settings.backendUrl.replace(/\/$/, "");
+  if (event.historySyncRunId && !isCurrentHistoryRun(await getProviderHistorySyncState(scraper.provider), event.historySyncRunId, destination)) {
+    throw new Error("History run was superseded or its destination changed; retry the import.");
+  }
 
   const snapshot = scraper.parse(event);
   if (!snapshot || !snapshot.messages.length) {
@@ -1841,12 +1871,12 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
   const sessionKey = `${snapshot.provider}:${snapshot.externalSessionId}`;
   const accountDecision = accountAllowedBySettings(settings, snapshot);
   if (!accountDecision.allowed) {
-    const syncState = await getSessionSyncState(sessionKey);
+    const syncState = await getSessionSyncState(sessionKey, destination);
     await saveSessionSyncState(sessionKey, {
       ...syncState,
       indexingRuleDecision: "skipped",
       indexingRuleReason: accountDecision.reason
-    });
+    }, destination);
     await setExtensionStatus({
       backendUrl: settings.backendUrl.replace(/\/$/, ""),
       lastProvider: snapshot.provider,
@@ -1858,7 +1888,7 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
     });
     return;
   }
-  const syncState = await getSessionSyncState(sessionKey);
+  const syncState = await getSessionSyncState(sessionKey, destination);
   const indexingDecision = evaluateIndexingRules(settings, snapshot);
   const indexingFingerprint = indexingRulesFingerprint(settings);
   if (!indexingDecision.shouldIndex) {
@@ -1867,7 +1897,7 @@ async function handleCapture(event: CapturedNetworkEvent, tabId?: number): Promi
       indexingRuleDecision: "skipped",
       indexingRuleFingerprint: indexingFingerprint,
       indexingRuleReason: indexingDecision.reason
-    });
+    }, destination);
     await setExtensionStatus({
       backendUrl: settings.backendUrl.replace(/\/$/, ""),
       lastProvider: snapshot.provider,
@@ -1950,13 +1980,14 @@ async function deliverCaptureOutbox(): Promise<void> {
       const receipt = await response.json();
       requireCaptureReceipt(payload, receipt);
       const sessionKey = `${payload.provider}:${payload.external_session_id}`;
-      const syncState = await getSessionSyncState(sessionKey);
-      if (receipt.disposition !== "quarantined") {
+      const syncState = await getSessionSyncState(sessionKey, backendUrl);
+      if (receipt.disposition !== "quarantined" && mayAdvanceSyncState(syncState, payload.captured_at)) {
         await saveSessionSyncState(sessionKey, {
           ...syncState,
           seenMessageIds: mergeSeenMessageIds(syncState.seenMessageIds, snapshot.messages),
           projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
           lastTitle: payload.title || syncState.lastTitle,
+          lastCapturedAt: payload.captured_at,
           historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
           historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
           // A full history receipt describes current memberships. Retaining old
@@ -1969,8 +2000,8 @@ async function deliverCaptureOutbox(): Promise<void> {
           indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed",
           indexingRuleFingerprint: indexingRulesFingerprint(settings),
           discardWordMatch: payload.discard_word_match
-        });
-      } else if (payload.raw_capture.historySyncRunId) {
+        }, backendUrl);
+      } else if (receipt.disposition === "quarantined" && payload.raw_capture.historySyncRunId) {
         historySyncRunErrors.set(payload.raw_capture.historySyncRunId, "Capture needs repair; evidence preserved.");
       }
       await setExtensionStatus({

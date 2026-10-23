@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { chatGPTHistoryPages, discoverChatGPTHistory } from "../src/injected/chatgpt-history";
+import { assertChatGPTHistoryIdentity, chatGPTHistoryPages, discoverChatGPTHistory } from "../src/injected/chatgpt-history";
 
 it("refetches a changed top conversation and skips unchanged metadata only after acknowledgement", async () => {
   const read = vi.fn().mockResolvedValue({ json: { items: [{ id: "top", update_time: 1, title: "A" }] } });
@@ -63,6 +63,32 @@ it("does not trust missing timestamps or unknown account scope", async () => {
   const first = await discoverChatGPTHistory(read, undefined);
   const item = first.items.get("top")!;
   expect((await discoverChatGPTHistory(read, undefined, { [item.key]: item.fingerprint })).pending).toEqual(["top"]);
+});
+
+it("follows server-capped short pages until the advertised total is reached", async () => {
+  const offsets: number[] = [];
+  const result = await discoverChatGPTHistory(async url => {
+    const offset = Number(new URL(url).searchParams.get("offset"));
+    offsets.push(offset);
+    return { json: { total: 125, items: Array.from({ length: Math.min(25, 125 - offset) }, (_, n) => ({ id: `c${offset + n}`, update_time: 1 })) } };
+  }, "account");
+  expect(result.pending).toHaveLength(125);
+  expect(offsets).toEqual([0, 25, 50, 75, 100]);
+});
+
+it("does not declare completion on an empty page before the advertised end", async () => {
+  await expect(discoverChatGPTHistory(async () => ({ json: { total: 10, items: [] } }), "account")).rejects.toThrow(/incomplete|progress/);
+});
+
+it("rejects wrong-conversation details rather than checkpointing the requested ID", () => {
+  expect(() => assertChatGPTHistoryIdentity({ conversation_id: "other" }, "requested")).toThrow(/identity/);
+  expect(() => assertChatGPTHistoryIdentity({ conversation_id: "requested", conversationId: "other" }, "requested")).toThrow(/identity/);
+  expect(() => assertChatGPTHistoryIdentity({ conversation_id: "requested" }, "requested")).not.toThrow();
+  expect(() => assertChatGPTHistoryIdentity({ mapping: {} }, "requested")).not.toThrow(); // URL still supplies identity.
+});
+
+it.each([-1, 1.5, "125", NaN])("refuses an untrustworthy history total %s", async total => {
+  await expect(discoverChatGPTHistory(async () => ({ json: { items: [], total } }), "account")).rejects.toThrow(/total/);
 });
 
 it("finds old-chat edits, title-only renames and archive/unarchive with an unchanged newest ID", async () => {

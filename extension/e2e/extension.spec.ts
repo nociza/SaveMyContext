@@ -310,7 +310,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       let providerArchived = false;
       let continued = false;
       let providerRevision = 1;
-      let currentProjectId = "g-p-e2e";
+      let currentProjectId: string | null = "g-p-e2e";
       let providerUnavailable = false;
       let detailReads = 0;
       let assistantAnswer = "FastAPI uses uvloop to run the event loop with high-performance async I/O.";
@@ -318,7 +318,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       await context.route("**/backend-api/gizmos/**", async (route) => {
         const sidebar = route.request().url().includes("/sidebar");
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({
-          items: sidebar ? [{ gizmo: { gizmo: { id: currentProjectId, display: { name: "E2E Project" } } } }]
+          items: sidebar ? (currentProjectId ? [{ gizmo: { gizmo: { id: currentProjectId, display: { name: "E2E Project" } } } }] : [])
             : [{ id: sessionId, update_time: providerRevision, title: providerTitle }], cursor: null
         }) });
       });
@@ -358,6 +358,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
             conversation_id: sessionId,
             title: providerTitle,
             is_archived: providerArchived,
+            gizmo_id: currentProjectId,
             mapping: {
               ...(continued ? { followup: { id: "followup", parent: "assistantNode", message: {
                 id: "msg-followup", author: { role: "user" }, create_time: 1711842090,
@@ -540,6 +541,46 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       expect(resumed.messages.map((m: { content: string }) => m.content)).toContain("Returning to this historical chat months later.");
       const allSessions = await (await request.get(`${backendBaseUrl}/api/v1/sessions?provider=chatgpt`)).json();
       expect(allSessions.filter((s: { external_session_id: string }) => s.external_session_id === sessionId)).toHaveLength(1);
+
+      // Removal from a project does not necessarily change ordinary metadata.
+      const beforeRemoval = detailReads;
+      currentProjectId = null;
+      await importAgain();
+      expect(detailReads).toBe(beforeRemoval + 1);
+      const removedProject = await (await request.get(`${backendBaseUrl}/api/v1/workspace/sources/${encodeURIComponent(`session:${matchedSession?.id}`)}`)).json();
+      expect(removedProject.project_id).toBeNull();
+      await importAgain();
+      expect(detailReads).toBe(beforeRemoval + 1);
+
+      // A delayed completion/progress message from a different run must not
+      // turn success into a spinner or clear the current completion timestamp.
+      const cleanStatus = await serviceWorker.evaluate(async () => (await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"]);
+      for (const phase of ["started", "completed", "failed"]) {
+        await optionsPage.evaluate(async phase => chrome.runtime.sendMessage({ type: "HISTORY_SYNC_STATUS", payload: {
+          provider: "chatgpt", phase, runId: "obsolete-run", pageUrl: "https://chatgpt.com/", processedCount: 999,
+        } }), phase);
+      }
+      expect(await serviceWorker.evaluate(async () => (await chrome.storage.local.get("savemycontext.status"))["savemycontext.status"])).toEqual(cleanStatus);
+
+      // Seed a valid-looking receipt from another database. The real background
+      // worker must ignore it and re-deliver, not just pass a pure helper test.
+      await serviceWorker.evaluate(async () => new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("smc-sync-state", 1);
+        open.onsuccess = () => {
+          const db = open.result, tx = db.transaction(["states", "summaries"], "readwrite");
+          for (const name of ["states", "summaries"]) {
+            const cursor = tx.objectStore(name).openCursor();
+            cursor.onsuccess = () => { const row = cursor.result; if (!row) return;
+              row.update({ ...row.value, state: { ...row.value.state, destination: "https://old-database.invalid" } }); row.continue(); };
+          }
+          tx.oncomplete = () => { db.close(); resolve(); };
+          tx.onabort = () => { db.close(); reject(tx.error); };
+        };
+        open.onerror = () => reject(open.error);
+      }));
+      const beforeDestination = detailReads;
+      await importAgain();
+      expect(detailReads).toBe(beforeDestination + 1);
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
@@ -816,7 +857,7 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate(({ skippedId, partialId, receipts }) => {
+      await serviceWorker.evaluate(({ skippedId, partialId, receipts, destination }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
             [`gemini:u0__${partialId}`]: {
@@ -826,18 +867,20 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
             [`gemini:u0__${skippedId}`]: {
               seenMessageIds: ["existing-message"],
               historyFingerprints: receipts[0],
+              destination,
               lastFullHistorySyncedAt: new Date().toISOString(),
               lastSyncedAt: new Date().toISOString()
             },
             [`gemini:u1__gemini-e2e-u1-skipped-555555555`]: {
               seenMessageIds: ["existing-message-u1"],
               historyFingerprints: receipts[1],
+              destination,
               lastFullHistorySyncedAt: new Date().toISOString(),
               lastSyncedAt: new Date().toISOString()
             }
           }
         });
-      }, { skippedId: skippedSessionId, partialId: sessionId, receipts: [
+      }, { skippedId: skippedSessionId, partialId: sessionId, destination: backendBaseUrl, receipts: [
         await historyMetadataReceipt("gemini", `u0__${skippedSessionId}`, buildGeminiConversationEntry(skippedSessionId, "Gemini Previously Synced")),
         await historyMetadataReceipt("gemini", `u1__${skippedAccountOneSessionId}`, buildGeminiConversationEntry(skippedAccountOneSessionId, "Gemini Account 1 Previously Synced"))
       ] });
@@ -1454,7 +1497,7 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate(({ skippedId, partialId, receipt }) => {
+      await serviceWorker.evaluate(({ skippedId, partialId, receipt, destination }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
             [`grok:${partialId}`]: {
@@ -1464,12 +1507,13 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
             [`grok:${skippedId}`]: {
               seenMessageIds: ["existing-message"],
               historyFingerprints: receipt,
+              destination,
               lastFullHistorySyncedAt: new Date().toISOString(),
               lastSyncedAt: new Date().toISOString()
             }
           }
         });
-      }, { skippedId: skippedSessionId, partialId: sessionId,
+      }, { skippedId: skippedSessionId, partialId: sessionId, destination: backendBaseUrl,
         receipt: await historyMetadataReceipt("grok", skippedSessionId, { conversationId: skippedSessionId, title: "Grok Previously Synced", modifyTime: "2026-04-01T11:55:00.000Z" }) });
 
       await context.route(/^https:\/\/grok\.com(?:\/c\/.*)?$/, async (route) => {

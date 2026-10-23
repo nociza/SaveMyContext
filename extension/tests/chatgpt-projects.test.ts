@@ -22,6 +22,18 @@ const event: CapturedNetworkEvent = {
 };
 
 describe("ChatGPT Projects", () => {
+  it("timestamps a snapshot when its request starts, not when a delayed response finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const read = chatGPTReader(async () => {
+        vi.setSystemTime(new Date("2026-01-01T00:00:10Z"));
+        return Response.json({ messages: [] });
+      }, {});
+      const result = await read("/backend-api/conversation/test");
+      expect((result as { capturedAt?: string }).capturedAt).toBe("2026-01-01T00:00:00.000Z");
+    } finally { vi.useRealTimers(); }
+  });
   it("paginates independent project/chat indexes, excludes custom GPTs and deduplicates", async () => {
     const paths: string[] = [];
     const read = async (path: string) => {

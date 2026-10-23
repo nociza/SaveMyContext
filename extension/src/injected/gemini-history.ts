@@ -8,6 +8,7 @@ import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
 import { MAX_CAPTURE_BYTES, readBoundedResponse } from "./response-observer";
 import {
   countRetryableHistoryFailures,
+  HistoryPageProgress,
   historyMetadataReceipt,
   hasHistoryReceipt,
   normalizeHistorySessionIds,
@@ -694,20 +695,23 @@ function parseGeminiConversationEntry(context: GeminiAccountContext, value: unkn
 
 function extractGeminiConversationEntries(context: GeminiAccountContext, payloads: unknown[]): GeminiConversationEntry[] {
   const entries: GeminiConversationEntry[] = [];
+  let foundList = false;
 
   for (const payload of payloads) {
     if (!Array.isArray(payload) || !Array.isArray(payload[2])) {
       continue;
     }
+    foundList = true;
 
     for (const item of payload[2]) {
       const entry = parseGeminiConversationEntry(context, item);
       if (entry) {
         entries.push(entry);
-      }
+      } else throw createProviderDriftError("gemini", "Gemini history contains an invalid conversation identity; sync remains incomplete.");
     }
   }
 
+  if (!foundList) throw createProviderDriftError("gemini", "Gemini history list format changed; sync remains incomplete.");
   return entries;
 }
 
@@ -725,6 +729,8 @@ async function* listGeminiConversationEntries(
 ): AsyncGenerator<GeminiConversationEntry[]> {
   const sourcePath = buildGeminiAppSourcePath(context.basePrefix);
   const seenTokens = new Set<string>();
+  const seenIds = new Set<string>();
+  const progress = new HistoryPageProgress();
   let pageToken: string | undefined;
 
   while (true) {
@@ -749,6 +755,9 @@ async function* listGeminiConversationEntries(
     yield [...entries.values()];
 
     const nextPageToken = readGeminiNextPageToken(result.payloads);
+    let newItems = 0;
+    for (const id of entries.keys()) if (!seenIds.has(id)) { seenIds.add(id); newItems++; }
+    progress.observe(newItems, Boolean(nextPageToken));
     if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Gemini pagination repeated a cursor; sync remains incomplete.");
     if (!nextPageToken) {
       break;
@@ -820,32 +829,33 @@ function offsetIsoTimestamp(value: string, milliseconds: number): string {
   return new Date(timestamp + milliseconds).toISOString();
 }
 
-function buildGeminiSyntheticMessages(
+export function buildGeminiSyntheticMessages(
   scopedSessionId: string,
   blocks: Array<{
     userText: string;
     assistantText: string;
     occurredAt?: string;
-  }>,
-  capturedAt: string
+  }>
 ): Array<{
   id: string;
   parentId?: string;
   role: "user" | "assistant";
   content: string;
-  occurredAt: string;
+  occurredAt?: string;
 }> {
   const messages: Array<{
     id: string;
     parentId?: string;
     role: "user" | "assistant";
     content: string;
-    occurredAt: string;
+    occurredAt?: string;
   }> = [];
 
   let previousAssistantId: string | undefined;
   for (const [index, block] of blocks.entries()) {
-    const occurredAt = block.occurredAt ?? capturedAt;
+    // Unknown provider time must stay unknown. Import time would manufacture a
+    // changed message/revision (and another AI job) on every safety recheck.
+    const occurredAt = block.occurredAt;
     const userId = `gemini-${scopedSessionId}-user-${index}`;
     messages.push({
       id: userId,
@@ -861,7 +871,7 @@ function buildGeminiSyntheticMessages(
       parentId: userId,
       role: "assistant",
       content: block.assistantText,
-      occurredAt: offsetIsoTimestamp(occurredAt, 1)
+      occurredAt: occurredAt ? offsetIsoTimestamp(occurredAt, 1) : undefined
     });
     previousAssistantId = assistantId;
   }
@@ -923,7 +933,6 @@ async function fetchGeminiConversationCapture(
     pageToken = nextPageToken;
   }
 
-  const capturedAt = new Date().toISOString();
   const decodeResult = decodeGeminiConversationBlocks(payloads);
   const blocks = decodeResult.blocks;
   if (!blocks.length) {
@@ -939,7 +948,7 @@ async function fetchGeminiConversationCapture(
     externalSessionId: entry.scopedSessionId,
     accountKey: entry.accountKey,
     title: entry.title,
-    messages: buildGeminiSyntheticMessages(entry.scopedSessionId, blocks, capturedAt),
+    messages: buildGeminiSyntheticMessages(entry.scopedSessionId, blocks),
     // Keep provider evidence for future parser repairs, not only our interpretation.
     providerEvidence: payloads,
     decoderStrategy: decodeResult.diagnostics.selectedStrategy
@@ -1038,6 +1047,7 @@ export async function runGeminiHistorySync(
             throw new Error(`Missing Gemini account context for ${entry.accountKey}.`);
           }
 
+          const capturedAt = new Date().toISOString();
           const capture = await fetchGeminiConversationCapture(accountContext, entry);
           await hooks.postCapture({
             providerHint: "gemini",
@@ -1051,7 +1061,7 @@ export async function runGeminiHistorySync(
             requestId: `history-gemini-${entry.accountKey}-${entry.conversationId}-${Date.now()}`,
             method: "POST",
             url: capture.url,
-            capturedAt: new Date().toISOString(),
+            capturedAt,
             requestBody: capture.requestBody,
             response: capture.response
           });

@@ -264,6 +264,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
       if (!captureEnabled) throw new Error("Capture is paused or awaiting consent");
       return postControlMessage({
         type: "START_HISTORY_SYNC",
+        runId: payload.runId,
         historyFingerprints: payload.historyFingerprints,
         syncedSessionIds: payload.syncedSessionIds,
         previousTopSessionId: payload.previousTopSessionId,

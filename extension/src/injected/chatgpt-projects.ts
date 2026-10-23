@@ -14,19 +14,32 @@ export interface ProjectConversation {
   fingerprint: string;
 }
 
+/** Previous project membership matters even when the current project index no
+ * longer lists the chat. Ordinary metadata may be unchanged after removal. */
+export function previouslyProjectScoped(known: Record<string, string>, account: string | undefined): Set<string> {
+  const ids = new Set<string>();
+  if (!account) return ids;
+  for (const key of Object.keys(known)) {
+    const parts = key.split("/");
+    if (parts.length === 4 && parts[0] === account && projectId(parts[2])) ids.add(parts[3]);
+  }
+  return ids;
+}
+
 /** Bounded same-origin GETs. Never persist authorization or log response bodies. */
 export function chatGPTReader(fetcher: typeof fetch, headers: HeadersInit,
   sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))) {
-  return async (path: string): Promise<{ response: Response; text: string; json: unknown }> => {
+  return async (path: string): Promise<{ response: Response; text: string; json: unknown; capturedAt: string }> => {
     const url = new URL(path, "https://chatgpt.com");
     if (url.origin !== "https://chatgpt.com") throw new Error("Cross-origin history request rejected.");
     for (let attempt = 0; attempt < 3; attempt++) {
+      const capturedAt = new Date().toISOString();
       const response = await fetcher(url.toString(), {
         method: "GET", credentials: "include", headers, redirect: "error", signal: AbortSignal.timeout(30_000)
       });
       if (response.ok) {
         const text = await readBoundedResponse(response, undefined, 30_000);
-        return { response, text, json: JSON.parse(text) };
+        return { response, text, json: JSON.parse(text), capturedAt };
       }
       void response.body?.cancel().catch(() => undefined);
       if ((response.status !== 429 && response.status < 500) || attempt === 2) {

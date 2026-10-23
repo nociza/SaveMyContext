@@ -31,7 +31,7 @@ async function installFixture(page: Page, total: number, rejectAfter: number, br
       const id = Number(url.pathname.split("/").at(-1)?.replace("chat", ""));
       state.details++;
       if (brokenId === -2 && id >= 3) throw new TypeError("Synthetic offline network");
-      return Response.json(id === brokenId ? { unexpected: true } : { conversation_id: `chat${id}`, messages: [{ id: `m${id}`, author: { role: "user" }, content: { parts: ["Synthetic history only"] } }] });
+      return Response.json(id === brokenId ? { unexpected: true } : { conversation_id: brokenId === -3 && id === 3 ? "wrong-conversation" : `chat${id}`, messages: [{ id: `m${id}`, author: { role: "user" }, content: { parts: ["Synthetic history only"] } }] });
     };
     w.startFixture = () => {
       const channel = new MessageChannel();
@@ -123,4 +123,15 @@ test("a network outage halts new downloads instead of walking the entire backlog
   expect(Date.parse(result.last.retryAfter)).toBeGreaterThan(Date.now());
   expect(result.details).toBeLessThanOrEqual(5);
   expect(result.pages).toEqual([0]);
+});
+
+test("wrong-conversation response is not acknowledged while later pages still import", async ({ page }) => {
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: "Synthetic identity mismatch" }));
+  await page.goto("https://chatgpt.com/");
+  await installFixture(page, 250, 1000, -3);
+  const result = await runFixture(page);
+  expect(result.accepted).toBe(249);
+  expect(result.last.retryableFailureCount).toBe(1);
+  expect(result.pages).toEqual([0, 100, 200]);
+  expect(await page.evaluate(() => Object.keys((window as any).historyFixture.known).some(key => JSON.parse(key).at(-1) === "chat3"))).toBe(false);
 });

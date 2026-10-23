@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { countRetryableHistoryFailures, runWithConcurrency, historyMetadataReceipt, hasHistoryReceipt } from "../src/injected/history-shared";
+import { countRetryableHistoryFailures, runWithConcurrency, historyMetadataReceipt, hasHistoryReceipt, HistoryPageProgress } from "../src/injected/history-shared";
 
 describe("history shared helpers", () => {
+  it("bounds non-progressing pages even if cursors keep changing, while tolerating brief overlaps", () => {
+    const guard = new HistoryPageProgress();
+    guard.observe(100, true);
+    guard.observe(0, true); guard.observe(0, true);
+    guard.observe(1, true); // Real progress resets the counter.
+    for (let i = 0; i < 10000; i++) guard.observe(1, true);
+    guard.observe(0, true); guard.observe(0, true);
+    expect(() => guard.observe(0, true)).toThrow(/incomplete/);
+    expect(() => new HistoryPageProgress().observe(0, false)).not.toThrow();
+  });
   it("reconciles scoped metadata, including titles, revisions and archive flags, without storing raw rows", async () => {
     const original = { conversationId: "same", title: "Old", modifyTime: "1", archived: false };
     const receipt = await historyMetadataReceipt("grok", "same", original);

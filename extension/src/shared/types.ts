@@ -70,6 +70,9 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  /** A receipt from one database must not suppress delivery to another. */
+  destination?: string;
+  lastCapturedAt?: string;
   /** Last durably delivered title; message fingerprints cannot detect renames. */
   lastTitle?: string;
   /** A live/incremental capture is not proof that older turns were imported. */
@@ -96,6 +99,8 @@ export interface ProviderDriftAlert {
 }
 
 export interface ProviderHistorySyncState {
+  destination?: string;
+  activeRunId?: string;
   /** An authorized import has not yet completed; resume using durable receipts. */
   catchupPending?: boolean;
   /** Fixed reconciliation clock: retries must not revive expired receipts. */
@@ -880,6 +885,7 @@ export interface ActiveChatMarkdownDumpResponse {
 }
 
 export interface HistorySyncTriggerPayload {
+  runId?: string;
   historyFingerprints?: Record<string, string>;
   provider: ProviderName;
   syncedSessionIds?: string[];
@@ -889,6 +895,7 @@ export interface HistorySyncTriggerPayload {
 }
 
 export interface HistorySyncControlPayload {
+  runId?: string;
   historyFingerprints?: Record<string, string>;
   type: "START_HISTORY_SYNC";
   syncedSessionIds?: string[];

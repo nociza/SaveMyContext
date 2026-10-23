@@ -9,6 +9,16 @@ export interface HistoryPage {
   topSessionId?: string;
 }
 
+export function assertChatGPTHistoryIdentity(value: unknown, requestedId: string): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const root = value as Record<string, unknown>;
+  for (const field of ["conversation_id", "conversationId"]) {
+    if (Object.hasOwn(root, field) && root[field] !== requestedId) {
+      throw createProviderDriftError("chatgpt", "History response identity does not match the requested conversation; no checkpoint recorded.");
+    }
+  }
+}
+
 /** Reconcile the bounded metadata index, not an ID watermark: the newest ID
  * can stay unchanged while its conversation (or another conversation) changes.
  * Fingerprints are persisted only after durable delivery by the background worker.
@@ -24,13 +34,20 @@ export async function* chatGPTHistoryPages(
   const seen = new Set<string>();
   let topSessionId: string | undefined;
   let stalledPages = 0;
-  for (let offset = 0; ; offset += 100) {
+  for (let offset = 0; ;) {
     const items = new Map<string, HistoryItem>();
     const url = new URL("https://chatgpt.com/backend-api/conversations");
     url.search = new URLSearchParams({ offset: String(offset), limit: "100", order: "updated", is_archived: String(archived) }).toString();
     const { json } = await read(url.href);
     const rows = (json as { items?: unknown[] } | null)?.items;
     if (!Array.isArray(rows)) throw createProviderDriftError("chatgpt", "ChatGPT history list has no items array.");
+    const total = (json as { total?: unknown }).total;
+    if (total !== undefined && (!Number.isSafeInteger(total) || (total as number) < 0)) {
+      throw createProviderDriftError("chatgpt", "ChatGPT history total is invalid; sync remains incomplete.");
+    }
+    if (!rows.length && typeof total === "number" && offset < total) {
+      throw new Error("ChatGPT history returned an empty page before its advertised end; sync remains incomplete.");
+    }
     for (const value of rows) {
       const row = value as { id?: unknown; update_time?: unknown; title?: unknown } | null;
       if (!row || typeof row.id !== "string" || !/^[a-zA-Z0-9_-]{1,255}$/.test(row.id)) {
@@ -49,13 +66,14 @@ export async function* chatGPTHistoryPages(
     // Some offset endpoints ignore the offset after a schema change. Do not
     // spin forever, but tolerate a small overlap caused by concurrent edits.
     stalledPages = items.size ? 0 : stalledPages + 1;
-    if (rows.length >= 100 && stalledPages >= 3) {
+    if (rows.length && stalledPages >= 3) {
       throw new Error("ChatGPT history pagination made no progress; sync remains incomplete.");
     }
     yield { items, topSessionId, pending: [...items.values()]
         .filter(item => refresh.has(item.id) || !item.fingerprint || known[item.key] !== item.fingerprint)
         .map(item => item.id) };
-    if (rows.length < 100) return;
+    offset += rows.length;
+    if (typeof total === "number" ? offset >= total : rows.length < 100) return;
   }
 }
 

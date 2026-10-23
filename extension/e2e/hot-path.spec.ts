@@ -55,3 +55,36 @@ test("fetch hook preserves the native promise and dispatches before parsing capt
   });
   expect(result).toEqual({ pausedNative: true, capturedNative: true, dispatchOrder: ["native"], requestConstructions: 0 });
 });
+
+test("a delayed older response keeps its request timestamp even after a newer response arrives", async ({ page }) => {
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: "Out-of-order synthetic responses" }));
+  await page.goto("https://chatgpt.com/c/synthetic");
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+  await page.evaluate(() => {
+    (window as any).pendingFetches = [];
+    window.fetch = () => new Promise(resolve => (window as any).pendingFetches.push(resolve));
+  });
+  await page.addScriptTag({ content: bundle.outputFiles[0].text });
+  await page.evaluate(() => {
+    const w = window as any, channel = new MessageChannel();
+    w.captures = [];
+    channel.port1.onmessage = event => { if (event.data.type === "NETWORK_CAPTURE") w.captures.push(event.data.payload); };
+    channel.port1.start();
+    w.HookTest.attachBridgePort(channel.port2);
+    w.HookTest.handleControlPayload({ type: "SET_CAPTURE_ENABLED", enabled: true });
+    void fetch("/backend-api/conversation/older");
+  });
+  await page.clock.fastForward(1000);
+  await page.evaluate(() => {
+    void fetch("/backend-api/conversation/newer");
+    (window as any).pendingFetches[1](new Response('{"title":"new"}'));
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).captures.length)).toBe(1);
+  await page.clock.fastForward(1000);
+  await page.evaluate(() => (window as any).pendingFetches[0](new Response('{"title":"old"}')));
+  await expect.poll(() => page.evaluate(() => (window as any).captures.length)).toBe(2);
+  const captures = await page.evaluate(() => (window as any).captures);
+  expect(captures[0].url).toContain("newer");
+  expect(captures[1].url).toContain("older");
+  expect(Date.parse(captures[1].capturedAt)).toBeLessThan(Date.parse(captures[0].capturedAt));
+});

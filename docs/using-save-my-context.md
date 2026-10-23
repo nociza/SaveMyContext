@@ -73,6 +73,12 @@ edit detection. The expiry clock is fixed at the start of an import so interrupt
 neither restart the already-accepted prefix nor revive stale receipts. Upgrading
 an older ID-only cache may require a one-time reimport.
 
+Version 0.4.8 also isolates receipts by backend URL and rejects messages from
+superseded imports. Receipts from older versions without a provable destination
+are rechecked once; saved evidence is not deleted. Moving a chat out of a project
+triggers a detail recheck even without a timestamp change. Provider pagination
+that stalls or contradicts its advertised total stays visibly incomplete.
+
 Deleted/temporary chats, unavailable accounts, attachment binaries, and provider data
 not exposed by the authenticated endpoints cannot be recovered by pagination. Claude
 does not yet have an automatic full-history adapter. Individual captures are limited

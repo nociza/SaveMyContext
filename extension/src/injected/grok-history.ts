@@ -5,7 +5,7 @@ import type { HistorySyncControlPayload } from "./history-shared";
 import { CaptureHandoffError } from "./capture-receipts";
 import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
 import { readBoundedResponse } from "./response-observer";
-import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcurrency, historyMetadataReceipt, hasHistoryReceipt } from "./history-shared";
+import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcurrency, historyMetadataReceipt, hasHistoryReceipt, HistoryPageProgress } from "./history-shared";
 
 const GROK_HISTORY_PAGE_SIZE = 100;
 const GROK_HISTORY_DETAIL_CONCURRENCY = 4;
@@ -75,7 +75,7 @@ function normalizeGrokConversationId(value: unknown): string | null {
   }
 
   const trimmed = value.trim();
-  return trimmed || null;
+  return /^[a-zA-Z0-9_-]{1,255}$/.test(trimmed) ? trimmed : null;
 }
 
 function parseGrokConversationEntry(value: unknown): GrokConversationEntry | null {
@@ -205,6 +205,7 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{
 
 async function* listGrokConversationEntries(): AsyncGenerator<GrokConversationEntry[]> {
   const seenIds = new Set<string>();
+  const progress = new HistoryPageProgress();
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
 
@@ -237,6 +238,12 @@ async function* listGrokConversationEntries(): AsyncGenerator<GrokConversationEn
     const pageEntries = Array.isArray(record?.conversations)
       ? record.conversations.map(parseGrokConversationEntry).filter((entry): entry is GrokConversationEntry => Boolean(entry))
       : [];
+    if (pageEntries.length !== record.conversations.length) {
+      throw createProviderDriftError("grok", "Grok history contains an invalid conversation identity; sync remains incomplete.");
+    }
+    if (record.nextPageToken != null && typeof record.nextPageToken !== "string") {
+      throw createProviderDriftError("grok", "Grok history cursor is invalid; sync remains incomplete.");
+    }
     const entries: GrokConversationEntry[] = [];
     for (const entry of pageEntries) {
       if (seenIds.has(entry.conversationId)) {
@@ -249,6 +256,7 @@ async function* listGrokConversationEntries(): AsyncGenerator<GrokConversationEn
 
     const nextPageToken =
       typeof record?.nextPageToken === "string" && record.nextPageToken.trim() ? record.nextPageToken.trim() : undefined;
+    progress.observe(entries.length, Boolean(nextPageToken));
     if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Grok pagination repeated a cursor; sync remains incomplete.");
     if (!nextPageToken) {
       break;
@@ -496,6 +504,7 @@ export async function runGrokHistorySync(
 
       await runWithConcurrency(pendingEntries, GROK_HISTORY_DETAIL_CONCURRENCY, async (entry) => {
         try {
+          const capturedAt = new Date().toISOString();
           const capture = await fetchGrokConversationCapture(entry);
           await hooks.postCapture({
             providerHint: "grok",
@@ -506,7 +515,7 @@ export async function runGrokHistorySync(
             requestId: `history-grok-${entry.conversationId}-${Date.now()}`,
             method: "GET",
             url: capture.url,
-            capturedAt: new Date().toISOString(),
+            capturedAt,
             requestBody: capture.requestBody,
             response: capture.response
           });

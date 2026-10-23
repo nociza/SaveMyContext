@@ -1,4 +1,5 @@
 import { SyncStateStore } from "./sync-state-store";
+import { syncStateAtDestination } from "./sync-scope";
 const sessionStates = new SyncStateStore();
 import {
   DEFAULT_PAGE_SURFACE_SCOPE,
@@ -275,11 +276,12 @@ export async function getInstallationId(): Promise<string> {
   return next;
 }
 
-export const getSessionSyncState = (key: string) => sessionStates.get(key);
+export const getSessionSyncState = async (key: string, destination: string) => syncStateAtDestination(await sessionStates.get(key), destination);
 export const getAllSessionSyncStates = () => sessionStates.all();
-export const saveSessionSyncState = (key: string, state: SessionSyncState) => sessionStates.set(key, state);
+export const saveSessionSyncState = (key: string, state: SessionSyncState, destination: string) => sessionStates.set(key, { ...state, destination });
 /** Provider enumeration intentionally omits per-message fingerprints and IDs. */
-export const getProviderSessionSyncStates = (provider: ProviderName) => sessionStates.all(provider);
+export const getProviderSessionSyncStates = async (provider: ProviderName, destination: string) =>
+  Object.fromEntries(Object.entries(await sessionStates.all(provider)).filter(([, state]) => state.destination === destination));
 
 export async function getStatus(): Promise<SyncStatus> {
   const stored = await chrome.storage.local.get(STATUS_KEY);

@@ -2,6 +2,16 @@ import type { ProviderName } from "../shared/types";
 
 export type { HistorySyncControlPayload } from "../shared/types";
 
+/** A changing cursor is not proof of progress. Bound empty/repeated pages
+ * without putting a ceiling on the number of distinct conversations. */
+export class HistoryPageProgress {
+  private stalled = 0;
+  observe(newItems: number, hasNext: boolean): void {
+    this.stalled = newItems || !hasNext ? 0 : this.stalled + 1;
+    if (this.stalled >= 3) throw new Error("History pagination made no progress; sync remains incomplete.");
+  }
+}
+
 /** Hash one bounded list entry, including provider revision fields we do not
  * interpret. Receipts are only committed after durable backend delivery. */
 export async function historyMetadataReceipt(provider: ProviderName, id: string, metadata: unknown): Promise<Record<string, string>> {

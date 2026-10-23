@@ -10,8 +10,8 @@ import type {
   ProviderDriftAlert,
   ProviderName
 } from "../shared/types";
-import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
-import { chatGPTHistoryPages, type HistoryPage } from "./chatgpt-history";
+import { chatGPTReader, discoverChatGPTProjects, previouslyProjectScoped } from "./chatgpt-projects";
+import { assertChatGPTHistoryIdentity, chatGPTHistoryPages, type HistoryPage } from "./chatgpt-history";
 import { CaptureHandoffError, CaptureReceipts } from "./capture-receipts";
 import { HistoryTransportError } from "./history-errors";
 import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
@@ -274,6 +274,7 @@ function patchFetch(): void {
 
     const url = new URL(candidate, location.href).href;
     const pageUrl = location.href;
+    const capturedAt = new Date().toISOString();
     const requestBodyPromise = readFetchRequestBody(input, init).catch(() => undefined);
     const responsePromise = nativeFetch(input, init);
     void responsePromise.then(response => {
@@ -285,7 +286,7 @@ function patchFetch(): void {
           providerHint: providerHintFromUrl(url), pageUrl,
           requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           method: init?.method ?? (input instanceof Request ? input.method : "GET"),
-          url, capturedAt: new Date().toISOString(), requestBody,
+          url, capturedAt, requestBody,
           response: { status: response.status, ok: response.ok,
             contentType: response.headers.get("content-type") ?? undefined, text }
         });
@@ -321,6 +322,7 @@ function patchXHR(): void {
     const pageUrl = location.href;
 
     if (captureEnabled && url && shouldCapture(url)) {
+      const capturedAt = new Date().toISOString();
       const requestBodyPromise = serializeBody(body);
       this.addEventListener(
         "loadend",
@@ -337,7 +339,7 @@ function patchXHR(): void {
               requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
               method,
               url,
-              capturedAt: new Date().toISOString(),
+              capturedAt,
               requestBody,
               response: {
                 status: this.status,
@@ -394,14 +396,15 @@ function hasChatGPTConversationPayload(payload: unknown): boolean {
 
 async function withHistorySyncGuard(
   provider: ProviderName,
-  runner: (runId: string) => Promise<void>
+  runner: (runId: string) => Promise<void>,
+  requestedRunId?: string
 ): Promise<void> {
   if (activeHistorySyncs.has(provider)) {
     return;
   }
 
   activeHistorySyncs.add(provider);
-  const runId = createHistorySyncRunId(provider);
+  const runId = requestedRunId ?? createHistorySyncRunId(provider);
   try {
     await runner(runId);
   } finally {
@@ -444,6 +447,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
       const read = chatGPTReader(authorizedHistoryFetch, headers);
       const accountScope = asRecord(sessionJson.user)?.id;
       const account = typeof accountScope === "string" ? accountScope : undefined;
+      const previousProjects = previouslyProjectScoped(control?.historyFingerprints ?? {}, account);
       const refreshSessionIds = normalizeHistorySessionIds("chatgpt", control?.refreshSessionIds);
       let projectFailure: unknown;
       const projectChats = await discoverChatGPTProjects(read, typeof accountScope === "string" ? accountScope : undefined).catch((error) => {
@@ -489,6 +493,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
         for (const id of ordinary.items.keys()) {
           const item = projectChats.get(id);
           if (item && (refreshSessionIds.has(id) || !account || !item.fingerprint || control?.historyFingerprints?.[item.key] !== item.fingerprint)) pending.add(id);
+          if (!projectFailure && !item && previousProjects.has(id)) pending.add(id);
         }
         const pendingSessionIds = [...pending];
         totalCount += ordinary.items.size;
@@ -512,6 +517,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
                 `conversationId=${conversationId}`
               );
             }
+            assertChatGPTHistoryIdentity(detailResult.json, conversationId);
 
             // Keep exact provider text, not a second parsed tree throughout the
             // bridge, runtime messaging, durable outbox and backend upload.
@@ -520,6 +526,8 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
             await postCaptureDurably({
               historyFingerprints: Object.fromEntries([ordinary.items.get(conversationId), projectChats.get(conversationId)]
                 .filter(item => item?.fingerprint).map(item => [item!.key, item!.fingerprint])),
+              // Absence from the index triggers a recheck, not an inferred
+              // removal. The detail's explicit gizmo_id:null clears membership.
               project: projectChats.get(conversationId)?.project,
               historyItemKey: projectChats.get(conversationId)?.key ?? ordinary.items.get(conversationId)?.key,
               historyFingerprint: projectChats.get(conversationId)?.fingerprint ?? ordinary.items.get(conversationId)?.fingerprint,
@@ -530,7 +538,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
               requestId: `history-chatgpt-${conversationId}-${Date.now()}`,
               method: "GET",
               url: detailUrl.toString(),
-              capturedAt: new Date().toISOString(),
+              capturedAt: detailResult.capturedAt,
               response: {
                 status: detailResult.response.status,
                 ok: detailResult.response.ok,
@@ -596,7 +604,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
           : null
       });
     }
-  });
+  }, control?.runId);
 }
 
 async function runManagedGeminiHistorySync(control?: HistorySyncControlPayload): Promise<void> {
@@ -606,7 +614,7 @@ async function runManagedGeminiHistorySync(control?: HistorySyncControlPayload):
       postCapture: postCaptureDurably,
       postStatus: postHistorySyncStatus
     });
-  });
+  }, control?.runId);
 }
 
 async function runManagedGrokHistorySync(control?: HistorySyncControlPayload): Promise<void> {
@@ -616,7 +624,7 @@ async function runManagedGrokHistorySync(control?: HistorySyncControlPayload): P
       postCapture: postCaptureDurably,
       postStatus: postHistorySyncStatus
     });
-  });
+  }, control?.runId);
 }
 
 async function runHistorySync(control?: HistorySyncControlPayload): Promise<void> {

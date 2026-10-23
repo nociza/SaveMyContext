@@ -41,6 +41,45 @@ Automatic provider support remains ChatGPT, Gemini, and Grok. This release does 
 add a Claude adapter, enable capture consent, enable external model processing, or
 change server/NAS backup configuration.
 
+## Adversarial lifecycle audit (0.4.8)
+
+The audit tests state transitions and invariants, not just successful imports.
+Short-page truncation, false completion on an empty intermediate page, and late
+response timestamping were reproduced as failing regressions before their fixes.
+Provider traffic in these tests is synthetic; actual IndexedDB, the extension
+bridge, disposable SQLite APIs, and browser workers are exercised where noted.
+
+| Failure/transition | Required behavior and regression coverage |
+| --- | --- |
+| Server caps a requested 100-item page to 25 | Follow actual returned offsets to the advertised total; unit fixture imports all 125 |
+| Empty intermediate page or invalid total | Report incomplete, never a successful truncated import |
+| Cursors change without new chats | Stop after three non-progressing pages; Grok browser fixtures cover empty loops and malformed entries/cursors |
+| Response belongs to another conversation | Reject its checkpoint, continue other chats; browser test imports 249/250 with exactly one retryable failure |
+| Project → no project, unchanged timestamp | Recheck detail despite unchanged ordinary metadata; only explicit detail evidence clears membership; real extension/API test |
+| Delayed response arrives after a newer response | Timestamp request start, not response completion; controlled-clock browser test |
+| Duplicate/out-of-order acknowledgements | Never rewind local state; deterministic test shuffles 4,000 deliveries across 100 seeds |
+| Backend A → B, or unknown legacy destination | Do not reuse another database's receipts; scoped-state tests and actual background/IndexedDB regression |
+| Old run finishes after a replacement | Ignore obsolete status/capture messages; serialized provider transitions and browser stale-status regression |
+| Gemini has no message timestamp | Preserve unknown time instead of inventing a new one on each import; deterministic repeated-import test |
+| Offline/full queue, crash/restart, corrupt capture, pause, destination change | Existing backlog, queue-capacity, migration, consent, and policy tests remain required |
+| Rename, archive/unarchive, live continuation, partial snapshots | Existing extension/SQLite and workspace tests remain required; no inferred deletion or extra AI job for unchanged content |
+
+Receipts without a destination are deliberately untrusted after upgrading. This
+can cause a one-time reimport, not deletion of captures. Durable queue entries
+remain bound to their original backend. Metadata/body buffers and worker counts
+remain bounded; reconciliation still retains IDs/receipts proportional to history.
+
+Remaining boundaries: provider lists are not transactional snapshots. Concurrent
+reordering can require another reconciliation pass; a scan is not proof of a frozen
+account-wide snapshot. Undocumented APIs may drift. Unchanged provider metadata
+can delay detection until the safety recheck. Request-start timestamps prevent
+local response-order inversion, not clock skew between devices. Replacing the
+database behind the **same URL** is not detected by destination scoping. Provider
+account slots (notably Gemini's `/u/N`) are not a stable identity guarantee after
+account reordering. These are not covered by a claim of exhaustive live-account
+compatibility. Existing Claude, oversized-transcript, browser-availability and AI
+budget limitations still apply.
+
 ## Historical conversation reconciliation (0.4.7)
 
 - All three history adapters traverse paginated metadata instead of stopping at
