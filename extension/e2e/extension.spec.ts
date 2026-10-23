@@ -306,6 +306,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
       let ordinaryItems: { id: string; update_time: number }[] = [];
       let providerRevision = 1;
+      let currentProjectId = "g-p-e2e";
       let providerUnavailable = false;
       let detailReads = 0;
       let assistantAnswer = "FastAPI uses uvloop to run the event loop with high-performance async I/O.";
@@ -313,7 +314,7 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       await context.route("**/backend-api/gizmos/**", async (route) => {
         const sidebar = route.request().url().includes("/sidebar");
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({
-          items: sidebar ? [{ gizmo: { gizmo: { id: "g-p-e2e", display: { name: "E2E Project" } } } }]
+          items: sidebar ? [{ gizmo: { gizmo: { id: currentProjectId, display: { name: "E2E Project" } } } }]
             : [{ id: sessionId, update_time: providerRevision }], cursor: null
         }) });
       });
@@ -492,6 +493,15 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       expect(detailReads).toBe(acknowledgedReads + 1);
       const edited = await (await request.get(`${backendBaseUrl}/api/v1/sessions/${matchedSession?.id}`)).json();
       expect(edited.messages.map((message: { content: string }) => message.content)).toContain(assistantAnswer);
+
+      // Membership can change without a transcript timestamp changing. Old
+      // project receipts must not suppress a move back into a previous project.
+      const readsBeforeMoves = detailReads;
+      currentProjectId = "g-p-moved";
+      await importAgain();
+      currentProjectId = "g-p-e2e";
+      await importAgain();
+      expect(detailReads).toBe(readsBeforeMoves + 2);
 
       const popup = await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });

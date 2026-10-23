@@ -1963,7 +1963,9 @@ async function deliverCaptureOutbox(): Promise<void> {
           projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
           historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
           historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
-          historyFingerprints: { ...syncState.historyFingerprints, ...payload.raw_capture.historyFingerprints },
+          // A full history receipt describes current memberships. Retaining old
+          // project keys could falsely skip a chat moved back into an old project.
+          historyFingerprints: payload.raw_capture.historyFingerprints ?? syncState.historyFingerprints,
           messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
           lastSyncedAt: new Date().toISOString(),
           lastFullHistorySyncedAt: payload.raw_capture.historySyncRunId && payload.sync_mode === "full_snapshot"
