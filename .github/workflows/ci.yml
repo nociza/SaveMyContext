@@ -155,7 +155,8 @@ jobs:
   extension-e2e:
     name: Extension end-to-end
     needs: [backend, extension, frontend]
-    runs-on: ubuntu-latest
+    # Locked Playwright 1.59 does not support the ubuntu-latest 26.04 migration.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
