@@ -3,9 +3,11 @@ import type { CapturedBody, CapturedNetworkEvent, HistorySyncUpdate, ProviderDri
 import { decodeGeminiConversationBlocks, formatGeminiDecodeDiagnostics } from "./gemini-decoder";
 import { buildProviderDriftAlert, createProviderDriftError, isProviderDriftError } from "./drift";
 import type { HistorySyncControlPayload } from "./history-shared";
+import { CaptureHandoffError } from "./capture-receipts";
+import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
+import { MAX_CAPTURE_BYTES, readBoundedResponse } from "./response-observer";
 import {
   countRetryableHistoryFailures,
-  dedupeIds,
   normalizeHistorySessionIds,
   runWithConcurrency
 } from "./history-shared";
@@ -15,7 +17,7 @@ const GEMINI_LIST_RPC_ID = "MaZiqc";
 const GEMINI_READ_RPC_ID = "hNvQHb";
 const GEMINI_HISTORY_LIST_PAGE_SIZE = 200;
 const GEMINI_HISTORY_READ_PAGE_SIZE = 1_000;
-const GEMINI_HISTORY_READ_CONCURRENCY = 4;
+const GEMINI_HISTORY_READ_CONCURRENCY = 2;
 const GEMINI_CONTEXT_WAIT_TIMEOUT_MS = 10_000;
 const GEMINI_CONTEXT_WAIT_POLL_MS = 200;
 const GEMINI_ACCOUNT_DISCOVERY_MAX_INDEX = 10;
@@ -54,22 +56,6 @@ interface GeminiHistoryHooks {
   postCapture: (capture: Omit<CapturedNetworkEvent, "source">) => void | Promise<void>;
   postStatus: (update: HistorySyncUpdate) => void;
 }
-
-type GeminiConversationSyncOutcome =
-  | {
-      status: "captured";
-      entry: GeminiConversationEntry;
-    }
-  | {
-      status: "provider_drift";
-      entry: GeminiConversationEntry;
-      alert: ProviderDriftAlert;
-    }
-  | {
-      status: "failed";
-      entry: GeminiConversationEntry;
-      message: string;
-    };
 
 type JsonRecord = Record<string, unknown>;
 
@@ -643,10 +629,11 @@ async function executeGeminiBatchCall(
     body: requestBody
   });
 
-  const text = await response.text();
   if (!response.ok) {
-    throw new Error(`Gemini ${rpcId} request failed with ${response.status}.`);
+    void response.body?.cancel().catch(() => undefined);
+    throwHistoryHttpError(response);
   }
+  const text = await readBoundedResponse(response, undefined, 30_000);
 
   return {
     url: url.toString(),
@@ -727,13 +714,12 @@ function buildGeminiReadArgs(conversationId: string, pageToken: string | undefin
   return [toGeminiApiConversationId(conversationId), GEMINI_HISTORY_READ_PAGE_SIZE, pageToken ?? null, 1, [1], [4], null, 1];
 }
 
-async function listGeminiConversationEntries(
+async function* listGeminiConversationEntries(
   context: GeminiAccountContext,
   pinned: boolean,
   stopConversationId?: string
-): Promise<GeminiConversationEntry[]> {
+): AsyncGenerator<GeminiConversationEntry[]> {
   const sourcePath = buildGeminiAppSourcePath(context.basePrefix);
-  const entries = new Map<string, GeminiConversationEntry>();
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
 
@@ -747,6 +733,7 @@ async function listGeminiConversationEntries(
       );
     }
 
+    const entries = new Map<string, GeminiConversationEntry>();
     for (const entry of extractGeminiConversationEntries(context, result.payloads)) {
       const current = entries.get(entry.scopedSessionId);
       entries.set(entry.scopedSessionId, {
@@ -755,13 +742,15 @@ async function listGeminiConversationEntries(
         title: entry.title || current?.title
       });
     }
+    yield [...entries.values()];
 
     if (stopConversationId && entries.has(stopConversationId)) {
       break;
     }
 
     const nextPageToken = readGeminiNextPageToken(result.payloads);
-    if (!nextPageToken || seenTokens.has(nextPageToken)) {
+    if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Gemini pagination repeated a cursor; sync remains incomplete.");
+    if (!nextPageToken) {
       break;
     }
 
@@ -769,7 +758,6 @@ async function listGeminiConversationEntries(
     pageToken = nextPageToken;
   }
 
-  return [...entries.values()];
 }
 
 function pickGeminiWatermarkConversationId(entries: GeminiConversationEntry[]): string | undefined {
@@ -780,12 +768,12 @@ function pickGeminiWatermarkConversationId(entries: GeminiConversationEntry[]): 
   );
 }
 
-async function collectGeminiHistoryCandidates(
+async function* collectGeminiHistoryCandidates(
   contexts: GeminiAccountContext[],
   previousTopSessionIds: Set<string>,
   syncedSessionIds: Set<string>,
   refreshSessionIds: Set<string>
-): Promise<{
+): AsyncGenerator<{
   topSessionIds: string[];
   pendingEntries: GeminiConversationEntry[];
   totalCount: number;
@@ -800,49 +788,34 @@ async function collectGeminiHistoryCandidates(
   }
 
   const topSessionIds: string[] = [];
-  const pendingEntries: GeminiConversationEntry[] = [];
-  let totalCount = 0;
-  let skippedCount = 0;
 
   for (const context of contexts) {
     const previousTopSessionId = previousTopByAccount.get(context.accountKey);
-    const pinnedEntries = await listGeminiConversationEntries(context, true);
-    const unpinnedEntries = await listGeminiConversationEntries(context, false, previousTopSessionId);
-    const combinedEntries = [...pinnedEntries, ...unpinnedEntries];
-    const orderedEntries = dedupeIds(combinedEntries.map((entry) => entry.scopedSessionId)).map((scopedSessionId) => {
-      return combinedEntries.find((entry) => entry.scopedSessionId === scopedSessionId)!;
-    });
-
-    const topSessionId = pickGeminiWatermarkConversationId(orderedEntries);
-    if (topSessionId) {
-      topSessionIds.push(topSessionId);
-    }
-
-    if (previousTopSessionId) {
-      const stopIndex = orderedEntries.findIndex((entry) => entry.scopedSessionId === previousTopSessionId);
-      const nextPendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
-      pendingEntries.push(...nextPendingEntries);
-      totalCount += nextPendingEntries.length;
-      continue;
-    }
-
-    totalCount += orderedEntries.length;
-    for (const entry of orderedEntries) {
-      if (refreshSessionIds.has(entry.scopedSessionId) || !syncedSessionIds.has(entry.scopedSessionId)) {
-        pendingEntries.push(entry);
-        continue;
+    const seen = new Set<string>();
+    let fallbackTop: string | undefined;
+    let regularTop: string | undefined;
+    let reachedWatermark = false;
+    for (const pinned of [true, false]) {
+      for await (const entries of listGeminiConversationEntries(context, pinned, pinned ? undefined : previousTopSessionId)) {
+        fallbackTop ??= pickGeminiWatermarkConversationId(entries);
+        if (!pinned) regularTop ??= pickGeminiWatermarkConversationId(entries);
+        const top = regularTop ?? fallbackTop;
+        const tops = top ? [...topSessionIds, top] : [...topSessionIds];
+        const orderedEntries = entries.filter(entry => {
+          if (seen.has(entry.scopedSessionId)) return false;
+          seen.add(entry.scopedSessionId);
+          if (entry.scopedSessionId === previousTopSessionId) reachedWatermark = true;
+          return !reachedWatermark;
+        });
+        const pendingEntries = orderedEntries.filter(entry => previousTopSessionId ||
+          refreshSessionIds.has(entry.scopedSessionId) || !syncedSessionIds.has(entry.scopedSessionId));
+        yield { topSessionIds: tops, pendingEntries, totalCount: orderedEntries.length,
+          skippedCount: orderedEntries.length - pendingEntries.length };
       }
-
-      skippedCount += 1;
     }
+    const top = regularTop ?? fallbackTop;
+    if (top) topSessionIds.push(top);
   }
-
-  return {
-    topSessionIds,
-    pendingEntries,
-    totalCount,
-    skippedCount
-  };
 }
 
 function offsetIsoTimestamp(value: string, milliseconds: number): string {
@@ -921,7 +894,8 @@ async function fetchGeminiConversationCapture(
   const conversationId = entry.conversationId;
   const sourcePath = `${context.basePrefix}/app/${conversationId}`;
   const payloads: unknown[] = [];
-  const requestBodies: string[] = [];
+  let pageCount = 0;
+  let evidenceBytes = 0;
   let pageToken: string | undefined;
   let lastUrl = "";
 
@@ -940,12 +914,15 @@ async function fetchGeminiConversationCapture(
         `rpc=${GEMINI_READ_RPC_ID} conversationId=${conversationId} pageToken=${pageToken ?? "none"}`
       );
     }
+    evidenceBytes += new TextEncoder().encode(result.text).byteLength;
+    if (evidenceBytes > MAX_CAPTURE_BYTES) throw new Error("Gemini conversation exceeds the safe capture size; transcript was not truncated.");
     payloads.push(...result.payloads);
-    requestBodies.push(result.requestBody);
+    pageCount += 1;
     lastUrl = result.url;
 
     const nextPageToken = readGeminiNextPageToken(result.payloads);
-    if (!nextPageToken || seenTokens.has(nextPageToken)) {
+    if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Gemini conversation pagination repeated a cursor; transcript was not truncated.");
+    if (!nextPageToken) {
       break;
     }
 
@@ -978,7 +955,7 @@ async function fetchGeminiConversationCapture(
     rpcId: GEMINI_READ_RPC_ID,
     conversationId,
     externalSessionId: entry.scopedSessionId,
-    pageCount: requestBodies.length
+    pageCount
   };
 
   return {
@@ -1050,71 +1027,63 @@ export async function runGeminiHistorySync(
       control?.refreshSessionIds,
       normalizeGeminiExternalSessionId
     );
-    const { topSessionIds, pendingEntries, totalCount, skippedCount } = await collectGeminiHistoryCandidates(
-      accountContexts,
-      previousTopSessionIds,
-      syncedSessionIds,
-      refreshSessionIds
-    );
-    const topSessionId = topSessionIds[0];
+    let topSessionIds: string[] = [];
+    let topSessionId: string | undefined;
+    let totalCount = 0;
+    let skippedCount = 0;
+    let processedCount = 0;
+    let attemptedConversationCount = 0;
+    let syncedConversationCount = 0;
+    let driftFailureCount = 0;
+    let firstDriftFailure: ProviderDriftAlert | null = null;
+    for await (const batch of collectGeminiHistoryCandidates(accountContexts, previousTopSessionIds, syncedSessionIds, refreshSessionIds)) {
+      const { pendingEntries } = batch;
+      topSessionIds = batch.topSessionIds;
+      topSessionId = topSessionIds[0];
+      totalCount += batch.totalCount;
+      skippedCount += batch.skippedCount;
+      processedCount += batch.skippedCount;
+      attemptedConversationCount += pendingEntries.length;
+      postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
 
-    let processedCount = skippedCount;
-    const outcomes: GeminiConversationSyncOutcome[] = [];
-    postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
+      await runWithConcurrency(pendingEntries, GEMINI_HISTORY_READ_CONCURRENCY, async (entry) => {
+        try {
+          const accountContext = accountContexts.find((context) => context.accountKey === entry.accountKey);
+          if (!accountContext) {
+            throw new Error(`Missing Gemini account context for ${entry.accountKey}.`);
+          }
 
-    await runWithConcurrency(pendingEntries, GEMINI_HISTORY_READ_CONCURRENCY, async (entry) => {
-      try {
-        const accountContext = accountContexts.find((context) => context.accountKey === entry.accountKey);
-        if (!accountContext) {
-          throw new Error(`Missing Gemini account context for ${entry.accountKey}.`);
-        }
-
-        const capture = await fetchGeminiConversationCapture(accountContext, entry);
-        await hooks.postCapture({
-          providerHint: "gemini",
-          captureMode: "full_snapshot",
-          historySyncRunId: hooks.runId,
-          pageUrl: buildGeminiHistoryPageUrl(entry.conversationId, {
-            basePrefix: entry.basePrefix,
-            origin: location.origin
-          }),
-          requestId: `history-gemini-${entry.accountKey}-${entry.conversationId}-${Date.now()}`,
-          method: "POST",
-          url: capture.url,
-          capturedAt: new Date().toISOString(),
-          requestBody: capture.requestBody,
-          response: capture.response
-        });
-        outcomes.push({ status: "captured", entry });
-      } catch (error) {
-        if (isProviderDriftError(error)) {
-          outcomes.push({
-            status: "provider_drift",
-            entry,
-            alert: buildProviderDriftAlert("gemini", location.href, error.message, error.evidence)
+          const capture = await fetchGeminiConversationCapture(accountContext, entry);
+          await hooks.postCapture({
+            providerHint: "gemini",
+            captureMode: "full_snapshot",
+            historySyncRunId: hooks.runId,
+            pageUrl: buildGeminiHistoryPageUrl(entry.conversationId, {
+              basePrefix: entry.basePrefix,
+              origin: location.origin
+            }),
+            requestId: `history-gemini-${entry.accountKey}-${entry.conversationId}-${Date.now()}`,
+            method: "POST",
+            url: capture.url,
+            capturedAt: new Date().toISOString(),
+            requestBody: capture.requestBody,
+            response: capture.response
           });
-        } else {
-          outcomes.push({
-            status: "failed",
-            entry,
-            message: error instanceof Error ? error.message : String(error)
-          });
+          syncedConversationCount += 1;
+        } catch (error) {
+          if (error instanceof CaptureHandoffError || error instanceof HistoryTransportError) throw error;
+          if (isProviderDriftError(error)) {
+            driftFailureCount += 1;
+            firstDriftFailure ??= buildProviderDriftAlert("gemini", location.href, error.message, error.evidence);
+          }
+          // Skip malformed individual conversations without aborting the whole run.
+        } finally {
+          processedCount += 1;
+          postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
         }
-        // Skip malformed individual conversations without aborting the whole run.
-      } finally {
-        processedCount += 1;
-        postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId, topSessionIds);
-      }
-    });
-
-    const attemptedConversationCount = pendingEntries.length;
-    const syncedConversationCount = outcomes.filter((outcome) => outcome.status === "captured").length;
+      });
+    }
     const retryableFailureCount = countRetryableHistoryFailures(attemptedConversationCount, syncedConversationCount);
-    const driftFailures = outcomes.filter((outcome): outcome is Extract<GeminiConversationSyncOutcome, { status: "provider_drift" }> => {
-      return outcome.status === "provider_drift";
-    });
-    const driftFailureCount = driftFailures.length;
-    const firstDriftFailure = driftFailures[0]?.alert ?? null;
     let providerDriftAlert: ProviderDriftAlert | null = null;
     if (
       firstDriftFailure &&
@@ -1151,6 +1120,7 @@ export async function runGeminiHistorySync(
       runId: hooks.runId,
       pageUrl: location.href,
       message: error instanceof Error ? error.message : String(error),
+      retryAfter: error instanceof HistoryTransportError ? error.retryAfter : undefined,
       providerDriftAlert: isProviderDriftError(error)
         ? buildProviderDriftAlert("gemini", location.href, error.message, error.evidence)
         : null

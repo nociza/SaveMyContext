@@ -38,6 +38,15 @@ export interface CaptureStore {
   remove(id: string): Promise<void>;
 }
 
+/** Backpressure must not let old destinations or policy-deferred accounts block
+ * an unrelated import. Stop at the first eligible record; never load the queue. */
+export async function hasPendingCapture(store: CaptureStore, backendUrl: string, eligible: (payload: BackendIngestPayload) => boolean): Promise<boolean> {
+  for await (const item of store.iterate(backendUrl)) {
+    if (item.backendUrl === backendUrl && eligible(item.payload)) return true;
+  }
+  return false;
+}
+
 async function captureIdentity(backendUrl: string, payload: BackendIngestPayload): Promise<{ id: string; bytes: number }> {
   const encoded = new TextEncoder().encode(JSON.stringify([backendUrl, payload]));
   const id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", encoded)),

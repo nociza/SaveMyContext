@@ -302,10 +302,11 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
 
       const conversationUrl = "https://chatgpt.com/";
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
-      const listApiUrl = "https://chatgpt.com/backend-api/conversations?offset=0&limit=100&order=updated";
+      const listApiUrl = "https://chatgpt.com/backend-api/conversations?**";
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
       let ordinaryItems: { id: string; update_time: number }[] = [];
       let providerRevision = 1;
+      let providerUnavailable = false;
       let detailReads = 0;
       let assistantAnswer = "FastAPI uses uvloop to run the event loop with high-performance async I/O.";
 
@@ -340,6 +341,10 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
 
       await context.route(detailApiUrl, async (route) => {
         detailReads++;
+        if (providerUnavailable) {
+          await route.fulfill({ status: 429, headers: { "retry-after": "3600" }, body: "Synthetic rate limit" });
+          return;
+        }
         await route.fulfill({
           status: 200,
           contentType: "application/json",
@@ -492,6 +497,20 @@ test("explicitly imports project-only ChatGPT history with automatic history dis
       await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: "domcontentloaded" });
       await expect(popup.locator("#history-sync")).toContainText("success");
       await expect(popup.locator("#last-session")).toHaveText(`chatgpt:${sessionId}`);
+      expect(await serviceWorker.evaluate(() => chrome.alarms.get("savemycontext.history-catchup.chatgpt"))).toBeUndefined();
+
+      providerUnavailable = true;
+      providerRevision = 3;
+      ordinaryItems = [{ id: sessionId, update_time: providerRevision }];
+      await page.bringToFront();
+      expect(await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }))).toMatchObject({ triggered: true });
+      await expect.poll(() => serviceWorker.evaluate(async () => {
+        const states = (await chrome.storage.local.get("savemycontext.history-sync"))["savemycontext.history-sync"] as Record<string, { catchupPending?: boolean; retryAfter?: string }>;
+        const stored = states.chatgpt;
+        return { pending: stored.catchupPending, coolingDown: Date.parse(stored.retryAfter ?? "") > Date.now() + 3_500_000 };
+      })).toEqual({ pending: true, coolingDown: true });
+      expect(await serviceWorker.evaluate(() => chrome.alarms.get("savemycontext.history-catchup.chatgpt"))).toMatchObject({ periodInMinutes: 15 });
+      expect(await optionsPage.evaluate(() => chrome.runtime.sendMessage({ type: "IMPORT_ACTIVE_HISTORY" }))).toMatchObject({ triggered: false, reason: "provider-cooldown" });
     } finally {
       await context.close();
     }
@@ -572,7 +591,7 @@ test("skips indexing when trigger-word mode is enabled and the opening request d
 
       const conversationUrl = "https://chatgpt.com/";
       const sessionApiUrl = "https://chatgpt.com/api/auth/session";
-      const listApiUrl = "https://chatgpt.com/backend-api/conversations?offset=0&limit=100&order=updated";
+      const listApiUrl = "https://chatgpt.com/backend-api/conversations?**";
       const detailApiUrl = `https://chatgpt.com/backend-api/conversation/${sessionId}`;
 
       await context.route(sessionApiUrl, async (route) => {
@@ -748,20 +767,26 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate((skippedId) => {
+      await serviceWorker.evaluate(({ skippedId, partialId }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
+            [`gemini:u0__${partialId}`]: {
+              seenMessageIds: ["recent-live-message"],
+              lastSyncedAt: "2026-04-01T11:50:00.000Z"
+            },
             [`gemini:u0__${skippedId}`]: {
               seenMessageIds: ["existing-message"],
+              lastFullHistorySyncedAt: "2026-04-01T11:50:00.000Z",
               lastSyncedAt: "2026-04-01T11:50:00.000Z"
             },
             [`gemini:u1__gemini-e2e-u1-skipped-555555555`]: {
               seenMessageIds: ["existing-message-u1"],
+              lastFullHistorySyncedAt: "2026-04-01T11:51:00.000Z",
               lastSyncedAt: "2026-04-01T11:51:00.000Z"
             }
           }
         });
-      }, skippedSessionId);
+      }, { skippedId: skippedSessionId, partialId: sessionId });
 
       await context.route(/^https:\/\/gemini\.google\.com(?:\/u\/\d+)?\/app(?:\/.*)?$/, async (route) => {
         const pageUrl = new URL(route.request().url());
@@ -1111,8 +1136,8 @@ test("auto-syncs Gemini history on provider visit", async ({ request }, testInfo
           historySyncInProgress: false,
           reran: true,
           historySyncLastResult: "success",
-          historySyncProcessedCount: 0,
-          historySyncTotalCount: 0,
+          historySyncProcessedCount: 6, // Explicit import audits all metadata, skips all bodies.
+          historySyncTotalCount: 6,
           historySyncLastConversationCount: 0
         });
 
@@ -1366,16 +1391,21 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
       await expect(optionsPage.locator("#save-status")).toHaveText("Settings saved.");
       await enableCapture(optionsPage);
 
-      await serviceWorker.evaluate((skippedId) => {
+      await serviceWorker.evaluate(({ skippedId, partialId }) => {
         return chrome.storage.local.set({
           "savemycontext.sync-state": {
+            [`grok:${partialId}`]: {
+              seenMessageIds: ["recent-live-message"],
+              lastSyncedAt: "2026-04-01T11:50:00.000Z"
+            },
             [`grok:${skippedId}`]: {
               seenMessageIds: ["existing-message"],
+              lastFullHistorySyncedAt: "2026-04-01T11:50:00.000Z",
               lastSyncedAt: "2026-04-01T11:50:00.000Z"
             }
           }
         });
-      }, skippedSessionId);
+      }, { skippedId: skippedSessionId, partialId: sessionId });
 
       await context.route(/^https:\/\/grok\.com(?:\/c\/.*)?$/, async (route) => {
         await route.fulfill({
@@ -1682,8 +1712,8 @@ test("auto-syncs Grok history on provider visit", async ({ request }, testInfo) 
           historySyncInProgress: false,
           reran: true,
           historySyncLastResult: "success",
-          historySyncProcessedCount: 0,
-          historySyncTotalCount: 0,
+          historySyncProcessedCount: 4,
+          historySyncTotalCount: 4,
           historySyncLastConversationCount: 0
         });
 

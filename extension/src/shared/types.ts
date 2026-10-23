@@ -70,6 +70,8 @@ export interface NormalizedSessionSnapshot {
 }
 
 export interface SessionSyncState {
+  /** A live/incremental capture is not proof that older turns were imported. */
+  lastFullHistorySyncedAt?: string;
   historyFingerprints?: Record<string, string>;
   projectFingerprint?: string;
   historyItemKey?: string;
@@ -92,6 +94,10 @@ export interface ProviderDriftAlert {
 }
 
 export interface ProviderHistorySyncState {
+  /** An authorized import has not yet completed; resume using durable receipts. */
+  catchupPending?: boolean;
+  lastProgressAt?: string;
+  retryAfter?: string;
   lastSuccessfulAt?: string;
   inProgress?: boolean;
   lastStartedAt?: string;
@@ -888,6 +894,7 @@ export interface HistorySyncControlPayload {
 }
 
 export interface HistorySyncUpdate {
+  retryAfter?: string;
   provider: ProviderName;
   phase: "started" | "completed" | "failed" | "unsupported";
   runId?: string;

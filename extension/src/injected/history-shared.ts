@@ -1,12 +1,6 @@
 import type { ProviderName } from "../shared/types";
 
-export interface HistorySyncControlPayload {
-  type: "START_HISTORY_SYNC";
-  syncedSessionIds?: string[];
-  previousTopSessionId?: string;
-  previousTopSessionIds?: string[];
-  refreshSessionIds?: string[];
-}
+export type { HistorySyncControlPayload } from "../shared/types";
 
 export function normalizeHistorySessionIds(
   provider: ProviderName,
@@ -58,10 +52,12 @@ export async function runWithConcurrency<T>(
 ): Promise<void> {
   const workerCount = Math.max(1, Math.min(concurrency, items.length || 1));
   let nextIndex = 0;
+  let failed = false;
+  let failure: unknown;
 
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
-      while (true) {
+      while (!failed) {
         const currentIndex = nextIndex;
         nextIndex += 1;
 
@@ -69,10 +65,18 @@ export async function runWithConcurrency<T>(
           return;
         }
 
-        await worker(items[currentIndex], currentIndex);
+        try {
+          await worker(items[currentIndex], currentIndex);
+        } catch (error) {
+          // Stop new work immediately, but join active workers before returning.
+          // Otherwise a restarted import can race a rejected run still capturing.
+          if (!failed) failure = error;
+          failed = true;
+        }
       }
     })
   );
+  if (failed) throw failure;
 }
 
 export function countRetryableHistoryFailures(attemptedCount: number, syncedCount: number): number {

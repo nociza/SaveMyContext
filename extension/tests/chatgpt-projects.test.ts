@@ -56,6 +56,16 @@ describe("ChatGPT Projects", () => {
       ? { items: [gizmo(), gizmo("g-p-def")], cursor: null }
       : { items: [{ id: "same" }], cursor: null } }))).rejects.toThrow(/membership changed/);
   });
+  it("imports more than 100 pages and 10,000 project conversations", async () => {
+    const result = await discoverChatGPTProjects(async path => {
+      const url = new URL(path);
+      if (url.pathname.endsWith("sidebar")) return { json: { items: [gizmo()], cursor: null } };
+      const offset = Number(url.searchParams.get("cursor"));
+      return { json: { items: Array.from({ length: 100 }, (_, n) => ({ id: `c${offset + n}`, update_time: 1 })), cursor: offset < 10_000 ? offset + 100 : null } };
+    });
+    expect(result.size).toBe(10_100);
+    expect(result.has("c10099")).toBe(true);
+  });
   it("fingerprints changes in project context or chat update time", async () => {
     const discover = (name: string, time: number | undefined) => discoverChatGPTProjects(async (path) => ({ json: path.includes("sidebar")
       ? { items: [gizmo("g-p-abc", name)], cursor: null }
@@ -122,6 +132,6 @@ describe("bounded history transport", () => {
     expect(fetcher).not.toHaveBeenCalled();
     await expect(chatGPTReader(async () => new Response("not json"), {})("/api/test")).rejects.toThrow();
     await expect(chatGPTReader(async () => new Response("x".repeat(8 * 1024 * 1024 + 1)), {})("/api/test")).rejects.toThrow(/large/);
-    await expect(chatGPTReader(async () => new Response("busy", { status: 429, headers: { "retry-after": "3600" } }), {})("/api/test")).rejects.toThrow(/rate limit/);
+    await expect(chatGPTReader(async () => new Response("busy", { status: 429, headers: { "retry-after": "3600" } }), {})("/api/test")).rejects.toThrow(/429/);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { drainCaptures, enqueueCapture, indexingAllowsCapture, type CaptureStore, type PendingCapture } from "../src/background/outbox";
+import { drainCaptures, enqueueCapture, hasPendingCapture, indexingAllowsCapture, type CaptureStore, type PendingCapture } from "../src/background/outbox";
 import { defaultSettings } from "../src/shared/storage";
 import { observeResponse, readBoundedResponse } from "../src/injected/response-observer";
 import { flattenText, sortMessages } from "../src/providers/helpers";
@@ -26,6 +26,17 @@ const payload: BackendIngestPayload = {
 };
 
 describe("durable capture delivery", () => {
+  it("applies history backpressure only to eligible captures at the current destination", async () => {
+    const store = new MemoryStore();
+    await enqueueCapture(store, "https://old", payload);
+    expect(await hasPendingCapture(store, "https://new", () => true)).toBe(false);
+    await enqueueCapture(store, "https://new", payload);
+    expect(await hasPendingCapture(store, "https://new", () => false)).toBe(false);
+    const eligible = vi.fn(() => true);
+    expect(await hasPendingCapture(store, "https://new", eligible)).toBe(true);
+    expect(eligible).toHaveBeenCalledTimes(1);
+    expect(await store.list()).toHaveLength(2); // Checking never discards evidence.
+  });
   it("retains policy-deferred captures without blocking other eligible captures", async () => {
     const store = new MemoryStore();
     await store.put({ id: "blocked", backendUrl: "https://original", payload, bytes: 1, createdAt: 1 });

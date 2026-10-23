@@ -1,12 +1,12 @@
 import type { ProviderProject } from "../shared/types";
 import { projectId } from "../providers/chatgpt-project";
 import { readBoundedResponse } from "./response-observer";
+import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : undefined;
-const MAX_PAGES = 100;
-const MAX_ITEMS = 10_000;
+const MAX_EMPTY_PAGES = 100;
 
 export interface ProjectConversation {
   project: ProviderProject;
@@ -30,12 +30,14 @@ export function chatGPTReader(fetcher: typeof fetch, headers: HeadersInit,
       }
       void response.body?.cancel().catch(() => undefined);
       if ((response.status !== 429 && response.status < 500) || attempt === 2) {
-        throw new Error(`ChatGPT history request failed (${response.status}); sync remains retryable.`);
+        throwHistoryHttpError(response);
       }
       const retry = response.headers.get("retry-after");
-      const wait = retry && /^\d+$/.test(retry) ? Number(retry) * 1000 : 1000 * 2 ** attempt;
+      const parsedDate = Date.parse(retry ?? "");
+      const wait = retry && /^\d+$/.test(retry) ? Number(retry) * 1000
+        : Number.isFinite(parsedDate) ? Math.max(0, parsedDate - Date.now()) : 1000 * 2 ** attempt;
       // Long rate limits are surfaced rather than ignored or left running indefinitely.
-      if (wait > 30_000) throw new Error("ChatGPT rate limit: retry history sync later.");
+      if (wait > 30_000) throw new HistoryTransportError(response.status, retry);
       await sleep(wait);
     }
     throw new Error("ChatGPT history retry limit reached.");
@@ -54,20 +56,25 @@ function page(value: unknown): { items: unknown[]; cursor: string | null } {
 async function* pages(read: (path: string) => Promise<{ json: unknown }>, path: string, first?: string) {
   let cursor = first;
   const visited = new Set<string>();
-  let count = 0;
-  for (let i = 0; i < MAX_PAGES; i++) {
+  const pageDigests = new Set<string>();
+  let emptyPages = 0;
+  while (true) {
     const url = new URL(path, "https://chatgpt.com");
     if (cursor !== undefined) url.searchParams.set("cursor", cursor);
     const result = page((await read(url.toString())).json);
-    count += result.items.length;
-    if (count > MAX_ITEMS) throw new Error("ChatGPT project history item limit reached; sync incomplete.");
+    emptyPages = result.items.length ? 0 : emptyPages + 1;
+    if (emptyPages >= MAX_EMPTY_PAGES) throw new Error("ChatGPT project empty-page limit reached; sync incomplete.");
+    if (result.items.length) {
+      const digest = await fingerprint(result.items);
+      if (pageDigests.has(digest)) throw new Error("ChatGPT project pagination repeated a page; sync incomplete.");
+      pageDigests.add(digest);
+    }
     yield result.items;
     if (result.cursor === null) return;
     if (visited.has(result.cursor) || result.cursor === cursor) throw new Error("ChatGPT project pagination repeated a cursor.");
     visited.add(result.cursor);
     cursor = result.cursor;
   }
-  throw new Error("ChatGPT project pagination limit reached; sync incomplete.");
 }
 
 function project(value: unknown): ProviderProject | undefined {
@@ -137,7 +144,6 @@ export async function discoverChatGPTProjects(read: (path: string) => Promise<{ 
           fingerprint: typeof item.update_time === "string" || typeof item.update_time === "number"
             ? await fingerprint([projectDigest, item.update_time]) : ""
         });
-        if (conversations.size > MAX_ITEMS) throw new Error("ChatGPT project conversation limit reached; sync incomplete.");
       }
     }
   }

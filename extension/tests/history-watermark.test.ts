@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "../src/background/history-watermark";
+import { activeHistoryWatermarks, historyResumeFingerprints, shouldCommitHistoryWatermark } from "../src/background/history-watermark";
 import type { HistorySyncUpdate } from "../src/shared/types";
 
 function update(partial: Partial<HistorySyncUpdate>): HistorySyncUpdate {
@@ -13,6 +13,14 @@ function update(partial: Partial<HistorySyncUpdate>): HistorySyncUpdate {
 }
 
 describe("history sync watermark", () => {
+  it("retains acknowledged prefixes across multi-week catch-up without trusting unacknowledged rows", () => {
+    const states = {
+      old: { seenMessageIds: [], lastSyncedAt: "2020-01-01", historyFingerprints: { old: "receipt" } },
+      pending: { seenMessageIds: [], historyFingerprints: { pending: "not-a-receipt" } }
+    };
+    expect(historyResumeFingerprints(states, true)).toEqual({ old: "receipt" });
+    expect(historyResumeFingerprints(states, false)).toEqual({});
+  });
   it("commits only clean completed runs", () => {
     expect(shouldCommitHistoryWatermark(update({ topSessionIds: ["u0__latest"] }))).toBe(true);
   });

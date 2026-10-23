@@ -50,6 +50,7 @@ import type {
   RuntimeMessage,
   SaveConnectionBundleResponse,
   SaveSettingsResponse,
+  SessionSyncState,
   SourceCapturePayload,
   SourceCaptureResponse,
   SyncStatus
@@ -66,8 +67,8 @@ import {
   validateBackendConfiguration
 } from "./backend";
 import { buildIngestPayload, mergeMessageFingerprints, mergeSeenMessageIds } from "./diff";
-import { activeHistoryWatermarks, shouldCommitHistoryWatermark } from "./history-watermark";
-import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
+import { activeHistoryWatermarks, historyResumeFingerprints, shouldCommitHistoryWatermark } from "./history-watermark";
+import { IndexedCaptureStore, OUTBOX_ALARM, drainCaptures, enqueueCapture, hasPendingCapture, indexingAllowsCapture, requireCaptureReceipt } from "./outbox";
 import { acceptCaptureConsent } from "../shared/storage";
 import {
   buildProviderRefreshAlarmPlan,
@@ -82,6 +83,7 @@ let captureDrain: Promise<void> | null = null;
 const HISTORY_SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
 const BACKEND_VALIDATION_TTL_MS = 30 * 1000;
 const historySyncRunErrors = new Map<string, string>();
+const HISTORY_CATCHUP_ALARM_PREFIX = "savemycontext.history-catchup.";
 let backendValidationInFlight: Promise<SyncStatus> | null = null;
 let backendValidationInFlightKey = "";
 let backendValidationLastCompletedAt = 0;
@@ -155,7 +157,7 @@ function normalizeAccountFilterValue(value: string): string {
 
 function accountAllowedBySettings(
   settings: ExtensionSettings,
-  snapshot: NormalizedSessionSnapshot
+  snapshot: Pick<NormalizedSessionSnapshot, "provider" | "accountKey" | "accountLabel">
 ): { allowed: boolean; reason: string } {
   if (settings.accountCaptureMode !== "include") {
     return { allowed: true, reason: `Captured from ${snapshot.accountLabel}.` };
@@ -250,7 +252,7 @@ async function extensionClientName(): Promise<string> {
 }
 
 function isFreshHistorySyncInProgress(state: ProviderHistorySyncState): boolean {
-  const lastStartedAt = state.lastStartedAt ? Date.parse(state.lastStartedAt) : Number.NaN;
+  const lastStartedAt = Date.parse(state.lastProgressAt ?? state.lastStartedAt ?? "");
   const staleInProgress =
     state.inProgress &&
     !Number.isNaN(lastStartedAt) &&
@@ -1252,6 +1254,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name.startsWith(HISTORY_CATCHUP_ALARM_PREFIX)) {
+    const provider = alarm.name.slice(HISTORY_CATCHUP_ALARM_PREFIX.length) as ProviderName;
+    if (!HISTORY_SYNC_PROVIDERS.includes(provider)) return;
+    void enqueueTask(async () => {
+      const state = await getProviderHistorySyncState(provider);
+      if (!state.catchupPending) { await chrome.alarms.clear(alarm.name); return; }
+      const settings = await getSettings();
+      if (settings.capturePaused || !settings.enabledProviders[provider] || isFreshHistorySyncInProgress(state)) return;
+      // Continue an already-authorized import only in an existing provider tab.
+      // Never open/reload pages, enable capture, or silently sign into an account.
+      const tabs = await chrome.tabs.query({});
+      const tab = tabs.find(tab => tab.url && detectProviderFromUrl(tab.url) === provider);
+      if (tab?.id && tab.url) await handlePageVisit({ provider, pageUrl: tab.url }, tab.id, true);
+    }).catch(() => undefined);
+    return;
+  }
   if (alarm.name === OUTBOX_ALARM) {
     void flushCaptureOutbox();
     return;
@@ -1468,15 +1486,7 @@ function findMatchingProvider(event: CapturedNetworkEvent) {
 
 function extractExternalSessionIds(
   provider: ProviderName,
-  sessionStates: Record<
-    string,
-    {
-      seenMessageIds: string[];
-      lastSyncedAt?: string;
-      indexingRuleDecision?: "indexed" | "skipped" | "discarded";
-      indexingRuleFingerprint?: string;
-    }
-  >,
+  sessionStates: Record<string, SessionSyncState>,
   settings: ExtensionSettings
 ): string[] {
   const prefix = `${provider}:`;
@@ -1487,7 +1497,7 @@ function extractExternalSessionIds(
         return false;
       }
       const state = sessionStates[sessionKey];
-      if (state?.lastSyncedAt) {
+      if (state?.lastFullHistorySyncedAt) {
         return true;
       }
       return state?.indexingRuleDecision === "skipped" && state?.indexingRuleFingerprint === fingerprint;
@@ -1531,30 +1541,48 @@ async function handlePageVisit(
   }
 
   const currentState = await getProviderHistorySyncState(payload.provider);
+  if (currentState.retryAfter && Date.parse(currentState.retryAfter) > Date.now()) {
+    return { triggered: false, reason: "provider-cooldown" };
+  }
   if (isFreshHistorySyncInProgress(currentState)) {
     return { triggered: false, reason: "already-in-progress" };
   }
 
-  if (!explicit && currentState.lastSuccessfulAt &&
+  // Drain before discovering more history, avoiding repeated copies of queued
+  // snapshots when the backend is offline or slower than the provider.
+  if (await captureOutbox.count() && await hasPendingCapture(captureOutbox, settings.backendUrl.replace(/\/$/, ""), pending =>
+    Boolean(settings.enabledProviders[pending.provider]) &&
+    accountAllowedBySettings(settings, { provider: pending.provider, accountKey: pending.account_key, accountLabel: pending.account_label }).allowed &&
+    indexingAllowsCapture(settings, pending))) {
+    await ensureDeliveryRetry();
+    return { triggered: false, reason: "delivery-pending" };
+  }
+  if (!explicit && !currentState.catchupPending && currentState.lastSuccessfulAt &&
       Date.now() - Date.parse(currentState.lastSuccessfulAt) < (settings.scheduledProviderRefreshIntervalMinutes ?? 60) * 60_000) {
     return { triggered: false, reason: "recently-synced" };
   }
-  const activeWatermarks = activeHistoryWatermarks(payload.provider, currentState, backendStatus.providerDriftAlert);
+  // Explicit import/recovery audits the complete index, including gaps left by
+  // older versions. Only fully acknowledged snapshots may skip detail reads.
+  const activeWatermarks = explicit ? undefined : activeHistoryWatermarks(payload.provider, currentState, backendStatus.providerDriftAlert);
   const hasExistingHistoryWatermark = Boolean(activeWatermarks?.length);
+  const sessionStates = await getProviderSessionSyncStates(payload.provider);
   const syncedSessionIds = hasExistingHistoryWatermark
     ? undefined
-    : extractExternalSessionIds(payload.provider, await getProviderSessionSyncStates(payload.provider), settings);
+    : extractExternalSessionIds(payload.provider, sessionStates, settings);
   const previousTopSessionIds = activeWatermarks;
   const now = new Date().toISOString();
   await saveProviderHistorySyncState(payload.provider, {
     ...currentState,
     inProgress: true,
+    catchupPending: true,
+    lastProgressAt: now,
     lastStartedAt: now,
     lastPageUrl: payload.pageUrl,
     processedCount: 0,
     totalCount: undefined,
     skippedCount: 0
   });
+  await chrome.alarms.create(`${HISTORY_CATCHUP_ALARM_PREFIX}${payload.provider}`, { delayInMinutes: 15, periodInMinutes: 15 });
   const activeProviders = await getActiveHistorySyncProviders({ [payload.provider]: true });
   await setExtensionStatus({
     autoSyncHistory: settings.autoSyncHistory,
@@ -1576,10 +1604,7 @@ async function handlePageVisit(
       payload: {
         provider: payload.provider,
         syncedSessionIds,
-        historyFingerprints: Object.fromEntries(Object.values(await getProviderSessionSyncStates(payload.provider))
-          .filter((s) => s.lastSyncedAt && Date.now() - Date.parse(s.lastSyncedAt) < 7 * 24 * 60 * 60 * 1000)
-          .flatMap((s) => s.historyFingerprints ? Object.entries(s.historyFingerprints)
-            : s.historyItemKey && s.historyFingerprint ? [[s.historyItemKey, s.historyFingerprint]] : [])),
+        historyFingerprints: historyResumeFingerprints(sessionStates, Boolean(currentState.catchupPending)),
         previousTopSessionId: previousTopSessionIds?.[0],
         previousTopSessionIds
       }
@@ -1589,6 +1614,7 @@ async function handlePageVisit(
     await saveProviderHistorySyncState(payload.provider, {
       ...currentState,
       inProgress: false,
+      catchupPending: true,
       lastPageUrl: payload.pageUrl
     });
     const activeProviders = await getActiveHistorySyncProviders({ [payload.provider]: false });
@@ -1607,7 +1633,7 @@ async function handlePageVisit(
 }
 
 async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok: true }> {
-  if (update.phase === "started" && update.runId) {
+  if (update.phase === "started" && update.runId && update.processedCount === undefined) {
     historySyncRunErrors.delete(update.runId);
   }
 
@@ -1620,6 +1646,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
   const basePatch = {
     ...currentState,
     lastPageUrl: update.pageUrl,
+    retryAfter: update.retryAfter,
     lastDriftAlert: update.providerDriftAlert ?? currentState.lastDriftAlert
   };
   const watermarkPatch = {
@@ -1632,6 +1659,7 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
     await saveProviderHistorySyncState(update.provider, {
       ...basePatch,
       inProgress: true,
+      lastProgressAt: new Date().toISOString(),
       lastStartedAt: startedAt,
       processedCount: update.processedCount ?? currentState.processedCount,
       totalCount: update.totalCount ?? currentState.totalCount,
@@ -1696,10 +1724,12 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       update.providerDriftAlert ?? clearRecoveredProviderDriftAlert(currentStatus.providerDriftAlert, update.provider);
     const providerStateDriftAlert =
       update.providerDriftAlert ?? clearRecoveredProviderDriftAlert(currentState.lastDriftAlert, update.provider);
+    const complete = shouldCommitHistoryWatermark(update, runError);
     await saveProviderHistorySyncState(update.provider, {
       ...basePatch,
       ...(shouldCommitHistoryWatermark(update, runError) ? { ...watermarkPatch, lastSuccessfulAt: completedAt } : {}),
       inProgress: false,
+      catchupPending: !complete,
       lastCompletedAt: completedAt,
       lastConversationCount: update.conversationCount ?? currentState.lastConversationCount,
       processedCount,
@@ -1715,13 +1745,14 @@ async function handleHistorySyncStatus(update: HistorySyncUpdate): Promise<{ ok:
       historySyncLastCompletedAt: completedAt,
       historySyncLastConversationCount: update.conversationCount,
       historySyncLastPageUrl: update.pageUrl,
-      historySyncLastResult: "success",
-      historySyncLastError: null,
+      historySyncLastResult: complete ? "success" : "failed",
+      historySyncLastError: complete ? null : `History import incomplete: ${update.retryableFailureCount ?? 0} conversations need retry. Saved progress is retained.`,
       historySyncProcessedCount: processedCount,
       historySyncTotalCount: totalCount,
       historySyncSkippedCount: skippedCount,
       providerDriftAlert
     });
+    if (complete) await chrome.alarms.clear(`${HISTORY_CATCHUP_ALARM_PREFIX}${update.provider}`);
     return { ok: true };
   }
 
@@ -1932,9 +1963,11 @@ async function deliverCaptureOutbox(): Promise<void> {
           projectFingerprint: payload.provider_project === undefined ? syncState.projectFingerprint : JSON.stringify(payload.provider_project),
           historyItemKey: payload.raw_capture.historyItemKey ?? syncState.historyItemKey,
           historyFingerprint: payload.raw_capture.historyFingerprint ?? syncState.historyFingerprint,
-          historyFingerprints: payload.raw_capture.historyFingerprints ?? syncState.historyFingerprints,
+          historyFingerprints: { ...syncState.historyFingerprints, ...payload.raw_capture.historyFingerprints },
           messageFingerprints: await mergeMessageFingerprints(syncState.messageFingerprints, snapshot.messages),
           lastSyncedAt: new Date().toISOString(),
+          lastFullHistorySyncedAt: payload.raw_capture.historySyncRunId && payload.sync_mode === "full_snapshot"
+            ? new Date().toISOString() : syncState.lastFullHistorySyncedAt,
           indexingRuleDecision: payload.route_to_discard ? "discarded" : "indexed",
           indexingRuleFingerprint: indexingRulesFingerprint(settings),
           discardWordMatch: payload.discard_word_match
@@ -2062,3 +2095,14 @@ void withDeliveryAlarm(async () => {
     await chrome.alarms.create(OUTBOX_ALARM, { delayInMinutes: 1 });
   }
 }).catch(() => undefined);
+
+// Alarms are not guaranteed to survive a browser restart. The intent and
+// acknowledged per-conversation checkpoints do; recreate only unfinished jobs.
+void (async () => {
+  for (const provider of HISTORY_SYNC_PROVIDERS) {
+    const name = `${HISTORY_CATCHUP_ALARM_PREFIX}${provider}`;
+    if ((await getProviderHistorySyncState(provider)).catchupPending && !(await chrome.alarms.get(name))) {
+      await chrome.alarms.create(name, { delayInMinutes: 1, periodInMinutes: 15 });
+    }
+  }
+})().catch(() => undefined);

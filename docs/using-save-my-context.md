@@ -33,6 +33,29 @@ include project-only conversations and project membership. Successful acknowledg
 fingerprints, and retryable watermarks prevent silent skips and unnecessary re-imports.
 A failed or quarantined capture is not a successful history checkpoint.
 
+Large imports are incremental: ordinary/archived ChatGPT, Gemini, and Grok lists
+are consumed page by page. ChatGPT's independent Projects index includes chats
+missing from the sidebar. There is no 5,000-chat or 10,000-project-chat ceiling.
+Progress totals grow as more pages are discovered; they are not a known account total.
+
+An explicitly started import remains pending until it completes. Every 15 minutes,
+unfinished work can retry in an **already-open** provider tab, even when automatic
+history import is off. This continuation never opens/reloads tabs, turns on capture,
+or bypasses Pause/provider/account filters. Browser restart restores the retry job;
+the provider must still be signed in. A full/offline queue drains before new downloads.
+Completed conversation fingerprints survive interruptions, including multi-week gaps.
+Explicit imports audit the whole index; saving a recent live message does not count
+as importing that conversation's older turns. Older extension receipts may be reread once.
+Provider rate-limit deadlines delay retries, including explicit retry clicks.
+
+Deleted/temporary chats, unavailable accounts, attachment binaries, and provider data
+not exposed by the authenticated endpoints cannot be recovered by pagination. Claude
+does not yet have an automatic full-history adapter. Individual captures are limited
+to 8 MiB of provider evidence (also cumulative across Gemini message pages); oversized
+or malformed conversations remain visibly incomplete, never silently truncated.
+Saving history is separate from AI processing: configured budgets/consent still apply,
+and a source above the summarizer budget is marked `needs_budget`, not fully summarized.
+
 Capture is opportunistic, not a guarantee of continuous monitoring while the browser
 is closed. Scheduled refresh is optional and can open provider tabs. If the provider's
 response format changes, check the visible error instead of repeatedly importing.

@@ -29,7 +29,9 @@ details, passwords, or health information as separate features; such information
 can nevertheless be present in conversations or pages you choose to save.
 
 Explicit history import reads older conversations using your existing signed-in
-provider session. The provider's session tokens may be used within its own page
+provider session, including archived ChatGPT conversations and project-only chats.
+An unfinished explicit import can continue in an already-open provider tab on later
+retry alarms; Pause capture also pauses this continuation. The provider's session tokens may be used within its own page
 to request your conversations; SaveMyContext does not require your provider
 password or export provider authentication cookies to the workspace. The separate
 SaveMyContext application token you supply authenticates requests to your backend.

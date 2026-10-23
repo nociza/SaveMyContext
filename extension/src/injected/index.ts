@@ -11,8 +11,9 @@ import type {
   ProviderName
 } from "../shared/types";
 import { chatGPTReader, discoverChatGPTProjects } from "./chatgpt-projects";
-import { discoverChatGPTHistory } from "./chatgpt-history";
-import { CaptureReceipts } from "./capture-receipts";
+import { chatGPTHistoryPages, type HistoryPage } from "./chatgpt-history";
+import { CaptureHandoffError, CaptureReceipts } from "./capture-receipts";
+import { HistoryTransportError } from "./history-errors";
 import { MAX_CAPTURE_BYTES, observeResponse, readBoundedResponse } from "./response-observer";
 import { authorizedHistoryFetch, setHistoryCaptureEnabled } from "./capture-permission";
 
@@ -21,7 +22,6 @@ import { maybeUpdateGeminiRuntimeContext, runGeminiHistorySync } from "./gemini-
 import { runGrokHistorySync } from "./grok-history";
 import {
   countRetryableHistoryFailures,
-  dedupeIds,
   normalizeHistorySessionIds,
   runWithConcurrency
 } from "./history-shared";
@@ -39,7 +39,7 @@ function handleControlPayload(payload: MainWorldControlPayload): void {
 }
 const INTERESTING_PATH =
   /backend-api|conversation|conversations|BardFrontendService|StreamGenerate|batchexecute|app-chat|grok|chat/i;
-const CHATGPT_HISTORY_DETAIL_CONCURRENCY = 4;
+const CHATGPT_HISTORY_DETAIL_CONCURRENCY = 2;
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const nativeFetch = window.fetch.bind(window);
 let bridgePort: MessagePort | null = null;
@@ -53,6 +53,7 @@ interface TrackedXHR extends XMLHttpRequest {
 type JsonRecord = Record<string, unknown>;
 
 const activeHistorySyncs = new Set<ProviderName>();
+const progressSentAt = new Map<string, number>();
 
 function createHistorySyncRunId(provider: ProviderName): string {
   return `${provider}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -162,11 +163,18 @@ function postCapture(capture: Omit<CapturedNetworkEvent, "source">): void {
 }
 
 async function postCaptureDurably(capture: Omit<CapturedNetworkEvent, "source">): Promise<void> {
-  if (!captureEnabled) throw new Error("Capture paused.");
+  if (!captureEnabled) throw new CaptureHandoffError("Capture paused.");
   await captureReceipts.wait(capture.requestId, () => postCapture(capture));
 }
 
 function postHistorySyncStatus(update: HistorySyncUpdate): void {
+  if (update.runId) {
+    if (update.phase === "started" && update.processedCount !== undefined) {
+      const now = Date.now();
+      if (now - (progressSentAt.get(update.runId) ?? 0) < 500) return;
+      progressSentAt.set(update.runId, now);
+    } else if (update.phase !== "started") progressSentAt.delete(update.runId);
+  }
   postToExtension({
     type: "HISTORY_SYNC_STATUS",
     payload: update
@@ -437,81 +445,114 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
       const accountScope = asRecord(sessionJson.user)?.id;
       const account = typeof accountScope === "string" ? accountScope : undefined;
       const refreshSessionIds = normalizeHistorySessionIds("chatgpt", control?.refreshSessionIds);
-      const ordinary = await discoverChatGPTHistory(read, account, control?.historyFingerprints, refreshSessionIds);
-      const { topSessionId, pending: normalPending } = ordinary;
-      const normalTotal = ordinary.items.size;
-      const normalSkipped = normalTotal - normalPending.length;
       let projectFailure: unknown;
       const projectChats = await discoverChatGPTProjects(read, typeof accountScope === "string" ? accountScope : undefined).catch((error) => {
+        if (error instanceof HistoryTransportError) throw error;
         projectFailure = error;
         return new Map<string, import("./chatgpt-projects").ProjectConversation>();
       });
-      const projectPending = [...projectChats].filter(([id, item]) => refreshSessionIds.has(id) ||
-        typeof accountScope !== "string" || !item.fingerprint || control?.historyFingerprints?.[item.key] !== item.fingerprint).map(([id]) => id);
-      const pendingSessionIds = dedupeIds([...normalPending, ...projectPending]);
-      const skippedCount = normalSkipped + projectChats.size - projectPending.length;
-      const totalCount = Math.max(normalTotal, pendingSessionIds.length + skippedCount);
-
-      let processedCount = skippedCount;
+      let topSessionId: string | undefined;
+      let totalCount = 0;
+      let skippedCount = 0;
+      let processedCount = 0;
+      let attemptedConversationCount = 0;
       let syncedConversationCount = 0;
       let driftFailureCount = 0;
       let firstDriftFailure: ProviderDriftAlert | null = null;
-      postHistorySyncProgress("chatgpt", runId, processedCount, totalCount, skippedCount, topSessionId);
-
-      await runWithConcurrency(pendingSessionIds, CHATGPT_HISTORY_DETAIL_CONCURRENCY, async (conversationId) => {
-        try {
-          const detailUrl = buildChatGPTUrl(`/backend-api/conversation/${conversationId}`);
-          const detailResult = await read(detailUrl.toString());
-          if (!detailResult.response.ok) {
-            return;
-          }
-          if (!hasChatGPTConversationPayload(detailResult.json)) {
-            throw createProviderDriftError(
-              "chatgpt",
-              "ChatGPT conversation detail no longer exposes a mapping or messages payload.",
-              `conversationId=${conversationId}`
-            );
-          }
-
-          // Keep exact provider text, not a second parsed tree throughout the
-          // bridge, runtime messaging, durable outbox and backend upload.
-          detailResult.json = undefined;
-
-          await postCaptureDurably({
-            historyFingerprints: Object.fromEntries([ordinary.items.get(conversationId), projectChats.get(conversationId)]
-              .filter(item => item?.fingerprint).map(item => [item!.key, item!.fingerprint])),
-            project: projectChats.get(conversationId)?.project,
-            historyItemKey: projectChats.get(conversationId)?.key ?? ordinary.items.get(conversationId)?.key,
-            historyFingerprint: projectChats.get(conversationId)?.fingerprint ?? ordinary.items.get(conversationId)?.fingerprint,
-            providerHint: "chatgpt",
-            captureMode: "full_snapshot",
-            historySyncRunId: runId,
-            pageUrl: buildChatGPTHistoryPageUrl(conversationId),
-            requestId: `history-chatgpt-${conversationId}-${Date.now()}`,
-            method: "GET",
-            url: detailUrl.toString(),
-            capturedAt: new Date().toISOString(),
-            response: {
-              status: detailResult.response.status,
-              ok: detailResult.response.ok,
-              contentType: detailResult.response.headers.get("content-type") ?? undefined,
-              text: detailResult.text
+      // Ordinary metadata is consumed one page at a time; project-only chats
+      // follow in equally small batches. Project context stays attached to an
+      // overlapping chat and both fingerprints are acknowledged together.
+      async function* batches(): AsyncGenerator<HistoryPage> {
+        const seen = new Set<string>();
+        for (const archived of [false, true]) {
+          for await (const page of chatGPTHistoryPages(read, account, control?.historyFingerprints, refreshSessionIds, archived)) {
+            // A chat can move to/from the archive while pagination is running.
+            for (const id of page.items.keys()) {
+              if (seen.has(id)) page.items.delete(id);
+              else seen.add(id);
             }
-          });
-          syncedConversationCount += 1;
-        } catch (error) {
-          if (isProviderDriftError(error)) {
-            driftFailureCount += 1;
-            firstDriftFailure ??= buildProviderDriftAlert("chatgpt", location.href, error.message, error.evidence);
+            page.pending = page.pending.filter(id => page.items.has(id));
+            yield page;
+            for (const id of page.items.keys()) projectChats.delete(id);
           }
-          // Skip malformed individual conversations without aborting the whole run.
-        } finally {
-          processedCount += 1;
-          postHistorySyncProgress("chatgpt", runId, processedCount, totalCount, skippedCount, topSessionId);
         }
-      });
+        let items: HistoryPage["items"] = new Map();
+        for (const id of projectChats.keys()) {
+          items.set(id, { id, key: "", fingerprint: "" });
+          if (items.size === 100) { yield { items, pending: [] }; items = new Map(); }
+        }
+        if (items.size) yield { items, pending: [] };
+      }
+      for await (const ordinary of batches()) {
+        topSessionId ??= ordinary.topSessionId;
+        const pending = new Set(ordinary.pending);
+        for (const id of ordinary.items.keys()) {
+          const item = projectChats.get(id);
+          if (item && (refreshSessionIds.has(id) || !account || !item.fingerprint || control?.historyFingerprints?.[item.key] !== item.fingerprint)) pending.add(id);
+        }
+        const pendingSessionIds = [...pending];
+        totalCount += ordinary.items.size;
+        const skipped = ordinary.items.size - pending.size;
+        skippedCount += skipped;
+        processedCount += skipped;
+        attemptedConversationCount += pending.size;
+        postHistorySyncProgress("chatgpt", runId, processedCount, totalCount, skippedCount, topSessionId);
 
-      const attemptedConversationCount = pendingSessionIds.length;
+        await runWithConcurrency(pendingSessionIds, CHATGPT_HISTORY_DETAIL_CONCURRENCY, async (conversationId) => {
+          try {
+            const detailUrl = buildChatGPTUrl(`/backend-api/conversation/${conversationId}`);
+            const detailResult = await read(detailUrl.toString());
+            if (!detailResult.response.ok) {
+              return;
+            }
+            if (!hasChatGPTConversationPayload(detailResult.json)) {
+              throw createProviderDriftError(
+                "chatgpt",
+                "ChatGPT conversation detail no longer exposes a mapping or messages payload.",
+                `conversationId=${conversationId}`
+              );
+            }
+
+            // Keep exact provider text, not a second parsed tree throughout the
+            // bridge, runtime messaging, durable outbox and backend upload.
+            detailResult.json = undefined;
+
+            await postCaptureDurably({
+              historyFingerprints: Object.fromEntries([ordinary.items.get(conversationId), projectChats.get(conversationId)]
+                .filter(item => item?.fingerprint).map(item => [item!.key, item!.fingerprint])),
+              project: projectChats.get(conversationId)?.project,
+              historyItemKey: projectChats.get(conversationId)?.key ?? ordinary.items.get(conversationId)?.key,
+              historyFingerprint: projectChats.get(conversationId)?.fingerprint ?? ordinary.items.get(conversationId)?.fingerprint,
+              providerHint: "chatgpt",
+              captureMode: "full_snapshot",
+              historySyncRunId: runId,
+              pageUrl: buildChatGPTHistoryPageUrl(conversationId),
+              requestId: `history-chatgpt-${conversationId}-${Date.now()}`,
+              method: "GET",
+              url: detailUrl.toString(),
+              capturedAt: new Date().toISOString(),
+              response: {
+                status: detailResult.response.status,
+                ok: detailResult.response.ok,
+                contentType: detailResult.response.headers.get("content-type") ?? undefined,
+                text: detailResult.text
+              }
+            });
+            syncedConversationCount += 1;
+          } catch (error) {
+            if (error instanceof CaptureHandoffError || error instanceof HistoryTransportError) throw error;
+            if (isProviderDriftError(error)) {
+              driftFailureCount += 1;
+              firstDriftFailure ??= buildProviderDriftAlert("chatgpt", location.href, error.message, error.evidence);
+            }
+            // Skip malformed individual conversations without aborting the whole run.
+          } finally {
+            processedCount += 1;
+            postHistorySyncProgress("chatgpt", runId, processedCount, totalCount, skippedCount, topSessionId);
+          }
+        });
+      }
+
       if (projectFailure) throw projectFailure;
       const retryableFailureCount = countRetryableHistoryFailures(attemptedConversationCount, syncedConversationCount);
       let providerDriftAlert: ProviderDriftAlert | null = null;
@@ -549,6 +590,7 @@ async function runChatGPTHistorySync(control?: HistorySyncControlPayload): Promi
         runId,
         pageUrl: location.href,
         message: error instanceof Error ? error.message : String(error),
+        retryAfter: error instanceof HistoryTransportError ? error.retryAfter : undefined,
         providerDriftAlert: isProviderDriftError(error)
           ? buildProviderDriftAlert("chatgpt", location.href, error.message, error.evidence)
           : null

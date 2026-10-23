@@ -2,6 +2,9 @@ import type { CapturedNetworkEvent, HistorySyncUpdate, ProviderDriftAlert } from
 
 import { buildProviderDriftAlert, createProviderDriftError, isProviderDriftError } from "./drift";
 import type { HistorySyncControlPayload } from "./history-shared";
+import { CaptureHandoffError } from "./capture-receipts";
+import { HistoryTransportError, throwHistoryHttpError } from "./history-errors";
+import { readBoundedResponse } from "./response-observer";
 import { countRetryableHistoryFailures, normalizeHistorySessionIds, runWithConcurrency } from "./history-shared";
 
 const GROK_HISTORY_PAGE_SIZE = 100;
@@ -182,7 +185,11 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{
   json: unknown;
 }> {
   const response = await nativeFetch(url, init);
-  const text = await response.text();
+  if (!response.ok && ([401, 403, 429].includes(response.status) || response.status >= 500)) {
+    void response.body?.cancel().catch(() => undefined);
+    throwHistoryHttpError(response);
+  }
+  const text = await readBoundedResponse(response, undefined, 30_000);
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -193,10 +200,9 @@ async function fetchJson(url: string, init?: RequestInit): Promise<{
   return { response, json };
 }
 
-async function listGrokConversationEntries(
+async function* listGrokConversationEntries(
   previousTopSessionId?: string
-): Promise<GrokConversationEntry[]> {
-  const entries: GrokConversationEntry[] = [];
+): AsyncGenerator<GrokConversationEntry[]> {
   const seenIds = new Set<string>();
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
@@ -230,6 +236,7 @@ async function listGrokConversationEntries(
     const pageEntries = Array.isArray(record?.conversations)
       ? record.conversations.map(parseGrokConversationEntry).filter((entry): entry is GrokConversationEntry => Boolean(entry))
       : [];
+    const entries: GrokConversationEntry[] = [];
     for (const entry of pageEntries) {
       if (seenIds.has(entry.conversationId)) {
         continue;
@@ -237,6 +244,7 @@ async function listGrokConversationEntries(
       seenIds.add(entry.conversationId);
       entries.push(entry);
     }
+    yield entries;
 
     if (previousTopSessionId && pageEntries.some((entry) => entry.conversationId === previousTopSessionId)) {
       break;
@@ -244,7 +252,8 @@ async function listGrokConversationEntries(
 
     const nextPageToken =
       typeof record?.nextPageToken === "string" && record.nextPageToken.trim() ? record.nextPageToken.trim() : undefined;
-    if (!nextPageToken || seenTokens.has(nextPageToken)) {
+    if (nextPageToken && seenTokens.has(nextPageToken)) throw new Error("Grok pagination repeated a cursor; sync remains incomplete.");
+    if (!nextPageToken) {
       break;
     }
 
@@ -252,46 +261,48 @@ async function listGrokConversationEntries(
     pageToken = nextPageToken;
   }
 
-  return entries;
 }
 
 function pickGrokWatermarkConversationId(entries: GrokConversationEntry[]): string | undefined {
   return entries.find((entry) => !entry.starred)?.conversationId ?? entries[0]?.conversationId;
 }
 
-async function collectGrokHistoryCandidates(
+async function* collectGrokHistoryCandidates(
   previousTopSessionId: string | undefined,
   syncedSessionIds: Set<string>,
   refreshSessionIds: Set<string>
-): Promise<{
+): AsyncGenerator<{
   topSessionId?: string;
   pendingEntries: GrokConversationEntry[];
   totalCount: number;
   skippedCount: number;
 }> {
-  const orderedEntries = await listGrokConversationEntries(previousTopSessionId);
-  const topSessionId = pickGrokWatermarkConversationId(orderedEntries);
+  let topSessionId: string | undefined;
+  for await (const orderedEntries of listGrokConversationEntries(previousTopSessionId)) {
+    topSessionId ??= pickGrokWatermarkConversationId(orderedEntries);
 
-  if (previousTopSessionId) {
-    const stopIndex = orderedEntries.findIndex((entry) => entry.conversationId === previousTopSessionId);
-    const pendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
-    return {
+    if (previousTopSessionId) {
+      const stopIndex = orderedEntries.findIndex((entry) => entry.conversationId === previousTopSessionId);
+      const pendingEntries = stopIndex >= 0 ? orderedEntries.slice(0, stopIndex) : orderedEntries;
+      yield {
+        topSessionId,
+        pendingEntries,
+        totalCount: pendingEntries.length,
+        skippedCount: 0
+      };
+      continue;
+    }
+
+    const pendingEntries = orderedEntries.filter((entry) => {
+      return refreshSessionIds.has(entry.conversationId) || !syncedSessionIds.has(entry.conversationId);
+    });
+    yield {
       topSessionId,
       pendingEntries,
-      totalCount: pendingEntries.length,
-      skippedCount: 0
+      totalCount: orderedEntries.length,
+      skippedCount: orderedEntries.length - pendingEntries.length
     };
   }
-
-  const pendingEntries = orderedEntries.filter((entry) => {
-    return refreshSessionIds.has(entry.conversationId) || !syncedSessionIds.has(entry.conversationId);
-  });
-  return {
-    topSessionId,
-    pendingEntries,
-    totalCount: orderedEntries.length,
-    skippedCount: orderedEntries.length - pendingEntries.length
-  };
 }
 
 async function fetchGrokConversationResponsesDirect(conversationId: string): Promise<GrokResponseRecord[]> {
@@ -479,47 +490,52 @@ export async function runGrokHistorySync(
     const previousTopSessionId = normalizeGrokConversationId(control?.previousTopSessionId) ?? undefined;
     const syncedSessionIds = normalizeHistorySessionIds("grok", control?.syncedSessionIds);
     const refreshSessionIds = normalizeHistorySessionIds("grok", control?.refreshSessionIds);
-    const { topSessionId, pendingEntries, totalCount, skippedCount } = await collectGrokHistoryCandidates(
-      previousTopSessionId,
-      syncedSessionIds,
-      refreshSessionIds
-    );
-
-    let processedCount = skippedCount;
+    let topSessionId: string | undefined;
+    let totalCount = 0;
+    let skippedCount = 0;
+    let processedCount = 0;
+    let attemptedConversationCount = 0;
     let syncedConversationCount = 0;
     let driftFailureCount = 0;
     let firstDriftFailure: ProviderDriftAlert | null = null;
-    postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
+    for await (const batch of collectGrokHistoryCandidates(previousTopSessionId, syncedSessionIds, refreshSessionIds)) {
+      const { pendingEntries } = batch;
+      topSessionId ??= batch.topSessionId;
+      totalCount += batch.totalCount;
+      skippedCount += batch.skippedCount;
+      processedCount += batch.skippedCount;
+      attemptedConversationCount += pendingEntries.length;
+      postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
 
-    await runWithConcurrency(pendingEntries, GROK_HISTORY_DETAIL_CONCURRENCY, async (entry) => {
-      try {
-        const capture = await fetchGrokConversationCapture(entry);
-        await hooks.postCapture({
-          providerHint: "grok",
-          captureMode: "full_snapshot",
-          historySyncRunId: hooks.runId,
-          pageUrl: buildGrokHistoryPageUrl(entry.conversationId),
-          requestId: `history-grok-${entry.conversationId}-${Date.now()}`,
-          method: "GET",
-          url: capture.url,
-          capturedAt: new Date().toISOString(),
-          requestBody: capture.requestBody,
-          response: capture.response
-        });
-        syncedConversationCount += 1;
-      } catch (error) {
-        if (isProviderDriftError(error)) {
-          driftFailureCount += 1;
-          firstDriftFailure ??= buildProviderDriftAlert("grok", location.href, error.message, error.evidence);
+      await runWithConcurrency(pendingEntries, GROK_HISTORY_DETAIL_CONCURRENCY, async (entry) => {
+        try {
+          const capture = await fetchGrokConversationCapture(entry);
+          await hooks.postCapture({
+            providerHint: "grok",
+            captureMode: "full_snapshot",
+            historySyncRunId: hooks.runId,
+            pageUrl: buildGrokHistoryPageUrl(entry.conversationId),
+            requestId: `history-grok-${entry.conversationId}-${Date.now()}`,
+            method: "GET",
+            url: capture.url,
+            capturedAt: new Date().toISOString(),
+            requestBody: capture.requestBody,
+            response: capture.response
+          });
+          syncedConversationCount += 1;
+        } catch (error) {
+          if (error instanceof CaptureHandoffError || error instanceof HistoryTransportError) throw error;
+          if (isProviderDriftError(error)) {
+            driftFailureCount += 1;
+            firstDriftFailure ??= buildProviderDriftAlert("grok", location.href, error.message, error.evidence);
+          }
+          // Skip malformed individual conversations without aborting the run.
+        } finally {
+          processedCount += 1;
+          postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
         }
-        // Skip malformed individual conversations without aborting the run.
-      } finally {
-        processedCount += 1;
-        postHistorySyncProgress(hooks, processedCount, totalCount, skippedCount, topSessionId);
-      }
-    });
-
-    const attemptedConversationCount = pendingEntries.length;
+      });
+    }
     const retryableFailureCount = countRetryableHistoryFailures(attemptedConversationCount, syncedConversationCount);
     let providerDriftAlert: ProviderDriftAlert | null = null;
     if (
@@ -556,6 +572,7 @@ export async function runGrokHistorySync(
       runId: hooks.runId,
       pageUrl: location.href,
       message: error instanceof Error ? error.message : String(error),
+      retryAfter: error instanceof HistoryTransportError ? error.retryAfter : undefined,
       providerDriftAlert: isProviderDriftError(error)
         ? buildProviderDriftAlert("grok", location.href, error.message, error.evidence)
         : null

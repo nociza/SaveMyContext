@@ -13,13 +13,14 @@ that every browser workload has reached its theoretical minimum.
 
 ## Functional guarantees
 
-- ChatGPT history reconciles update fingerprints across the bounded metadata list.
+- ChatGPT history reconciles update fingerprints across paginated metadata lists.
   An edited conversation is not skipped merely because its ID remains newest.
   Project and ordinary-history fingerprints are acknowledged together when a chat
   appears in both lists. Missing timestamps/account scope cause a safe refetch.
 - Fingerprints become reusable only after backend acknowledgement. A weekly safety
   refresh rechecks older acknowledgements; automatic visits respect the configured
   refresh interval. Explicit imports bypass that interval.
+  An unfinished catch-up retains older receipts so weekly expiry cannot starve its tail.
 - History download workers await local persistence before downloading more captures.
   A failed or timed-out handoff keeps the history run retryable.
 - Scheduled refresh never reloads an existing provider tab. Loading waits are bounded
@@ -38,6 +39,51 @@ that every browser workload has reached its theoretical minimum.
 Automatic provider support remains ChatGPT, Gemini, and Grok. This release does not
 add a Claude adapter, enable capture consent, enable external model processing, or
 change server/NAS backup configuration.
+
+## Large-history recovery (0.4.6)
+
+The first-install audit found that 50 full ChatGPT list pages caused an exception
+before any conversation bodies were imported. Project discovery also stopped at
+100 pages / 10,000 entries. Those total-history ceilings are removed. No-progress
+pages and cursor cycles still fail explicitly rather than looping or claiming success.
+
+- Ordinary and archived ChatGPT lists, Gemini lists, and Grok lists feed page-sized
+  detail batches. The next page waits for the current page's local capture receipts.
+- ChatGPT and Gemini have two detail workers (previously four); Grok retains four.
+  All workers stop scheduling on storage-handoff failure or provider-wide transport
+  errors, and join active work before returning. Individual malformed chats do not
+  block later pages. Progress writes are coalesced to at most twice per second.
+- Cursor repetition is an error for both Gemini conversation lists and message pages,
+  and for Grok lists; it can no longer produce a falsely complete transcript.
+- Gemini no longer retains a per-conversation outcome array or uses a quadratic
+  combined-index lookup. Its conversation evidence has a cumulative 8 MiB guard;
+  individual provider response reads are also bounded.
+- Recovery rescans mutable indexes from the head, skipping backend-acknowledged
+  fingerprints. This intentionally favors correctness over persisting an offset
+  that can shift after edits/deletions. Delivery is drained before starting a new
+  scan. Unfinished jobs restore their alarms after worker/browser restart.
+  Explicit imports/recovery bypass old ID watermarks; a recent live capture is
+  not considered a full-history receipt. This prevents partial current chats from
+  being skipped on first import. Legacy receipts without this marker are safely reread.
+- The transcript working set is bounded by page/worker/response limits, **not total
+  history size**. Identity deduplication sets, small receipt summaries, and ChatGPT's
+  project membership/context index still scale with conversation/project count.
+  This is not constant total RAM, nor does it stream a single unlimited-size chat.
+
+Synthetic regression coverage includes 50,017 ordinary chats, exact full-page endings,
+10,100 project conversations over 101 pages, changed account scope, mutable offsets,
+repeated cursors, and multi-week receipt retention. A real Chromium MessageChannel
+fixture interrupts a 5,207-chat first import after 137 accepted captures, reloads,
+imports the remaining 5,070, then verifies a zero-detail-download reconciliation.
+It also checks a malformed middle chat and an empty active list with 105 archived
+chats over two pages, and stops early during an offline fetch rather than attempting
+the rest of the backlog. These browser fixtures use simulated storage receipts; the
+separate extension/API integration tests cover actual IndexedDB and SQLite delivery.
+
+Archive-list behavior is based on an independent implementation's
+[documented active/archived endpoint traversal](https://github.com/skillsynchq/txcript/blob/main/docs/formats/chatgpt.md),
+not a public OpenAI compatibility guarantee. Production provider changes still require
+live compatibility checks. No personal account history was imported for these tests.
 
 ## Experimental method
 
@@ -171,7 +217,9 @@ Repeat fresh contexts and alternate variants to check for cache or scheduling bi
 The 0.4.4 functional gate passed TypeScript checks, 155 extension unit tests, 292
 backend tests, and all 29 browser/workspace integration tests. Version 0.4.5 passes
 161 extension unit tests and 32 browser/workspace tests, including parser-equivalence,
-exact-text bridge, and UI-retention regressions. Workspace tests must
+exact-text bridge, and UI-retention regressions. The 0.4.6 suite expands this to 173
+extension unit tests and 36 browser/workspace tests; backend coverage remains 292 tests.
+Workspace tests must
 use an explicitly supplied disposable server; they create test captures and tasks.
 The integration suite includes a remote edit to the same newest ChatGPT conversation,
 overlapping project/ordinary history, unchanged-history skipping, offline retention,
